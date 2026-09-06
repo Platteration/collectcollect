@@ -19,6 +19,7 @@ export async function PUT(request: Request) {
   const settings = saveSettings({
     gradeMultipliers: body.gradeMultipliers ?? current.gradeMultipliers,
     conditionMultipliers: body.conditionMultipliers ?? current.conditionMultipliers,
+    gradingFee: body.gradingFee ?? current.gradingFee,
   });
   return NextResponse.json({ settings, providers: providerStatuses() });
 }

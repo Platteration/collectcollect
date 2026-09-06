@@ -1,93 +1,77 @@
-import Link from "next/link";
-import { latestSnapshotsByCard, listCards } from "@/lib/cards";
-import { money } from "@/lib/format";
-import { GAMES, GAME_IDS, type Game } from "@/lib/types";
-import { CardTile } from "@/components/CardTile";
+import { allSnapshots, latestSnapshotsByCard, listCards } from "@/lib/cards";
+import { gradingVerdict, outlookSeries, portfolioSeries } from "@/lib/analytics";
+import { imageSrc } from "@/lib/format";
+import { getSettings } from "@/lib/settings";
+import { Portfolio, type Holding, type Opportunity } from "@/components/Portfolio";
+import type { PriceSnapshot } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function CollectionPage({ searchParams }: PageProps<"/">) {
-  const sp = await searchParams;
-  const gameParam = typeof sp.game === "string" && sp.game in GAMES ? (sp.game as Game) : undefined;
-  const q = typeof sp.q === "string" ? sp.q : "";
-  const cards = listCards({ game: gameParam, search: q });
-  const prices = latestSnapshotsByCard();
+const VERDICT_ORDER = { prime: 0, insufficient: 1, wait: 2, skip: 3 } as const;
 
-  let totalQty = 0;
-  let totalValue = 0;
-  let totalUngraded = 0;
-  let priced = 0;
-  for (const c of cards) {
-    totalQty += c.quantity;
-    const s = prices.get(c.id)?.summary;
-    if (s?.yourCopyValue) {
-      totalValue += s.yourCopyValue * c.quantity;
-      priced++;
-    }
-    if (s?.ungraded) totalUngraded += s.ungraded * c.quantity;
-  }
+export default function HomePage() {
+  const cards = listCards();
+  const snapshots = allSnapshots();
+  const settings = getSettings();
+  const latest = latestSnapshotsByCard();
+  const points = portfolioSeries(cards, snapshots);
+
+  const byCard = new Map<number, PriceSnapshot[]>();
+  for (const s of snapshots) byCard.set(s.cardId, [...(byCard.get(s.cardId) ?? []), s]);
+
+  const detailOf = (c: (typeof cards)[number]) =>
+    [c.setName, c.cardNumber ? `#${c.cardNumber}` : null, c.year].filter(Boolean).join(" · ") || "—";
+
+  const opportunities: Opportunity[] = cards
+    .filter((c) => !c.grade)
+    .map((c) => {
+      const series = outlookSeries(byCard.get(c.id) ?? [], settings);
+      return {
+        id: c.id,
+        name: c.name,
+        game: c.game,
+        detail: detailOf(c),
+        image: imageSrc(c),
+        quantity: c.quantity,
+        series,
+        verdict: gradingVerdict(series),
+      };
+    })
+    .filter((o) => o.series.length > 0)
+    .sort((a, b) => {
+      const order = VERDICT_ORDER[a.verdict.kind] - VERDICT_ORDER[b.verdict.kind];
+      if (order !== 0) return order;
+      return (b.series[b.series.length - 1]?.upside ?? 0) - (a.series[a.series.length - 1]?.upside ?? 0);
+    });
+
+  const holdings: Holding[] = cards
+    .map((c) => {
+      const s = latest.get(c.id)?.summary;
+      return {
+        id: c.id,
+        name: c.name,
+        detail: detailOf(c),
+        image: imageSrc(c),
+        copy: c.grade ? `${c.gradingCompany ?? "Graded"} ${c.grade}` : `Raw · ${c.condition}`,
+        value: (s?.yourCopyValue ?? 0) * c.quantity,
+      };
+    })
+    .filter((h) => h.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5);
+
+  let lastRefreshed: string | null = null;
+  for (const s of latest.values()) if (!lastRefreshed || s.fetchedAt > lastRefreshed) lastRefreshed = s.fetchedAt;
 
   return (
-    <div className="space-y-6">
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Cards" value={String(cards.length)} sub={`${totalQty} total copies`} />
-        <Stat label="Collection value" value={money(totalValue)} sub={`${priced} of ${cards.length} priced`} />
-        <Stat label="Ungraded value" value={money(totalUngraded)} sub="if every copy were raw NM" />
-        <Stat
-          label="Unpriced"
-          value={String(cards.length - priced)}
-          sub={cards.length - priced ? "open a card and refresh prices" : "everything is priced"}
-        />
-      </section>
-
-      <form className="flex flex-wrap items-center gap-2" action="/">
-        <input name="q" defaultValue={q} placeholder="Search name, set, number…" className="input max-w-xs" />
-        <select name="game" defaultValue={gameParam ?? ""} className="input max-w-[12rem]">
-          <option value="">All games</option>
-          {GAME_IDS.map((g) => (
-            <option key={g} value={g}>
-              {GAMES[g]}
-            </option>
-          ))}
-        </select>
-        <button className="btn-secondary" type="submit">
-          Filter
-        </button>
-        {(q || gameParam) && (
-          <Link href="/" className="text-sm text-neutral-500 underline">
-            Clear
-          </Link>
-        )}
-      </form>
-
-      {cards.length === 0 ? (
-        <div className="card-surface flex flex-col items-center gap-3 p-12 text-center">
-          <p className="text-lg font-medium">No cards yet</p>
-          <p className="max-w-md text-sm text-neutral-500">
-            Snap a photo of a card and CollectCollect will identify it, look up the going rate for raw and
-            graded copies, and keep it in your collection.
-          </p>
-          <Link href="/add" className="btn-primary">
-            Add your first card
-          </Link>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {cards.map((c) => (
-            <CardTile key={c.id} card={c} price={prices.get(c.id)?.summary ?? null} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Stat({ label, value, sub }: { label: string; value: string; sub: string }) {
-  return (
-    <div className="card-surface p-4">
-      <div className="text-xs uppercase tracking-wide text-neutral-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
-      <div className="text-xs text-neutral-500">{sub}</div>
-    </div>
+    <Portfolio
+      points={points}
+      cardCount={cards.length}
+      copyCount={cards.reduce((n, c) => n + c.quantity, 0)}
+      pricedCount={cards.filter((c) => latest.get(c.id)?.summary.yourCopyValue).length}
+      lastRefreshed={lastRefreshed}
+      opportunities={opportunities}
+      holdings={holdings}
+    />
   );
 }

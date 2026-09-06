@@ -9,6 +9,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
   const [conditions, setConditions] = useState<Record<Condition, string>>(
     Object.fromEntries(Object.entries(initial.conditionMultipliers).map(([k, v]) => [k, String(v)])) as Record<Condition, string>,
   );
+  const [gradingFee, setGradingFee] = useState(String(initial.gradingFee));
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -19,7 +20,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
       const gradeMultipliers: Record<string, number> = {};
       for (const [k, v] of grades) if (k.trim() && v.trim() !== "") gradeMultipliers[k.trim()] = Number(v);
       const conditionMultipliers = Object.fromEntries(Object.entries(conditions).map(([k, v]) => [k, Number(v)])) as Settings["conditionMultipliers"];
-      await api("/api/settings", { method: "PUT", body: JSON.stringify({ gradeMultipliers, conditionMultipliers }) });
+      await api("/api/settings", { method: "PUT", body: JSON.stringify({ gradeMultipliers, conditionMultipliers, gradingFee: Number(gradingFee) }) });
       setStatus("Saved. New multipliers apply the next time a card's prices are refreshed.");
     } catch (e) {
       setStatus((e as Error).message);
@@ -65,6 +66,15 @@ export function SettingsForm({ initial }: { initial: Settings }) {
               <input className="input" value={conditions[c]} onChange={(e) => setConditions((s) => ({ ...s, [c]: e.target.value }))} inputMode="decimal" />
             </div>
           ))}
+        </div>
+      </section>
+
+      <section className="card-surface p-4">
+        <h2 className="font-semibold">Grading cost</h2>
+        <p className="mt-1 text-sm text-neutral-500">Per-card cost to grade (submission fee plus shipping). The grading outlook subtracts it from the graded outcomes.</p>
+        <div className="mt-3 max-w-[12rem]">
+          <label className="label">Fee per card (USD)</label>
+          <input className="input" value={gradingFee} onChange={(e) => setGradingFee(e.target.value)} inputMode="decimal" />
         </div>
       </section>
 

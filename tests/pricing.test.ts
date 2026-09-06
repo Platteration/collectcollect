@@ -108,3 +108,53 @@ describe("learnFromQuotes", () => {
     expect(learned).toEqual({ externalIds: { pokemontcg: "base1-4", pricecharting: "99" }, referenceImageUrl: "https://img/1" });
   });
 });
+
+describe("refreshCard", () => {
+  it("does not overwrite a card's last known price when every source fails", async () => {
+    const { openDatabase, setDb } = await import("@/lib/db");
+    const { createCard, addSnapshot, listSnapshots } = await import("@/lib/cards");
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    setDb(openDatabase(":memory:"));
+    const card = createCard({ game: "pokemon", name: "Pikachu" });
+    addSnapshot(card.id, summarizeFixture(50));
+    const original = globalThis.fetch;
+    globalThis.fetch = fakeFetch([["api.pokemontcg.io", { error: "down" }, 503]]);
+    try {
+      const r = await refreshCard(card);
+      expect(r.stored).toBe(false);
+      expect(r.snapshot.summary.errors).toHaveLength(1);
+      expect(listSnapshots(card.id)).toHaveLength(1);
+      expect(listSnapshots(card.id)[0].summary.ungraded).toBe(50);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+describe("refreshCard without a configured source", () => {
+  it("keeps the last snapshot for a game with no price provider", async () => {
+    const { openDatabase, setDb } = await import("@/lib/db");
+    const { createCard, addSnapshot, listSnapshots } = await import("@/lib/cards");
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    setDb(openDatabase(":memory:"));
+    const card = createCard({ game: "sports", name: "Mike Trout" });
+    addSnapshot(card.id, summarizeFixture(800));
+    const r = await refreshCard(card);
+    expect(r.stored).toBe(false);
+    expect(r.snapshot.summary.errors).toEqual([]);
+    expect(listSnapshots(card.id)).toHaveLength(1);
+  });
+  it("stores the first snapshot even when it has no price", async () => {
+    const { openDatabase, setDb } = await import("@/lib/db");
+    const { createCard, listSnapshots } = await import("@/lib/cards");
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    setDb(openDatabase(":memory:"));
+    const card = createCard({ game: "sports", name: "Mike Trout" });
+    expect((await refreshCard(card)).stored).toBe(true);
+    expect(listSnapshots(card.id)).toHaveLength(1);
+  });
+});
+
+function summarizeFixture(v: number) {
+  return summarize([quote({ ungraded: v })], [], DEFAULT_SETTINGS, { condition: "NM", gradingCompany: null, grade: null });
+}

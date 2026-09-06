@@ -67,10 +67,11 @@ describe("settings", () => {
 
   it("returns defaults and merges saved values", () => {
     expect(getSettings()).toEqual(DEFAULT_SETTINGS);
-    saveSettings({ gradeMultipliers: { "PSA 10": 4, " bad": -1 as number, "": 2 }, conditionMultipliers: { ...DEFAULT_SETTINGS.conditionMultipliers, LP: 0.9 } });
+    saveSettings({ gradeMultipliers: { "PSA 10": 4, " bad": -1 as number, "": 2 }, conditionMultipliers: { ...DEFAULT_SETTINGS.conditionMultipliers, LP: 0.9 }, gradingFee: 30 });
     const s = getSettings();
     expect(s.gradeMultipliers).toEqual({ "PSA 10": 4 });
     expect(s.conditionMultipliers.LP).toBe(0.9);
     expect(s.conditionMultipliers.NM).toBe(1);
+    expect(s.gradingFee).toBe(30);
   });
 });

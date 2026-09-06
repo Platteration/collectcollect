@@ -18,6 +18,7 @@ export function getSettings(): Settings {
         ...DEFAULT_SETTINGS.conditionMultipliers,
         ...(stored.conditionMultipliers ?? {}),
       },
+      gradingFee: Number.isFinite(stored.gradingFee) ? Number(stored.gradingFee) : DEFAULT_SETTINGS.gradingFee,
     };
   } catch {
     return structuredClone(DEFAULT_SETTINGS);
@@ -31,6 +32,7 @@ export function saveSettings(settings: Settings): Settings {
       ...DEFAULT_SETTINGS.conditionMultipliers,
       ...sanitizeNumbers(settings.conditionMultipliers),
     } as Settings["conditionMultipliers"],
+    gradingFee: Number.isFinite(settings.gradingFee) && settings.gradingFee >= 0 ? settings.gradingFee : DEFAULT_SETTINGS.gradingFee,
   };
   getDb()
     .prepare(

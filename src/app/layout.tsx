@@ -19,6 +19,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             </Link>
             <div className="flex items-center gap-1 text-sm">
               <Link href="/" className="rounded-md px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/10">
+                Portfolio
+              </Link>
+              <Link href="/collection" className="rounded-md px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/10">
                 Collection
               </Link>
               <Link href="/settings" className="rounded-md px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/10">

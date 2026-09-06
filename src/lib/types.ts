@@ -148,6 +148,8 @@ export interface Settings {
   gradeMultipliers: Record<string, number>;
   /** Multiplier applied to the ungraded (NM) price for a raw copy in this condition. */
   conditionMultipliers: Record<Condition, number>;
+  /** What it costs to get one card graded (fee + shipping), used in the grading outlook. */
+  gradingFee: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -172,6 +174,7 @@ export const DEFAULT_SETTINGS: Settings = {
     HP: 0.5,
     DMG: 0.3,
   },
+  gradingFee: 25,
 };
 
 export interface ProviderStatus {

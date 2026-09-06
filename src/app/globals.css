@@ -47,3 +47,33 @@ body {
 .badge {
   @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
 }
+
+/* Chart chrome + validated series palette (see dataviz reference palette). */
+:root {
+  --chart-surface: #ffffff;
+  --chart-grid: #e1e0d9;
+  --chart-axis: #c3c2b7;
+  --chart-muted: #898781;
+  --chart-good: #0ca30c;
+  --chart-good-text: #006300;
+  --chart-bad: #d03b3b;
+  --chart-bad-text: #b32b2b;
+  --chart-series-1: #2a78d6; /* blue: raw / your copy */
+  --chart-series-2: #eb6834; /* orange: gem-mint outcome */
+  --chart-series-3: #1baf7a; /* aqua: mid-grade outcome */
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --chart-surface: #171717;
+    --chart-grid: #2c2c2a;
+    --chart-axis: #383835;
+    --chart-muted: #898781;
+    --chart-good-text: #0ca30c;
+    --chart-bad-text: #e66767;
+    --chart-series-1: #3987e5;
+    --chart-series-2: #d95926;
+    --chart-series-3: #199e70;
+  }
+}
+.delta-up { color: var(--chart-good-text); }
+.delta-down { color: var(--chart-bad-text); }

@@ -246,6 +246,19 @@ export function latestSnapshot(cardId: number): PriceSnapshot | null {
   return listSnapshots(cardId, 1)[0] ?? null;
 }
 
+/** Every snapshot, oldest first (for the portfolio history). */
+export function allSnapshots(): PriceSnapshot[] {
+  const rows = getDb()
+    .prepare("SELECT * FROM price_snapshots ORDER BY fetched_at ASC, id ASC")
+    .all() as SnapshotRow[];
+  return rows.map((r) => ({
+    id: r.id,
+    cardId: r.card_id,
+    fetchedAt: r.fetched_at,
+    summary: JSON.parse(r.summary) as PriceSummary,
+  }));
+}
+
 /** Latest snapshot for every card in one query (for the collection view). */
 export function latestSnapshotsByCard(): Map<number, PriceSnapshot> {
   const rows = getDb()

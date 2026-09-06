@@ -4,7 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { imageSrc, money, when } from "@/lib/format";
-import { GAMES, type CardRecord, type PriceSnapshot, type PriceSummary } from "@/lib/types";
+import { GAMES, type CardRecord, type PriceSnapshot, type PriceSummary, type Settings } from "@/lib/types";
+import { gradingVerdict, outlookSeries } from "@/lib/analytics";
+import { OutlookChart } from "./charts/OutlookChart";
 import { CardForm, formFromCard, formToInput } from "./CardForm";
 import { PricePanel } from "./PricePanel";
 
@@ -12,9 +14,10 @@ interface Props {
   card: CardRecord;
   latest: PriceSummary | null;
   history: PriceSnapshot[];
+  settings: Settings;
 }
 
-export function CardDetail({ card: initial, latest: initialLatest, history: initialHistory }: Props) {
+export function CardDetail({ card: initial, latest: initialLatest, history: initialHistory, settings }: Props) {
   const router = useRouter();
   const [card, setCard] = useState(initial);
   const [latest, setLatest] = useState(initialLatest);
@@ -34,10 +37,16 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
     setBusy("price");
     setError(null);
     try {
-      const res = await api<{ card: CardRecord; snapshot: PriceSnapshot }>(`/api/cards/${card.id}/price`, { method: "POST" });
+      const res = await api<{ card: CardRecord; snapshot: PriceSnapshot; stored: boolean }>(`/api/cards/${card.id}/price`, { method: "POST" });
       setCard(res.card);
       setLatest(res.snapshot.summary);
-      setHistory((h) => [res.snapshot, ...h]);
+      if (res.stored) setHistory((h) => [res.snapshot, ...h]);
+      else
+        setError(
+          res.snapshot.summary.errors.length
+            ? "No source returned a price, so the previous snapshot was kept. See the errors below."
+            : "No price source found a match for this card (or none is configured for its game; see Settings). The previous snapshot was kept.",
+        );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -87,6 +96,9 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
 
   const src = imageSrc(card);
   const graded = Boolean(card.grade);
+  const outlook = graded ? [] : outlookSeries(history, settings);
+  const verdict = gradingVerdict(outlook);
+  const lastOutlook = outlook[outlook.length - 1];
 
   return (
     <div className="grid grid-cols-1 gap-6 md:grid-cols-[300px_1fr]">
@@ -189,6 +201,35 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
           <p className="text-sm text-neutral-600 dark:text-neutral-300">
             {card.quantity} copies × {money(latest.yourCopyValue)} = <strong>{money(latest.yourCopyValue * card.quantity)}</strong>
           </p>
+        )}
+
+        {!graded && latest && (
+          <section className="card-surface p-4">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h3 className="font-semibold">Grading outlook</h3>
+                <p className="text-sm text-neutral-500">
+                  Range of outcomes if you graded this copy, versus what it is worth raw. Includes a {money(settings.gradingFee)} grading fee (Settings).
+                </p>
+              </div>
+              <span className={`badge ${verdict.kind === "prime" ? "bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-100" : verdict.kind === "wait" ? "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100" : verdict.kind === "skip" ? "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-100" : "bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-100"}`}>
+                {verdict.headline}
+              </span>
+            </div>
+            {lastOutlook && (
+              <div className="my-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                <Field label="Raw (yours)" value={money(lastOutlook.raw)} />
+                <Field label={`${lastOutlook.minLabel} (min)`} value={money(lastOutlook.min)} />
+                <Field label={`${lastOutlook.maxLabel} (max)`} value={money(lastOutlook.max)} />
+                <Field label="Upside after fee" value={money(lastOutlook.upside)} />
+              </div>
+            )}
+            <OutlookChart series={outlook} />
+            <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">{verdict.detail}</p>
+            {lastOutlook && !lastOutlook.fromRealData && (
+              <p className="mt-1 text-xs text-neutral-500">Graded outcomes are estimates from your Settings multipliers; a PriceCharting token replaces them with real graded sales.</p>
+            )}
+          </section>
         )}
 
         {history.length > 1 && (
