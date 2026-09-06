@@ -205,3 +205,63 @@ export function gradingVerdict(series: OutlookPoint[]): Verdict {
 function fmt(n: number): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 }
+
+// ---------------------------------------------------------------------------
+// Cost basis and return
+// ---------------------------------------------------------------------------
+
+export interface Returns {
+  /** Sum of purchase price × quantity over cards with a recorded purchase price. */
+  invested: number;
+  /** Current value of those same cards. */
+  valueOfInvested: number;
+  amount: number;
+  percent: number | null;
+  /** How many cards have a purchase price recorded. */
+  cardsWithCost: number;
+}
+
+/** Total return over the cards whose cost is known; cards without a purchase price are left out of both sides. */
+export function totalReturn(cards: CardRecord[], valueOf: (card: CardRecord) => number | null): Returns {
+  let invested = 0;
+  let valueOfInvested = 0;
+  let cardsWithCost = 0;
+  for (const c of cards) {
+    if (c.purchasePrice === null || c.purchasePrice < 0) continue;
+    cardsWithCost++;
+    invested += c.purchasePrice * c.quantity;
+    valueOfInvested += (valueOf(c) ?? 0) * c.quantity;
+  }
+  const amount = round2(valueOfInvested - invested);
+  return {
+    invested: round2(invested),
+    valueOfInvested: round2(valueOfInvested),
+    amount,
+    percent: invested > 0 ? round2((amount / invested) * 100) : null,
+    cardsWithCost,
+  };
+}
+
+export interface Allocation {
+  game: CardRecord["game"];
+  value: number;
+  cards: number;
+  share: number;
+}
+
+/** Value split by game, largest first. */
+export function allocationByGame(cards: CardRecord[], valueOf: (card: CardRecord) => number | null): Allocation[] {
+  const byGame = new Map<CardRecord["game"], { value: number; cards: number }>();
+  let total = 0;
+  for (const c of cards) {
+    const v = (valueOf(c) ?? 0) * c.quantity;
+    total += v;
+    const cur = byGame.get(c.game) ?? { value: 0, cards: 0 };
+    cur.value += v;
+    cur.cards++;
+    byGame.set(c.game, cur);
+  }
+  return [...byGame.entries()]
+    .map(([game, { value, cards }]) => ({ game, value: round2(value), cards, share: total > 0 ? value / total : 0 }))
+    .sort((a, b) => b.value - a.value);
+}

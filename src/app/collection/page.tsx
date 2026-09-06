@@ -58,6 +58,9 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
             Clear
           </Link>
         )}
+        <a href="/api/export" className="btn-secondary ml-auto" download>
+          Export CSV
+        </a>
       </form>
 
       {cards.length === 0 ? (

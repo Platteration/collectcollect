@@ -36,8 +36,11 @@ export interface RefreshResult {
   failed: Array<{ cardId: number; message: string }>;
 }
 
+/** When each card was last attempted, so cards that yield no price are retried on the normal cadence, not every tick. */
+const lastAttempt = new Map<number, number>();
+
 /**
- * Refresh every card (or only those whose latest snapshot is older than
+ * Refresh every card (or only those neither refreshed nor attempted within
  * `staleHours`). Runs a couple at a time to stay polite to the free APIs.
  */
 export async function refreshAll(opts: { staleHours?: number; concurrency?: number } = {}): Promise<RefreshResult> {
@@ -47,12 +50,15 @@ export async function refreshAll(opts: { staleHours?: number; concurrency?: numb
   const queue = listCards().filter((c) => {
     if (cutoff === null) return true;
     const snap = latest.get(c.id);
-    return !snap || new Date(snap.fetchedAt).getTime() < cutoff;
+    const lastStored = snap ? new Date(snap.fetchedAt).getTime() : 0;
+    const lastTried = Math.max(lastStored, lastAttempt.get(c.id) ?? 0);
+    return lastTried < cutoff;
   });
   const result: RefreshResult = { refreshed: 0, unpriced: 0, skipped: listCards().length - queue.length, failed: [] };
   const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
     while (queue.length) {
       const card = queue.shift()!;
+      lastAttempt.set(card.id, Date.now());
       try {
         const fresh = getCard(card.id);
         if (!fresh) continue;

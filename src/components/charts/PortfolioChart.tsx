@@ -1,20 +1,26 @@
 "use client";
 
+import { useEffect } from "react";
 import type { PortfolioPoint } from "@/lib/analytics";
 import { money } from "@/lib/format";
-import { INK, areaPath, compactMoney, linePath, niceTicks, shortDate, timeTicks, useCrosshair, xScale, yScale, type Layout } from "./chart-utils";
+import { INK, areaPath, compactMoney, linePath, niceTicks, shortDate, timeTicks, useContainerWidth, useCrosshair, xScale, yScale, type Layout } from "./chart-utils";
 
 interface Props {
   points: PortfolioPoint[];
   up: boolean;
   onHover?: (point: PortfolioPoint | null) => void;
   height?: number;
+  /** Tooltip footer; defaults to the collection-level "raw NM … · n priced" line. */
+  detail?: (point: PortfolioPoint) => string;
+  label?: string;
 }
 
 const LAYOUT: Layout = { width: 800, height: 260, left: 8, right: 56, top: 12, bottom: 24 };
 
-export function PortfolioChart({ points, up, onHover, height = 260 }: Props) {
-  const layout = { ...LAYOUT, height };
+export function PortfolioChart({ points, up, onHover, height = 260, detail, label = "Collection value over time" }: Props) {
+  const { ref, width } = useContainerWidth<HTMLDivElement>(LAYOUT.width);
+  const narrow = width < 480;
+  const layout: Layout = { ...LAYOUT, width, height: narrow ? Math.round(height * 0.8) : height, right: narrow ? 48 : LAYOUT.right };
   const times = points.map((p) => new Date(p.t).getTime());
   const values = points.map((p) => p.value);
   const { lo, hi, ticks } = niceTicks(Math.min(...values, 0), Math.max(...values, 1));
@@ -27,14 +33,14 @@ export function PortfolioChart({ points, up, onHover, height = 260 }: Props) {
   const color = up ? INK.good : INK.bad;
   const baseline = sy(lo);
 
-  const hover = (i: number | null) => {
-    setIndex(i);
-    onHover?.(i === null ? null : points[i]);
-  };
+  // Pointer, keyboard and hit-rect updates all land on `index`; report every change upward.
+  useEffect(() => {
+    onHover?.(index === null ? null : (points[index] ?? null));
+  }, [index, points, onHover]);
 
   if (points.length === 0) {
     return (
-      <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-black/10 text-sm text-neutral-500 dark:border-white/10">
+      <div ref={ref} className="flex h-40 items-center justify-center rounded-lg border border-dashed border-black/10 text-sm text-neutral-500 dark:border-white/10">
         No price history yet. Refresh prices to start the chart.
       </div>
     );
@@ -43,20 +49,17 @@ export function PortfolioChart({ points, up, onHover, height = 260 }: Props) {
   const active = index !== null ? points[index] : null;
 
   return (
-    <div className="relative">
+    <div ref={ref} className="relative">
       <svg
         viewBox={`0 0 ${layout.width} ${layout.height}`}
-        className="h-auto w-full touch-none select-none"
+        width={layout.width}
+        height={layout.height}
+        className="block h-auto w-full touch-none select-none rounded-md outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
         role="img"
-        aria-label="Collection value over time"
+        aria-label={label}
         tabIndex={0}
-        onPointerMove={(e) => {
-          onMove(e);
-        }}
-        onPointerLeave={() => {
-          onLeave();
-          onHover?.(null);
-        }}
+        onPointerMove={onMove}
+        onPointerLeave={onLeave}
         onKeyDown={onKey}
       >
         {ticks.map((v) => (
@@ -70,7 +73,7 @@ export function PortfolioChart({ points, up, onHover, height = 260 }: Props) {
         <path d={areaPath(coords, baseline)} fill={color} opacity={0.1} />
         <path d={linePath(coords)} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
         {points.length === 1 && <circle cx={coords[0][0]} cy={coords[0][1]} r={4} fill={color} stroke={INK.surface} strokeWidth={2} />}
-        {timeTicks(times, xs, points.map((p) => shortDate(p.t))).map((i) => (
+        {timeTicks(times, xs, points.map((p) => shortDate(p.t)), narrow ? 3 : 4).map((i) => (
           <text key={i} x={xs[i]} y={layout.height - 6} fontSize={11} fill={INK.muted} textAnchor={i === 0 ? "start" : isEnd(i) ? "end" : "middle"}>
             {shortDate(points[i].t)}
           </text>
@@ -83,7 +86,7 @@ export function PortfolioChart({ points, up, onHover, height = 260 }: Props) {
         )}
         {/* Invisible hit areas so keyboard/touch users can land on points. */}
         {xs.map((x, i) => (
-          <rect key={i} x={x - 12} y={layout.top} width={24} height={layout.height - layout.top - layout.bottom} fill="transparent" onPointerEnter={() => hover(i)} />
+          <rect key={i} x={x - 12} y={layout.top} width={24} height={layout.height - layout.top - layout.bottom} fill="transparent" onPointerEnter={() => setIndex(i)} />
         ))}
       </svg>
       {active && (
@@ -93,7 +96,7 @@ export function PortfolioChart({ points, up, onHover, height = 260 }: Props) {
         >
           <div className="font-semibold">{money(active.value)}</div>
           <div className="text-neutral-500">{shortDate(active.t, true)}</div>
-          <div className="text-neutral-500">raw NM {money(active.ungraded)} · {active.priced} priced</div>
+          <div className="text-neutral-500">{detail ? detail(active) : `raw NM ${money(active.ungraded)} · ${active.priced} priced`}</div>
         </div>
       )}
     </div>

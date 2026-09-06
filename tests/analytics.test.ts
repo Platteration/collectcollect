@@ -111,3 +111,23 @@ describe("chart utils", () => {
     expect(compactMoney(25000)).toBe("$25.0K");
   });
 });
+
+describe("returns and allocation", () => {
+  const cards = [
+    { ...card(1), purchasePrice: 100, game: "pokemon" },
+    { ...card(2, 2), purchasePrice: 10, game: "yugioh" },
+    { ...card(3), purchasePrice: null, game: "pokemon" },
+  ] as CardRecord[];
+  const values: Record<number, number | null> = { 1: 150, 2: 8, 3: 500 };
+  it("computes total return only over cards with a known cost", async () => {
+    const { totalReturn } = await import("@/lib/analytics");
+    expect(totalReturn(cards, (c) => values[c.id])).toEqual({ invested: 120, valueOfInvested: 166, amount: 46, percent: 38.33, cardsWithCost: 2 });
+    expect(totalReturn([], () => null).percent).toBeNull();
+  });
+  it("splits value by game, largest first", async () => {
+    const { allocationByGame } = await import("@/lib/analytics");
+    const a = allocationByGame(cards, (c) => values[c.id]);
+    expect(a.map((x) => [x.game, x.value, x.cards])).toEqual([["pokemon", 650, 2], ["yugioh", 16, 1]]);
+    expect(a[0].share).toBeCloseTo(650 / 666);
+  });
+});

@@ -7,6 +7,8 @@ import { imageSrc, money, when } from "@/lib/format";
 import { GAMES, type CardRecord, type PriceSnapshot, type PriceSummary, type Settings } from "@/lib/types";
 import { gradingVerdict, outlookSeries } from "@/lib/analytics";
 import { OutlookChart } from "./charts/OutlookChart";
+import { PortfolioChart } from "./charts/PortfolioChart";
+import { VERDICT_STYLE } from "./verdict";
 import { CardForm, formFromCard, formToInput } from "./CardForm";
 import { PricePanel } from "./PricePanel";
 
@@ -39,14 +41,18 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
     try {
       const res = await api<{ card: CardRecord; snapshot: PriceSnapshot; stored: boolean }>(`/api/cards/${card.id}/price`, { method: "POST" });
       setCard(res.card);
-      setLatest(res.snapshot.summary);
-      if (res.stored) setHistory((h) => [res.snapshot, ...h]);
-      else
+      if (res.stored) {
+        setLatest(res.snapshot.summary);
+        setHistory((h) => [res.snapshot, ...h]);
+      } else {
+        // Keep showing the last good prices; explain why nothing changed.
+        const errs = res.snapshot.summary.errors.map((e) => `${e.source}: ${e.message}`).join("; ");
         setError(
-          res.snapshot.summary.errors.length
-            ? "No source returned a price, so the previous snapshot was kept. See the errors below."
-            : "No price source found a match for this card (or none is configured for its game; see Settings). The previous snapshot was kept.",
+          errs
+            ? `No source returned a price, so the previous prices are still shown. ${errs}`
+            : "No price source found a match for this card (or none is configured for its game; see Settings). The previous prices are still shown.",
         );
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -96,6 +102,12 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
 
   const src = imageSrc(card);
   const graded = Boolean(card.grade);
+  const valuePoints = [...history]
+    .reverse()
+    .filter((s) => s.summary.yourCopyValue)
+    .map((s) => ({ t: s.fetchedAt, value: s.summary.yourCopyValue!, ungraded: s.summary.ungraded ?? 0, priced: 1 }));
+  const valueChange = valuePoints.length > 1 ? valuePoints[valuePoints.length - 1].value - valuePoints[0].value : 0;
+  const ret = card.purchasePrice !== null && latest?.yourCopyValue ? latest.yourCopyValue - card.purchasePrice : null;
   const outlook = graded ? [] : outlookSeries(history, settings);
   const verdict = gradingVerdict(outlook);
   const lastOutlook = outlook[outlook.length - 1];
@@ -197,6 +209,31 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
 
         <PricePanel summary={latest} loading={busy === "price"} onRefresh={refreshPrice} />
 
+        {valuePoints.length > 1 && (
+          <section className="card-surface p-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="font-semibold">Value of your copy</h3>
+              <span className={`text-sm font-medium ${valueChange >= 0 ? "delta-up" : "delta-down"}`}>
+                {valueChange >= 0 ? "▲" : "▼"} {money(Math.abs(valueChange))} since {when(valuePoints[0].t)}
+              </span>
+            </div>
+            {ret !== null && (
+              <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-300">
+                Paid {money(card.purchasePrice)} · return{" "}
+                <span className={`font-medium ${ret >= 0 ? "delta-up" : "delta-down"}`}>
+                  {ret >= 0 ? "+" : "−"}
+                  {money(Math.abs(ret))}
+                  {card.purchasePrice ? ` (${((ret / card.purchasePrice) * 100).toFixed(1)}%)` : ""}
+                </span>
+                {card.quantity > 1 ? ` per copy` : ""}
+              </p>
+            )}
+            <div className="mt-3">
+              <PortfolioChart points={valuePoints} up={valueChange >= 0} height={200} label="Value of this card over time" detail={(p) => `ungraded ${money(p.ungraded)}`} />
+            </div>
+          </section>
+        )}
+
         {latest && card.quantity > 1 && latest.yourCopyValue && (
           <p className="text-sm text-neutral-600 dark:text-neutral-300">
             {card.quantity} copies × {money(latest.yourCopyValue)} = <strong>{money(latest.yourCopyValue * card.quantity)}</strong>
@@ -212,7 +249,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
                   Range of outcomes if you graded this copy, versus what it is worth raw. Includes a {money(settings.gradingFee)} grading fee (Settings).
                 </p>
               </div>
-              <span className={`badge ${verdict.kind === "prime" ? "bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-100" : verdict.kind === "wait" ? "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100" : verdict.kind === "skip" ? "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-100" : "bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-100"}`}>
+              <span className={`badge ${VERDICT_STYLE[verdict.kind]}`}>
                 {verdict.headline}
               </span>
             </div>

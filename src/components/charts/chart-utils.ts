@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface Layout {
   width: number;
@@ -148,3 +148,22 @@ export const INK = {
   max: "var(--chart-series-2)",
   min: "var(--chart-series-3)",
 };
+
+/**
+ * Pixel width of a container, so a chart can size its viewBox to the space
+ * it actually has instead of scaling an 800px drawing down to a phone.
+ */
+export function useContainerWidth<T extends HTMLElement>(fallback: number) {
+  const ref = useRef<T>(null);
+  const [width, setWidth] = useState(fallback);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const update = () => setWidth(Math.max(240, Math.round(el.getBoundingClientRect().width)) || fallback);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fallback]);
+  return { ref, width };
+}

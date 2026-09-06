@@ -7,7 +7,7 @@ Snap a photo of a card and CollectCollect:
 1. **Identifies it** with Claude's vision model: game, name, set, collector number, year, rarity, printing variant (holo, 1st edition, refractor, autograph…) and, if it's in a slab, the grading company, grade and cert number.
 2. **Looks up the going rate** for an **ungraded (raw)** copy and for **graded** copies (PSA / BGS / CGC / SGC) from live price sources.
 3. **Keeps it in your collection** with quantity, condition or grade, purchase price, notes and a price history, and totals up what your collection is worth.
-4. **Shows your portfolio** the way a brokerage app would: one headline number for the whole collection (valued at the grade or condition you recorded for each copy), the change over 1W / 1M / 3M / 1Y / all time, and a value-over-time chart you can scrub.
+4. **Shows your portfolio** the way a brokerage app would: one headline number for the whole collection (valued at the grade or condition you recorded for each copy), the change over 1W / 1M / 3M / 1Y / all time, a value-over-time chart you can scrub, your total return against what you paid, the split by game, and your top holdings. Each card page has its own value chart and return.
 5. **Tells you when to grade.** Every ungraded card gets a min/max outlook: the band between a mid-grade outcome and a gem-mint outcome, plotted against what the raw copy is worth. When the gap above the raw line is at its widest and clears your grading fee, the card is flagged as a good time to grade; when it has narrowed, it says wait; when even a PSA 10 would not cover the fee, it says skip.
 
 ## Quick start
@@ -44,6 +44,8 @@ Every refresh stores a snapshot, so a card's detail page shows how its price has
 
 Sports cards have no free price API; without a PriceCharting token you can still enter prices manually.
 
+**Export.** The Collection page has an *Export CSV* button (also `GET /api/export`) with every card, its grade or condition, purchase price, and latest ungraded / PSA 10 / your-copy prices.
+
 ## Card identification
 
 Identification runs on Claude (`claude-opus-5` by default; override with `CLAUDE_MODEL`). Photos are downscaled server-side before being sent. The model returns a structured identification with a confidence score and alternative matches when the card is ambiguous; you can add a back or slab-label photo, give it a hint ("it's Japanese"), and re-identify. Without an Anthropic key the app still works for manual entry and pricing.
@@ -59,6 +61,7 @@ src/app/                 Next.js App Router pages and API routes
   api/cards[/id]         CRUD; /price refreshes prices, /prices returns history
   api/prices/lookup      Price a not-yet-saved card
   api/prices/refresh     POST — refresh every card (?stale=24 limits to stale ones)
+  api/export             GET — the collection as CSV
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema
 src/lib/pricing/         Providers, matching heuristics, summary/valuation, refresh pipeline

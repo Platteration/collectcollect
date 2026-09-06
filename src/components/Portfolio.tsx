@@ -4,11 +4,12 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { RANGES, change, sliceRange, type OutlookPoint, type PortfolioPoint, type Range, type Verdict } from "@/lib/analytics";
+import { RANGES, change, sliceRange, type Allocation, type OutlookPoint, type PortfolioPoint, type Range, type Returns, type Verdict } from "@/lib/analytics";
 import { money, when } from "@/lib/format";
 import { GAMES, type Game } from "@/lib/types";
 import { PortfolioChart } from "./charts/PortfolioChart";
 import { OutlookChart } from "./charts/OutlookChart";
+import { VERDICT_STYLE } from "./verdict";
 
 export interface Opportunity {
   id: number;
@@ -38,16 +39,19 @@ interface Props {
   lastRefreshed: string | null;
   opportunities: Opportunity[];
   holdings: Holding[];
+  returns: Returns;
+  allocation: Allocation[];
 }
 
-const VERDICT_STYLE: Record<Verdict["kind"], string> = {
-  prime: "bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-100",
-  wait: "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100",
-  skip: "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-100",
-  insufficient: "bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-100",
+const GAME_COLORS: Record<Game, string> = {
+  pokemon: "var(--chart-series-1)",
+  yugioh: "var(--chart-series-2)",
+  mtg: "var(--chart-series-3)",
+  sports: "var(--chart-series-4)",
+  other: "var(--chart-series-5)",
 };
 
-export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefreshed, opportunities, holdings }: Props) {
+export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefreshed, opportunities, holdings, returns, allocation }: Props) {
   const router = useRouter();
   const [range, setRange] = useState<Range>("1M");
   const [hover, setHover] = useState<PortfolioPoint | null>(null);
@@ -81,6 +85,22 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
     }
   };
 
+  if (cardCount === 0) {
+    return (
+      <div className="card-surface flex flex-col items-center gap-3 p-12 text-center">
+        <p className="text-lg font-medium">Your portfolio is empty</p>
+        <p className="max-w-md text-sm text-neutral-500">
+          Add a few cards and this page becomes a live view of what your collection is worth, how that value moves, and which raw cards are worth sending in for grading.
+        </p>
+        <Link href="/add" className="btn-primary">
+          Add your first card
+        </Link>
+      </div>
+    );
+  }
+
+  const returnsUp = returns.amount >= 0;
+
   return (
     <div className="space-y-8">
       <section className="card-surface p-5">
@@ -97,8 +117,22 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
                 {hover ? `on ${when(hover.t)}` : delta.from ? `since ${when(delta.from)}` : "no earlier snapshot to compare"}
               </span>
             </div>
+            {returns.cardsWithCost > 0 && (
+              <div className="mt-1 text-sm">
+                <span className="text-neutral-500">Total return </span>
+                <span className={`font-medium ${returnsUp ? "delta-up" : "delta-down"}`}>
+                  {returnsUp ? "▲" : "▼"} {money(Math.abs(returns.amount))}
+                  {returns.percent !== null ? ` (${Math.abs(returns.percent).toFixed(2)}%)` : ""}
+                </span>
+                <span className="text-neutral-500">
+                  {" "}
+                  on {money(returns.invested)} paid for {returns.cardsWithCost} of {cardCount} cards
+                </span>
+              </div>
+            )}
             <p className="mt-2 max-w-xl text-xs text-neutral-500">
               Based on the grade or condition you recorded for each copy: {pricedCount} of {cardCount} cards priced, {copyCount} copies in total. Raw NM value of everything: {money(shown?.ungraded ?? 0)}.
+              {returns.cardsWithCost === 0 ? " Record purchase prices to see your total return." : ""}
             </p>
           </div>
           <div className="flex flex-col items-end gap-2">
@@ -181,6 +215,31 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
         )}
       </section>
 
+      {allocation.length > 1 && (
+        <section>
+          <h2 className="mb-3 text-lg font-semibold">By game</h2>
+          <div className="card-surface p-4">
+            <div className="flex h-3 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800" role="img" aria-label="Share of collection value by game">
+              {allocation.map((a) => (
+                <div key={a.game} style={{ width: `${a.share * 100}%`, background: GAME_COLORS[a.game], marginRight: 2 }} title={`${GAMES[a.game]} ${(a.share * 100).toFixed(0)}%`} />
+              ))}
+            </div>
+            <ul className="mt-3 grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-3">
+              {allocation.map((a) => (
+                <li key={a.game} className="flex items-center gap-2">
+                  <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: GAME_COLORS[a.game] }} />
+                  <span className="min-w-0 flex-1 truncate">
+                    {GAMES[a.game]} <span className="text-neutral-500">· {a.cards}</span>
+                  </span>
+                  <span className="font-medium">{money(a.value)}</span>
+                  <span className="w-10 text-right text-neutral-500">{(a.share * 100).toFixed(0)}%</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
+
       {holdings.length > 0 && (
         <section>
           <div className="mb-3 flex items-end justify-between">
@@ -219,7 +278,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
 function Stat({ label, value, tone }: { label: string; value: string; tone?: "up" | "down" }) {
   return (
     <div className="min-w-0">
-      <div className="truncate text-[10px] uppercase tracking-wide text-neutral-500">{label}</div>
+      <div className="text-[10px] uppercase leading-tight tracking-wide text-neutral-500">{label}</div>
       <div className={`truncate font-medium ${tone === "up" ? "delta-up" : tone === "down" ? "delta-down" : ""}`}>{value}</div>
     </div>
   );

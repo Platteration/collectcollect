@@ -2,7 +2,7 @@
 
 import type { OutlookPoint } from "@/lib/analytics";
 import { money } from "@/lib/format";
-import { INK, bandPath, compactMoney, linePath, niceTicks, shortDate, timeTicks, useCrosshair, xScale, yScale, type Layout } from "./chart-utils";
+import { INK, bandPath, compactMoney, linePath, niceTicks, shortDate, timeTicks, useContainerWidth, useCrosshair, xScale, yScale, type Layout } from "./chart-utils";
 
 interface Props {
   series: OutlookPoint[];
@@ -15,9 +15,11 @@ interface Props {
  * The wider the band above the line, the more grading could add.
  */
 export function OutlookChart({ series, compact = false }: Props) {
+  const { ref, width } = useContainerWidth<HTMLDivElement>(compact ? 320 : 800);
+  const narrow = width < 480;
   const layout: Layout = compact
-    ? { width: 320, height: 90, left: 4, right: 4, top: 6, bottom: 6 }
-    : { width: 800, height: 260, left: 8, right: 56, top: 12, bottom: 24 };
+    ? { width, height: 90, left: 4, right: 4, top: 6, bottom: 6 }
+    : { width, height: narrow ? 200 : 260, left: 8, right: narrow ? 48 : 56, top: 12, bottom: 24 };
   const times = series.map((p) => new Date(p.t).getTime());
   const all = series.flatMap((p) => [p.min, p.max, p.raw]);
   const { lo, hi, ticks } = niceTicks(Math.min(...all, 0), Math.max(...all, 1));
@@ -31,17 +33,23 @@ export function OutlookChart({ series, compact = false }: Props) {
   const { index, onMove, onLeave, onKey, setIndex } = useCrosshair(xs);
 
   if (series.length === 0) {
-    return <div className="text-sm text-neutral-500">No outlook yet. Refresh prices first.</div>;
+    return (
+      <div ref={ref} className="text-sm text-neutral-500">
+        No outlook yet. Refresh prices first.
+      </div>
+    );
   }
   const active = index !== null ? series[index] : null;
   const last = series[series.length - 1];
   const single = series.length === 1;
 
   return (
-    <div className="relative">
+    <div ref={ref} className="relative">
       <svg
         viewBox={`0 0 ${layout.width} ${layout.height}`}
-        className="h-auto w-full touch-none select-none"
+        width={layout.width}
+        height={layout.height}
+        className="block h-auto w-full touch-none select-none rounded-md outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
         role="img"
         aria-label="Grading outlook: gem-mint and mid-grade outcomes versus the raw price over time"
         tabIndex={compact ? -1 : 0}
@@ -73,7 +81,7 @@ export function OutlookChart({ series, compact = false }: Props) {
           </g>
         )}
         {!compact &&
-          timeTicks(times, xs, series.map((p) => shortDate(p.t))).map((i) => (
+          timeTicks(times, xs, series.map((p) => shortDate(p.t)), narrow ? 3 : 4).map((i) => (
             <text key={i} x={xs[i]} y={layout.height - 6} fontSize={11} fill={INK.muted} textAnchor={i === 0 ? "start" : isEnd(i) ? "end" : "middle"}>
               {shortDate(series[i].t)}
             </text>

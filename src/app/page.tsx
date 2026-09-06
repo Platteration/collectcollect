@@ -1,5 +1,5 @@
 import { allSnapshots, latestSnapshotsByCard, listCards } from "@/lib/cards";
-import { gradingVerdict, outlookSeries, portfolioSeries } from "@/lib/analytics";
+import { allocationByGame, gradingVerdict, outlookSeries, portfolioSeries, totalReturn } from "@/lib/analytics";
 import { imageSrc } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { Portfolio, type Holding, type Opportunity } from "@/components/Portfolio";
@@ -17,7 +17,11 @@ export default function HomePage() {
   const points = portfolioSeries(cards, snapshots);
 
   const byCard = new Map<number, PriceSnapshot[]>();
-  for (const s of snapshots) byCard.set(s.cardId, [...(byCard.get(s.cardId) ?? []), s]);
+  for (const s of snapshots) {
+    const list = byCard.get(s.cardId);
+    if (list) list.push(s);
+    else byCard.set(s.cardId, [s]);
+  }
 
   const detailOf = (c: (typeof cards)[number]) =>
     [c.setName, c.cardNumber ? `#${c.cardNumber}` : null, c.year].filter(Boolean).join(" · ") || "—";
@@ -60,6 +64,10 @@ export default function HomePage() {
     .sort((a, b) => b.value - a.value)
     .slice(0, 5);
 
+  const valueOf = (c: (typeof cards)[number]) => latest.get(c.id)?.summary.yourCopyValue ?? null;
+  const returns = totalReturn(cards, valueOf);
+  const allocation = allocationByGame(cards, valueOf);
+
   let lastRefreshed: string | null = null;
   for (const s of latest.values()) if (!lastRefreshed || s.fetchedAt > lastRefreshed) lastRefreshed = s.fetchedAt;
 
@@ -72,6 +80,8 @@ export default function HomePage() {
       lastRefreshed={lastRefreshed}
       opportunities={opportunities}
       holdings={holdings}
+      returns={returns}
+      allocation={allocation}
     />
   );
 }

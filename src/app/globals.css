@@ -61,6 +61,8 @@ body {
   --chart-series-1: #2a78d6; /* blue: raw / your copy */
   --chart-series-2: #eb6834; /* orange: gem-mint outcome */
   --chart-series-3: #1baf7a; /* aqua: mid-grade outcome */
+  --chart-series-4: #eda100; /* yellow */
+  --chart-series-5: #e87ba4; /* magenta */
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -73,6 +75,8 @@ body {
     --chart-series-1: #3987e5;
     --chart-series-2: #d95926;
     --chart-series-3: #199e70;
+    --chart-series-4: #c98500;
+    --chart-series-5: #d55181;
   }
 }
 .delta-up { color: var(--chart-good-text); }
