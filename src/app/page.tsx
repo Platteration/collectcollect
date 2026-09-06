@@ -1,5 +1,5 @@
 import { allSnapshots, latestSnapshotsByCard, listCards } from "@/lib/cards";
-import { allocationByGame, gradingVerdict, outlookSeries, portfolioSeries, totalReturn } from "@/lib/analytics";
+import { allocationByGame, gradingVerdict, isReadyToGrade, outlookSeries, portfolioSeries, totalReturn } from "@/lib/analytics";
 import { imageSrc } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { Portfolio, type Holding, type Opportunity } from "@/components/Portfolio";
@@ -30,6 +30,7 @@ export default function HomePage() {
     .filter((c) => !c.grade)
     .map((c) => {
       const series = outlookSeries(byCard.get(c.id) ?? [], settings);
+      const verdict = gradingVerdict(series);
       return {
         id: c.id,
         name: c.name,
@@ -38,11 +39,14 @@ export default function HomePage() {
         image: imageSrc(c),
         quantity: c.quantity,
         series,
-        verdict: gradingVerdict(series),
+        verdict,
+        status: c.gradingStatus,
+        ready: isReadyToGrade(series, verdict, settings),
       };
     })
     .filter((o) => o.series.length > 0)
     .sort((a, b) => {
+      if (a.ready !== b.ready) return a.ready ? -1 : 1;
       const order = VERDICT_ORDER[a.verdict.kind] - VERDICT_ORDER[b.verdict.kind];
       if (order !== 0) return order;
       return (b.series[b.series.length - 1]?.upside ?? 0) - (a.series[a.series.length - 1]?.upside ?? 0);
@@ -82,6 +86,7 @@ export default function HomePage() {
       holdings={holdings}
       returns={returns}
       allocation={allocation}
+      settings={settings}
     />
   );
 }

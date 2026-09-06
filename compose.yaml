@@ -1,0 +1,13 @@
+services:
+  collectcollect:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - collectcollect-data:/data
+    restart: unless-stopped
+
+volumes:
+  collectcollect-data:

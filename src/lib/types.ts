@@ -25,6 +25,16 @@ export const CONDITIONS: Record<Condition, string> = {
 
 export const GRADING_COMPANIES = ["PSA", "BGS", "CGC", "SGC", "TAG", "Other"] as const;
 
+/** Where a raw card stands in the owner's grading plans. */
+export type GradingStatus = "undecided" | "planned" | "submitted" | "keep_raw";
+
+export const GRADING_STATUSES: Record<GradingStatus, string> = {
+  undecided: "Undecided",
+  planned: "Plan to grade",
+  submitted: "At the grader",
+  keep_raw: "Keeping raw",
+};
+
 /** What the vision model reports about a single photographed card. */
 export interface Identification {
   game: Game;
@@ -81,6 +91,7 @@ export interface CardRecord {
   identification: Identification | null;
   manualUngraded: number | null;
   manualGraded: Record<string, number>;
+  gradingStatus: GradingStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -150,6 +161,9 @@ export interface Settings {
   conditionMultipliers: Record<Condition, number>;
   /** What it costs to get one card graded (fee + shipping), used in the grading outlook. */
   gradingFee: number;
+  /** A raw card counts as "ready to grade" when its upside clears both of these. */
+  readyMinUpside: number;
+  readyMinUpsidePercent: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -175,6 +189,8 @@ export const DEFAULT_SETTINGS: Settings = {
     DMG: 0.3,
   },
   gradingFee: 25,
+  readyMinUpside: 40,
+  readyMinUpsidePercent: 50,
 };
 
 export interface ProviderStatus {

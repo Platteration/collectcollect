@@ -20,6 +20,10 @@ npm run dev               # http://localhost:3000
 
 Production: `npm run build && npm start`. Everything is stored locally in `./data` (SQLite database plus uploaded photos); set `DATA_DIR` to move it.
 
+Docker: `docker compose up --build` (reads `.env`, keeps data in a named volume at `/data`).
+
+> **No login.** CollectCollect is a single-user app with no authentication: anyone who can reach the port can see your collection, upload photos, and spend your Anthropic credits on identifications. Run it on your own machine or behind something that adds a login (Tailscale, a reverse proxy with basic auth, and so on). Do not expose it directly to the internet.
+
 ## How pricing works
 
 | Source | Games | Key | What it provides |
@@ -39,6 +43,10 @@ For each card the app shows:
 Every refresh stores a snapshot, so a card's detail page shows how its price has moved and the portfolio chart fills in. A refresh that returns no price (source down, no source configured for that game, no match) is reported but never stored over a card's last known value.
 
 **Keeping history flowing.** The server re-prices any card whose latest snapshot is older than `AUTO_REFRESH_HOURS` (default 24, set 0 to disable) once an hour while it is running, and the Portfolio page has a *Refresh all prices* button. The min/max curves need a few refreshes before the timing verdict says anything stronger than "not enough history yet".
+
+**Grading plans.** Each raw card carries a plan: undecided, plan to grade, at the grader, or keeping raw. A card is flagged **Ready** when the timing verdict is good and its upside after the fee clears the thresholds in Settings (default $40 and 50% of the raw price). The portfolio page counts ready cards, totals their upside, and lets you filter by plan; when a card comes back from the grader, edit it and enter the grade.
+
+**Duplicates.** Saving a card that matches one you already have (same game and name, with the same number or set) offers to add it as another copy instead.
 
 **Grading outlook math.** *max* is the PSA 10 price (real if a source reports it, otherwise ungraded × the PSA 10 multiplier); *min* is the PSA 8 / Grade 8 price on the same basis, falling back to the raw price; *upside* is max − raw − grading fee (Settings). "Good time to grade" means today's upside is within 10% of the highest upside in the card's history and positive.
 

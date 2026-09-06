@@ -19,6 +19,8 @@ export function getSettings(): Settings {
         ...(stored.conditionMultipliers ?? {}),
       },
       gradingFee: Number.isFinite(stored.gradingFee) ? Number(stored.gradingFee) : DEFAULT_SETTINGS.gradingFee,
+      readyMinUpside: Number.isFinite(stored.readyMinUpside) ? Number(stored.readyMinUpside) : DEFAULT_SETTINGS.readyMinUpside,
+      readyMinUpsidePercent: Number.isFinite(stored.readyMinUpsidePercent) ? Number(stored.readyMinUpsidePercent) : DEFAULT_SETTINGS.readyMinUpsidePercent,
     };
   } catch {
     return structuredClone(DEFAULT_SETTINGS);
@@ -32,7 +34,9 @@ export function saveSettings(settings: Settings): Settings {
       ...DEFAULT_SETTINGS.conditionMultipliers,
       ...sanitizeNumbers(settings.conditionMultipliers),
     } as Settings["conditionMultipliers"],
-    gradingFee: Number.isFinite(settings.gradingFee) && settings.gradingFee >= 0 ? settings.gradingFee : DEFAULT_SETTINGS.gradingFee,
+    gradingFee: nonNegative(settings.gradingFee, DEFAULT_SETTINGS.gradingFee),
+    readyMinUpside: nonNegative(settings.readyMinUpside, DEFAULT_SETTINGS.readyMinUpside),
+    readyMinUpsidePercent: nonNegative(settings.readyMinUpsidePercent, DEFAULT_SETTINGS.readyMinUpsidePercent),
   };
   getDb()
     .prepare(
@@ -40,6 +44,11 @@ export function saveSettings(settings: Settings): Settings {
     )
     .run(KEY, JSON.stringify(clean));
   return clean;
+}
+
+function nonNegative(v: unknown, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
 function sanitizeNumbers(input: Record<string, unknown> | undefined) {

@@ -21,6 +21,8 @@ interface Item {
   pricing: boolean;
   savedId: number | null;
   hint: string;
+  /** Existing cards that look like this one; shown before saving. */
+  duplicates: CardRecord[] | null;
 }
 
 let counter = 0;
@@ -87,6 +89,7 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
         pricing: false,
         savedId: null,
         hint: "",
+        duplicates: null,
       }));
       setItems((prev) => [...fresh, ...prev]);
       await Promise.all(
@@ -122,6 +125,7 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
         pricing: false,
         savedId: null,
         hint: "",
+        duplicates: null,
       },
       ...prev,
     ]);
@@ -153,11 +157,21 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
     }
   };
 
-  const save = async (item: Item) => {
+  const save = async (item: Item, force = false) => {
     patch(item.key, { status: "saving", error: null });
     try {
       const input = formToInput(item.form);
       if (!input.name) throw new Error("Card name is required");
+      if (!force) {
+        const params = new URLSearchParams({ similar: "1", game: input.game, name: input.name });
+        if (input.cardNumber) params.set("number", input.cardNumber);
+        if (input.setName) params.set("set", input.setName);
+        const { cards } = await api<{ cards: CardRecord[] }>(`/api/cards?${params}`);
+        if (cards.length) {
+          patch(item.key, { status: "review", duplicates: cards });
+          return;
+        }
+      }
       const { card } = await api<{ card: CardRecord }>("/api/cards", {
         method: "POST",
         body: JSON.stringify({ ...input, imagePath: item.uploads[0] ?? null, identification: item.identification }),
@@ -165,6 +179,19 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
       // Store a first price snapshot so the collection view has a value right away.
       api(`/api/cards/${card.id}/price`, { method: "POST" }).catch(() => undefined);
       patch(item.key, { status: "saved", savedId: card.id });
+    } catch (e) {
+      patch(item.key, { status: "review", error: (e as Error).message });
+    }
+  };
+
+  /** Merge into an existing card: bump its quantity and attach the photo if it has none. */
+  const addCopy = async (item: Item, existing: CardRecord) => {
+    patch(item.key, { status: "saving", error: null });
+    try {
+      const body: Record<string, unknown> = { quantity: existing.quantity + (formToInput(item.form).quantity ?? 1) };
+      if (!existing.imagePath && item.uploads[0]) body.imagePath = item.uploads[0];
+      await api(`/api/cards/${existing.id}`, { method: "PATCH", body: JSON.stringify(body) });
+      patch(item.key, { status: "saved", savedId: existing.id, duplicates: null });
     } catch (e) {
       patch(item.key, { status: "review", error: (e as Error).message });
     }
@@ -232,6 +259,9 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
           onExtraPhoto={(f) => addExtraPhoto(item.key, f)}
           onLookup={() => lookupPrices(item)}
           onSave={() => save(item)}
+          onSaveAnyway={() => save(item, true)}
+          onAddCopy={(existing) => addCopy(item, existing)}
+          onDismissDuplicates={() => patch(item.key, { duplicates: null })}
           onRemove={() => setItems((prev) => prev.filter((i) => i.key !== item.key))}
         />
       ))}
@@ -247,6 +277,9 @@ function ItemCard({
   onExtraPhoto,
   onLookup,
   onSave,
+  onSaveAnyway,
+  onAddCopy,
+  onDismissDuplicates,
   onRemove,
 }: {
   item: Item;
@@ -256,6 +289,9 @@ function ItemCard({
   onExtraPhoto: (f: File) => void;
   onLookup: () => void;
   onSave: () => void;
+  onSaveAnyway: () => void;
+  onAddCopy: (existing: CardRecord) => void;
+  onDismissDuplicates: () => void;
   onRemove: () => void;
 }) {
   const extraInput = useRef<HTMLInputElement>(null);
@@ -366,6 +402,36 @@ function ItemCard({
           {item.status !== "saved" && item.status !== "uploading" && item.status !== "identifying" && (
             <>
               <CardForm value={item.form} onChange={onChange} disabled={busy} />
+              {item.duplicates && item.duplicates.length > 0 && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/40">
+                  <div className="font-medium">Looks like you already have this card</div>
+                  <ul className="mt-2 space-y-2">
+                    {item.duplicates.map((d) => (
+                      <li key={d.id} className="flex flex-wrap items-center justify-between gap-2">
+                        <span>
+                          <Link href={`/cards/${d.id}`} className="underline decoration-dotted">
+                            {d.name}
+                          </Link>{" "}
+                          <span className="text-neutral-500">
+                            {[d.setName, d.cardNumber ? `#${d.cardNumber}` : null, d.grade ? `${d.gradingCompany ?? ""} ${d.grade}` : `Raw · ${d.condition}`].filter(Boolean).join(" · ")} · qty {d.quantity}
+                          </span>
+                        </span>
+                        <button type="button" className="btn-secondary" onClick={() => onAddCopy(d)} disabled={busy}>
+                          Add as another copy
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button type="button" className="btn-secondary" onClick={onSaveAnyway} disabled={busy}>
+                      Save as a separate card
+                    </button>
+                    <button type="button" className="text-xs text-neutral-500 underline" onClick={onDismissDuplicates}>
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
               <PricePanel summary={item.price} loading={item.pricing} onRefresh={onLookup} />
               <div className="flex justify-end gap-2">
                 <button type="button" className="btn-primary" onClick={onSave} disabled={busy || !item.form.name.trim()}>

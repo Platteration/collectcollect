@@ -202,6 +202,14 @@ export function gradingVerdict(series: OutlookPoint[]): Verdict {
   };
 }
 
+/** Whether the latest outlook clears the owner's "ready to grade" thresholds and timing looks right. */
+export function isReadyToGrade(series: OutlookPoint[], verdict: Verdict, settings: Settings): boolean {
+  const last = series[series.length - 1];
+  if (!last || verdict.kind !== "prime") return false;
+  if (last.upside < settings.readyMinUpside) return false;
+  return last.raw <= 0 || (last.upside / last.raw) * 100 >= settings.readyMinUpsidePercent;
+}
+
 function fmt(n: number): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 }

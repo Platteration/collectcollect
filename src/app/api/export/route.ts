@@ -3,13 +3,15 @@ import { GAMES } from "@/lib/types";
 
 const COLUMNS = [
   "id", "game", "sport", "name", "set", "set_code", "number", "year", "rarity", "variant", "language", "manufacturer",
-  "quantity", "condition", "grading_company", "grade", "cert_number", "purchase_price",
+  "quantity", "condition", "grading_company", "grade", "cert_number", "grading_status", "purchase_price",
   "value_each", "value_total", "ungraded_price", "psa_10_price", "psa_10_estimate", "price_source", "price_date", "notes",
 ] as const;
 
 function cell(v: unknown): string {
   if (v === null || v === undefined) return "";
-  const s = String(v);
+  let s = String(v);
+  // Neutralise spreadsheet formula injection: a leading = + - @ or tab/CR would be evaluated by Excel/Sheets.
+  if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
@@ -24,7 +26,7 @@ export async function GET() {
     lines.push(
       [
         c.id, GAMES[c.game], c.sport, c.name, c.setName, c.setCode, c.cardNumber, c.year, c.rarity, c.variant, c.language, c.manufacturer,
-        c.quantity, c.grade ? "" : c.condition, c.gradingCompany, c.grade, c.certNumber, c.purchasePrice,
+        c.quantity, c.grade ? "" : c.condition, c.gradingCompany, c.grade, c.certNumber, c.grade ? "" : c.gradingStatus, c.purchasePrice,
         each, each === null ? null : Math.round(each * c.quantity * 100) / 100, s?.ungraded ?? null,
         s?.graded["PSA 10"] ?? null, s?.estimatedGraded["PSA 10"] ?? null, s?.ungradedSource ?? null, s?.fetchedAt ?? null, c.notes,
       ]

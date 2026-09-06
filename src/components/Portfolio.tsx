@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { RANGES, change, sliceRange, type Allocation, type OutlookPoint, type PortfolioPoint, type Range, type Returns, type Verdict } from "@/lib/analytics";
 import { money, when } from "@/lib/format";
-import { GAMES, type Game } from "@/lib/types";
+import { GAMES, GRADING_STATUSES, type Game, type GradingStatus, type Settings } from "@/lib/types";
 import { PortfolioChart } from "./charts/PortfolioChart";
 import { OutlookChart } from "./charts/OutlookChart";
 import { VERDICT_STYLE } from "./verdict";
@@ -20,6 +20,8 @@ export interface Opportunity {
   quantity: number;
   series: OutlookPoint[];
   verdict: Verdict;
+  status: GradingStatus;
+  ready: boolean;
 }
 
 export interface Holding {
@@ -41,7 +43,10 @@ interface Props {
   holdings: Holding[];
   returns: Returns;
   allocation: Allocation[];
+  settings: Settings;
 }
+
+type OutlookFilter = "active" | "ready" | "planned" | "submitted" | "keep_raw";
 
 const GAME_COLORS: Record<Game, string> = {
   pokemon: "var(--chart-series-1)",
@@ -51,9 +56,10 @@ const GAME_COLORS: Record<Game, string> = {
   other: "var(--chart-series-5)",
 };
 
-export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefreshed, opportunities, holdings, returns, allocation }: Props) {
+export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefreshed, opportunities, holdings, returns, allocation, settings }: Props) {
   const router = useRouter();
   const [range, setRange] = useState<Range>("1M");
+  const [filter, setFilter] = useState<OutlookFilter>("active");
   const [hover, setHover] = useState<PortfolioPoint | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -100,6 +106,20 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
   }
 
   const returnsUp = returns.amount >= 0;
+  const ready = opportunities.filter((o) => o.ready && o.status !== "submitted" && o.status !== "keep_raw");
+  const readyUpside = ready.reduce((n, o) => n + (o.series[o.series.length - 1]?.upside ?? 0) * o.quantity, 0);
+  const counts: Record<OutlookFilter, number> = {
+    active: opportunities.filter((o) => o.status === "undecided" || o.status === "planned").length,
+    ready: ready.length,
+    planned: opportunities.filter((o) => o.status === "planned").length,
+    submitted: opportunities.filter((o) => o.status === "submitted").length,
+    keep_raw: opportunities.filter((o) => o.status === "keep_raw").length,
+  };
+  const visibleOpportunities = opportunities.filter((o) => {
+    if (filter === "active") return o.status === "undecided" || o.status === "planned";
+    if (filter === "ready") return ready.includes(o);
+    return o.status === filter;
+  });
 
   return (
     <div className="space-y-8">
@@ -161,7 +181,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
       </section>
 
       <section>
-        <div className="mb-3 flex items-end justify-between">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Grading outlook</h2>
             <p className="text-sm text-neutral-500">
@@ -169,11 +189,52 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
             </p>
           </div>
         </div>
+        {opportunities.length > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <div className={`card-surface flex items-center gap-3 px-4 py-2 ${ready.length ? "border-green-300 dark:border-green-800" : ""}`}>
+              <div>
+                <div className="text-xs uppercase tracking-wide text-neutral-500">Ready to grade</div>
+                <div className="text-xl font-semibold">
+                  {ready.length} <span className="text-sm font-normal text-neutral-500">card{ready.length === 1 ? "" : "s"}</span>
+                </div>
+              </div>
+              <div className="border-l border-black/10 pl-3 text-sm dark:border-white/10">
+                <div className="text-xs text-neutral-500">potential upside after fees</div>
+                <div className="font-medium">{money(readyUpside)}</div>
+                <div className="text-xs text-neutral-500">
+                  threshold {money(settings.readyMinUpside)} and {settings.readyMinUpsidePercent}% over raw
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {(
+                [
+                  ["active", "Undecided + planned"],
+                  ["ready", "Ready"],
+                  ["planned", GRADING_STATUSES.planned],
+                  ["submitted", GRADING_STATUSES.submitted],
+                  ["keep_raw", GRADING_STATUSES.keep_raw],
+                ] as Array<[OutlookFilter, string]>
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setFilter(key)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium ${filter === key ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900" : "bg-black/5 text-neutral-700 hover:bg-black/10 dark:bg-white/10 dark:text-neutral-200"}`}
+                >
+                  {label} · {counts[key]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {opportunities.length === 0 ? (
           <div className="card-surface p-6 text-sm text-neutral-500">No ungraded cards with prices yet.</div>
+        ) : visibleOpportunities.length === 0 ? (
+          <div className="card-surface p-6 text-sm text-neutral-500">Nothing in this group.</div>
         ) : (
           <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {opportunities.map((o) => {
+            {visibleOpportunities.map((o) => {
               const last = o.series[o.series.length - 1];
               return (
                 <li key={o.id} className="card-surface p-3">
@@ -190,7 +251,15 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
                           {o.name}
                           {o.quantity > 1 ? ` ×${o.quantity}` : ""}
                         </Link>
-                        <span className={`badge ${VERDICT_STYLE[o.verdict.kind]}`}>{o.verdict.headline}</span>
+                        <span className="flex flex-wrap items-center gap-1">
+                          {o.ready && o.status !== "submitted" && o.status !== "keep_raw" && (
+                            <span className="badge bg-green-600 text-white">Ready</span>
+                          )}
+                          {o.status !== "undecided" && (
+                            <span className="badge bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100">{GRADING_STATUSES[o.status]}</span>
+                          )}
+                          <span className={`badge ${VERDICT_STYLE[o.verdict.kind]}`}>{o.verdict.headline}</span>
+                        </span>
                       </div>
                       <div className="truncate text-xs text-neutral-500">
                         {GAMES[o.game]} · {o.detail}

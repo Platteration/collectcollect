@@ -8,7 +8,9 @@ import type {
   PriceSnapshot,
   PriceSummary,
 } from "./types";
-import { CONDITIONS, GAMES } from "./types";
+import { CONDITIONS, GAMES, GRADING_STATUSES, type GradingStatus } from "./types";
+import { isValidUploadName } from "./images";
+import { normalizeNumber } from "./pricing/match";
 
 interface CardRow {
   id: number;
@@ -36,6 +38,7 @@ interface CardRow {
   identification: string | null;
   manual_ungraded: number | null;
   manual_graded: string;
+  grading_status: string;
   created_at: string;
   updated_at: string;
 }
@@ -76,6 +79,7 @@ function rowToCard(row: CardRow): CardRecord {
     identification: parseJson<Identification | null>(row.identification, null),
     manualUngraded: row.manual_ungraded,
     manualGraded: parseJson(row.manual_graded, {}),
+    gradingStatus: (row.grading_status in GRADING_STATUSES ? row.grading_status : "undecided") as GradingStatus,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -85,6 +89,17 @@ const str = (v: unknown): string | null => {
   if (v === undefined || v === null) return null;
   const s = String(v).trim();
   return s.length ? s : null;
+};
+/** Only http(s) URLs may be stored for rendering as links/images. */
+const httpUrl = (v: unknown): string | null => {
+  const s = str(v);
+  if (!s) return null;
+  try {
+    const u = new URL(s);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.toString() : null;
+  } catch {
+    return null;
+  }
 };
 const num = (v: unknown): number | null => {
   if (v === undefined || v === null || v === "") return null;
@@ -103,6 +118,8 @@ export function normalizeInput(input: CardInput): Required<
   const condition = (str(input.condition) ?? "NM") as Condition;
   if (!(condition in CONDITIONS)) throw new Error(`Unknown condition: ${condition}`);
   const quantity = Math.max(0, Math.floor(num(input.quantity) ?? 1));
+  const gradingStatus = (str(input.gradingStatus) ?? "undecided") as GradingStatus;
+  if (!(gradingStatus in GRADING_STATUSES)) throw new Error(`Unknown grading status: ${gradingStatus}`);
   const gradedNums: Record<string, number> = {};
   for (const [k, v] of Object.entries(input.manualGraded ?? {})) {
     const n = num(v);
@@ -127,14 +144,15 @@ export function normalizeInput(input: CardInput): Required<
     certNumber: str(input.certNumber),
     purchasePrice: num(input.purchasePrice),
     notes: str(input.notes),
-    imagePath: str(input.imagePath),
-    referenceImageUrl: str(input.referenceImageUrl),
+    imagePath: str(input.imagePath) && isValidUploadName(str(input.imagePath)!) ? str(input.imagePath) : null,
+    referenceImageUrl: httpUrl(input.referenceImageUrl),
     externalIds: Object.fromEntries(
       Object.entries(input.externalIds ?? {}).filter(([, v]) => str(v)),
     ) as Record<string, string>,
     identification: input.identification ?? null,
     manualUngraded: num(input.manualUngraded),
     manualGraded: gradedNums,
+    gradingStatus,
   };
 }
 
@@ -146,11 +164,11 @@ export function createCard(input: CardInput): CardRecord {
       `INSERT INTO cards (game, sport, name, set_name, set_code, card_number, year, rarity, variant,
         language, manufacturer, quantity, condition, grading_company, grade, cert_number, purchase_price,
         notes, image_path, reference_image_url, external_ids, identification, manual_ungraded, manual_graded,
-        created_at, updated_at)
+        grading_status, created_at, updated_at)
        VALUES (@game, @sport, @name, @setName, @setCode, @cardNumber, @year, @rarity, @variant,
         @language, @manufacturer, @quantity, @condition, @gradingCompany, @grade, @certNumber, @purchasePrice,
         @notes, @imagePath, @referenceImageUrl, @externalIds, @identification, @manualUngraded, @manualGraded,
-        @now, @now)`,
+        @gradingStatus, @now, @now)`,
     )
     .run({
       ...c,
@@ -173,7 +191,7 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
         manufacturer=@manufacturer, quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
         grade=@grade, cert_number=@certNumber, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
         reference_image_url=@referenceImageUrl, external_ids=@externalIds, identification=@identification,
-        manual_ungraded=@manualUngraded, manual_graded=@manualGraded, updated_at=@now
+        manual_ungraded=@manualUngraded, manual_graded=@manualGraded, grading_status=@gradingStatus, updated_at=@now
        WHERE id=@id`,
     )
     .run({
@@ -185,6 +203,29 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
       now: new Date().toISOString(),
     });
   return getCard(id);
+}
+
+/**
+ * Cards that look like the same card (same game and name, and a matching
+ * number or set when either side has one). Used to catch accidental
+ * duplicates when adding.
+ */
+export function findSimilar(input: { game: Game; name: string; cardNumber?: string | null; setName?: string | null }): CardRecord[] {
+  const name = input.name.trim().toLowerCase();
+  if (!name) return [];
+  const rows = getDb()
+    .prepare("SELECT * FROM cards WHERE game = ? AND lower(trim(name)) = ? ORDER BY updated_at DESC")
+    .all(input.game, name) as CardRow[];
+  const norm = (v: string | null | undefined) => (v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const num = normalizeNumber(input.cardNumber);
+  const set = norm(input.setName);
+  return rows.map(rowToCard).filter((c) => {
+    const cnum = normalizeNumber(c.cardNumber);
+    const cset = norm(c.setName);
+    if (num && cnum) return num === cnum;
+    if (set && cset) return set === cset || set.includes(cset) || cset.includes(set);
+    return true; // neither side has distinguishing detail: same name is the best we can do
+  });
 }
 
 export function getCard(id: number): CardRecord | null {

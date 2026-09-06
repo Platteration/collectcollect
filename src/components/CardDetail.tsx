@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { imageSrc, money, when } from "@/lib/format";
-import { GAMES, type CardRecord, type PriceSnapshot, type PriceSummary, type Settings } from "@/lib/types";
-import { gradingVerdict, outlookSeries } from "@/lib/analytics";
+import { GAMES, GRADING_STATUSES, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Settings } from "@/lib/types";
+import { gradingVerdict, isReadyToGrade, outlookSeries } from "@/lib/analytics";
 import { OutlookChart } from "./charts/OutlookChart";
 import { PortfolioChart } from "./charts/PortfolioChart";
 import { VERDICT_STYLE } from "./verdict";
@@ -87,6 +87,17 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
     }
   };
 
+  const setStatus = async (gradingStatus: GradingStatus) => {
+    setError(null);
+    try {
+      const res = await api<{ card: CardRecord }>(`/api/cards/${card.id}`, { method: "PATCH", body: JSON.stringify({ gradingStatus }) });
+      setCard(res.card);
+      router.refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   const remove = async () => {
     if (!confirm(`Delete ${card.name} from your collection?`)) return;
     setBusy("delete");
@@ -111,6 +122,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
   const outlook = graded ? [] : outlookSeries(history, settings);
   const verdict = gradingVerdict(outlook);
   const lastOutlook = outlook[outlook.length - 1];
+  const ready = isReadyToGrade(outlook, verdict, settings);
 
   return (
     <div className="grid grid-cols-1 gap-6 md:grid-cols-[300px_1fr]">
@@ -249,10 +261,31 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
                   Range of outcomes if you graded this copy, versus what it is worth raw. Includes a {money(settings.gradingFee)} grading fee (Settings).
                 </p>
               </div>
-              <span className={`badge ${VERDICT_STYLE[verdict.kind]}`}>
-                {verdict.headline}
+              <span className="flex flex-wrap items-center gap-1">
+                {ready && card.gradingStatus !== "keep_raw" && card.gradingStatus !== "submitted" && (
+                  <span className="badge bg-green-600 text-white">Ready</span>
+                )}
+                <span className={`badge ${VERDICT_STYLE[verdict.kind]}`}>{verdict.headline}</span>
               </span>
             </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-neutral-500">Your plan:</span>
+              {(Object.keys(GRADING_STATUSES) as GradingStatus[]).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setStatus(k)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium ${card.gradingStatus === k ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900" : "bg-black/5 text-neutral-700 hover:bg-black/10 dark:bg-white/10 dark:text-neutral-200"}`}
+                >
+                  {GRADING_STATUSES[k]}
+                </button>
+              ))}
+            </div>
+            {card.gradingStatus === "submitted" && (
+              <p className="mt-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
+                When the card comes back, hit <strong>Edit</strong> and enter the grading company and grade; it will then be valued as a graded card.
+              </p>
+            )}
             {lastOutlook && (
               <div className="my-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                 <Field label="Raw (yours)" value={money(lastOutlook.raw)} />

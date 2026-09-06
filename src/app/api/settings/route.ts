@@ -20,6 +20,8 @@ export async function PUT(request: Request) {
     gradeMultipliers: body.gradeMultipliers ?? current.gradeMultipliers,
     conditionMultipliers: body.conditionMultipliers ?? current.conditionMultipliers,
     gradingFee: body.gradingFee ?? current.gradingFee,
+    readyMinUpside: body.readyMinUpside ?? current.readyMinUpside,
+    readyMinUpsidePercent: body.readyMinUpsidePercent ?? current.readyMinUpsidePercent,
   });
   return NextResponse.json({ settings, providers: providerStatuses() });
 }

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDatabase, setDb } from "@/lib/db";
-import { addSnapshot, createCard, deleteCard, getCard, latestSnapshotsByCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
+import { addSnapshot, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { DEFAULT_SETTINGS, type PriceSummary } from "@/lib/types";
 
@@ -62,16 +62,38 @@ describe("card repository", () => {
   });
 });
 
+describe("findSimilar", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+  it("matches on game + name with number or set agreement", () => {
+    createCard({ game: "pokemon", name: "Pikachu", setName: "Jungle", cardNumber: "60/64" });
+    createCard({ game: "pokemon", name: "Pikachu", setName: "Base Set", cardNumber: "58/102" });
+    createCard({ game: "yugioh", name: "Pikachu" });
+    expect(findSimilar({ game: "pokemon", name: "pikachu", cardNumber: "60" }).map((c) => c.setName)).toEqual(["Jungle"]);
+    expect(findSimilar({ game: "pokemon", name: "Pikachu", setName: "jungle" }).map((c) => c.setName)).toEqual(["Jungle"]);
+    expect(findSimilar({ game: "pokemon", name: "Pikachu" })).toHaveLength(2);
+    expect(findSimilar({ game: "mtg", name: "Pikachu" })).toHaveLength(0);
+  });
+  it("migrates older databases by adding grading_status", () => {
+    const db = openDatabase(":memory:");
+    db.exec("ALTER TABLE cards DROP COLUMN grading_status");
+    setDb(openDatabase(":memory:"));
+    const card = createCard({ game: "mtg", name: "x", gradingStatus: "planned" });
+    expect(card.gradingStatus).toBe("planned");
+    expect(() => createCard({ game: "mtg", name: "x", gradingStatus: "lost" as never })).toThrow(/grading status/);
+  });
+});
+
 describe("settings", () => {
   beforeEach(() => setDb(openDatabase(":memory:")));
 
   it("returns defaults and merges saved values", () => {
     expect(getSettings()).toEqual(DEFAULT_SETTINGS);
-    saveSettings({ gradeMultipliers: { "PSA 10": 4, " bad": -1 as number, "": 2 }, conditionMultipliers: { ...DEFAULT_SETTINGS.conditionMultipliers, LP: 0.9 }, gradingFee: 30 });
+    saveSettings({ gradeMultipliers: { "PSA 10": 4, " bad": -1 as number, "": 2 }, conditionMultipliers: { ...DEFAULT_SETTINGS.conditionMultipliers, LP: 0.9 }, gradingFee: 30, readyMinUpside: 10, readyMinUpsidePercent: 20 });
     const s = getSettings();
     expect(s.gradeMultipliers).toEqual({ "PSA 10": 4 });
     expect(s.conditionMultipliers.LP).toBe(0.9);
     expect(s.conditionMultipliers.NM).toBe(1);
     expect(s.gradingFee).toBe(30);
+    expect(s.readyMinUpside).toBe(10);
   });
 });

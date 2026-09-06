@@ -59,11 +59,20 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 `;
 
+/** Columns added after the first release; applied when missing so older databases keep working. */
+const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
+  { table: "cards", column: "grading_status", ddl: "ALTER TABLE cards ADD COLUMN grading_status TEXT NOT NULL DEFAULT 'undecided'" },
+];
+
 export function openDatabase(file: string): Database.Database {
   const db = new Database(file);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  for (const m of MIGRATIONS) {
+    const cols = db.prepare(`PRAGMA table_info(${m.table})`).all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === m.column)) db.exec(m.ddl);
+  }
   return db;
 }
 
