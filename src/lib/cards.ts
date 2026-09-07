@@ -236,6 +236,52 @@ export function findSimilar(input: { game: Game; name: string; cardNumber?: stri
   });
 }
 
+export type IntakeOutcome =
+  | { result: "created"; card: CardRecord }
+  | { result: "merged"; card: CardRecord }
+  | { result: "ambiguous"; candidates: CardRecord[] };
+
+/**
+ * Add a scanned card in one transaction: merge into an existing row when there
+ * is exactly one unambiguous match, otherwise create. Doing this on the server
+ * keeps concurrent scans of the same card from both reading the old quantity
+ * and each adding one copy.
+ *
+ * A match only counts when the copies are interchangeable: both ungraded, or
+ * graded by the same company to the same grade. A raw scan must never be
+ * folded into a slab, since it would then be valued as a graded copy.
+ */
+export function intakeCard(input: CardInput): IntakeOutcome {
+  const clean = normalizeInput(input);
+  const run = getDb().transaction((): IntakeOutcome => {
+    const candidates = findSimilar({
+      game: clean.game,
+      name: clean.name,
+      cardNumber: clean.cardNumber,
+      setName: clean.setName,
+    });
+    const interchangeable = candidates.filter(
+      (c) =>
+        (c.grade ?? null) === (clean.grade ?? null) &&
+        (c.gradingCompany ?? null) === (clean.gradingCompany ?? null),
+    );
+    if (candidates.length > 0 && interchangeable.length !== 1) {
+      return { result: "ambiguous", candidates };
+    }
+    if (interchangeable.length === 1) {
+      const existing = interchangeable[0];
+      const patch: Partial<CardInput> = { quantity: existing.quantity + (clean.quantity || 1) };
+      if (!existing.imagePath && clean.imagePath) {
+        patch.imagePath = clean.imagePath;
+        patch.accentColor = clean.accentColor;
+      }
+      return { result: "merged", card: updateCard(existing.id, patch)! };
+    }
+    return { result: "created", card: createCard(input) };
+  });
+  return run();
+}
+
 export function getCard(id: number): CardRecord | null {
   const row = getDb().prepare("SELECT * FROM cards WHERE id = ?").get(id) as CardRow | undefined;
   return row ? rowToCard(row) : null;

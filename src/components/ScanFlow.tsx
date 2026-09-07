@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import type { CardRecord, Game, Identification } from "@/lib/types";
+import type { Game, Identification } from "@/lib/types";
+import type { IntakeOutcome } from "@/lib/cards";
 import { GAMES } from "@/lib/types";
 
 type ScanStatus = "queued" | "uploading" | "identifying" | "saving" | "added" | "merged" | "review" | "failed";
@@ -113,29 +114,10 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
         }
 
         patch(item.key, { status: "saving" });
-        const params = new URLSearchParams({ similar: "1", game: identification.game, name: identification.name });
-        if (identification.card_number) params.set("number", identification.card_number);
-        if (identification.set_name) params.set("set", identification.set_name);
-        const { cards: similar } = await api<{ cards: CardRecord[] }>(`/api/cards?${params}`);
-
-        if (similar.length === 1) {
-          const existing = similar[0];
-          const body: Record<string, unknown> = { quantity: existing.quantity + 1 };
-          if (!existing.imagePath) {
-            body.imagePath = upload.name;
-            body.accentColor = upload.color;
-          }
-          await api(`/api/cards/${existing.id}`, { method: "PATCH", body: JSON.stringify(body) });
-          patch(item.key, { status: "merged", cardId: existing.id, message: `Now ${existing.quantity + 1} copies of ${existing.name}.` });
-          return;
-        }
-        if (similar.length > 1) {
-          patch(item.key, { status: "review", message: `${similar.length} cards in your collection look like this one.` });
-          return;
-        }
-
         const assess = identification.condition_assessment ?? null;
-        const { card } = await api<{ card: CardRecord }>("/api/cards", {
+        // One atomic call decides between merge and create, so two workers
+        // scanning the same card cannot both add a fresh row or lose a copy.
+        const outcome = await api<IntakeOutcome>("/api/cards/intake", {
           method: "POST",
           body: JSON.stringify({
             game: identification.game,
@@ -159,9 +141,24 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
             identification,
           }),
         });
+
+        if (outcome.result === "ambiguous") {
+          patch(item.key, {
+            status: "review",
+            message:
+              outcome.candidates.length === 1
+                ? `You already have a ${outcome.candidates[0].grade ? `${outcome.candidates[0].gradingCompany ?? "graded"} ${outcome.candidates[0].grade}` : "raw"} copy; this one looks different.`
+                : `${outcome.candidates.length} cards in your collection look like this one.`,
+          });
+          return;
+        }
         // Price in the background; the scan should not wait on provider APIs.
-        void api(`/api/cards/${card.id}/price`, { method: "POST" }).catch(() => undefined);
-        patch(item.key, { status: "added", cardId: card.id, message: null });
+        void api(`/api/cards/${outcome.card.id}/price`, { method: "POST" }).catch(() => undefined);
+        patch(item.key, {
+          status: outcome.result === "merged" ? "merged" : "added",
+          cardId: outcome.card.id,
+          message: outcome.result === "merged" ? `Now ${outcome.card.quantity} copies of ${outcome.card.name}.` : null,
+        });
       } catch (e) {
         patch(item.key, { status: "failed", message: (e as Error).message });
       }
@@ -224,18 +221,24 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
     setCamera("starting");
     setCameraError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 } } });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      streamRef.current = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 } },
+      });
       setCamera("live");
     } catch (e) {
       setCamera("unavailable");
       setCameraError(e instanceof Error ? e.message : "No camera available");
     }
   }, []);
+
+  // The <video> only exists once the camera is live, so the stream is attached
+  // after that render rather than inside startCamera, where the ref is null.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (camera !== "live" || !video || !streamRef.current) return;
+    video.srcObject = streamRef.current;
+    void video.play().catch(() => setCameraError("The preview could not start"));
+  }, [camera]);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());

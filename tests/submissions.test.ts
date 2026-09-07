@@ -75,6 +75,23 @@ describe("grading submissions", () => {
     expect(o).toMatchObject({ cards: 2, cost: 70, rawValue: 150, returnedValue: 1000, graded: 2, gain: 780 });
   });
 
+  it("stays open until every card has a grade", () => {
+    const a = pricedCard("Charizard", 100, 900);
+    const b = pricedCard("Blastoise", 50, 300);
+    const sub0 = createSubmission({ company: "PSA", feePerCard: 25 });
+    addCard(sub0.id, a.id);
+    addCard(sub0.id, b.id);
+    markSent(sub0.id);
+    const partial = recordReturn(sub0.id, [{ cardId: a.id, grade: "10" }]);
+    expect(partial.status).toBe("sent");
+    expect(partial.returnedAt).toBeNull();
+    // the second card can still be graded afterwards
+    const done = recordReturn(sub0.id, [{ cardId: b.id, grade: "9" }]);
+    expect(done.status).toBe("returned");
+    expect(done.returnedAt).not.toBeNull();
+    expect(getCard(b.id)?.grade).toBe("9");
+  });
+
   it("rejects grades for cards outside the batch", () => {
     const card = pricedCard("Pikachu", 40, 150);
     const sub = addCard(createSubmission({ company: "PSA" }).id, card.id);

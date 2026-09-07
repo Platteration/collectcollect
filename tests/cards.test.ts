@@ -100,3 +100,45 @@ describe("settings", () => {
     expect(s.alertWebhookUrl).toBe(""); // only http(s) is stored
   });
 });
+
+describe("intakeCard", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("creates the first copy and merges the second", async () => {
+    const { intakeCard } = await import("@/lib/cards");
+    const first = intakeCard({ game: "pokemon", name: "Charizard", setName: "Base Set", cardNumber: "4/102" });
+    expect(first.result).toBe("created");
+    const second = intakeCard({ game: "pokemon", name: "Charizard", setName: "Base Set", cardNumber: "4/102" });
+    expect(second).toMatchObject({ result: "merged" });
+    if (second.result !== "created" && second.result !== "merged") throw new Error("unexpected");
+    expect(second.card.quantity).toBe(2);
+    expect(listCards()).toHaveLength(1);
+  });
+
+  it("never folds a raw scan into a graded copy, or the reverse", async () => {
+    const { intakeCard } = await import("@/lib/cards");
+    intakeCard({ game: "pokemon", name: "Charizard", cardNumber: "4/102", gradingCompany: "PSA", grade: "9" });
+    const raw = intakeCard({ game: "pokemon", name: "Charizard", cardNumber: "4/102" });
+    expect(raw.result).toBe("ambiguous");
+    if (raw.result !== "ambiguous") throw new Error("unexpected");
+    expect(raw.candidates).toHaveLength(1);
+    // a second slab at the same grade is interchangeable, so it merges
+    const slab = intakeCard({ game: "pokemon", name: "Charizard", cardNumber: "4/102", gradingCompany: "PSA", grade: "9" });
+    expect(slab).toMatchObject({ result: "merged" });
+  });
+
+  it("stops rather than guessing when several owned cards match", async () => {
+    const { intakeCard } = await import("@/lib/cards");
+    createCard({ game: "pokemon", name: "Pikachu" });
+    createCard({ game: "pokemon", name: "Pikachu" });
+    expect(intakeCard({ game: "pokemon", name: "Pikachu" }).result).toBe("ambiguous");
+  });
+
+  it("adopts the photo when the existing row has none", async () => {
+    const { intakeCard } = await import("@/lib/cards");
+    createCard({ game: "mtg", name: "Ragavan" });
+    const merged = intakeCard({ game: "mtg", name: "Ragavan", imagePath: "11111111-2222-4333-8444-555555555555.jpg", accentColor: "#abcdef" });
+    if (merged.result !== "merged") throw new Error("expected a merge");
+    expect(merged.card).toMatchObject({ imagePath: "11111111-2222-4333-8444-555555555555.jpg", accentColor: "#abcdef", quantity: 2 });
+  });
+});

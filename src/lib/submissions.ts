@@ -129,7 +129,7 @@ export function listSubmissions(): Submission[] {
 export function deleteSubmission(id: number): boolean {
   const sub = getSubmission(id);
   if (!sub) return false;
-  // Cards go back to being undecided rather than staying "at the grader".
+  // Cards go back to being planned rather than staying stranded "at the grader".
   for (const c of sub.cards) {
     const card = getCard(c.cardId);
     if (card && card.gradingStatus === "submitted") updateCard(card.id, { gradingStatus: "planned" });
@@ -189,7 +189,9 @@ export interface GradeResult {
 /**
  * Record what came back. Each graded card takes the company and grade, so it
  * is valued as a graded copy from here on, and the value at that grade is
- * captured for the batch's realized outcome.
+ * captured for the batch's realized outcome. Grades can arrive in more than
+ * one pass: the batch only closes once every card has one, so a partial entry
+ * does not strand the rest at the grader.
  */
 export function recordReturn(submissionId: number, results: GradeResult[], returnedAt?: string): Submission {
   const sub = getSubmission(submissionId);
@@ -209,9 +211,11 @@ export function recordReturn(submissionId: number, results: GradeResult[], retur
       .run(grade, value, submissionId, r.cardId);
     updateCard(r.cardId, { gradingCompany: sub.company, grade, gradingStatus: "undecided" });
   }
+  const after = getSubmission(submissionId)!;
+  const complete = after.cards.length > 0 && after.cards.every((c) => c.returnedGrade);
   getDb()
-    .prepare("UPDATE submissions SET status = 'returned', returned_at = ?, updated_at = ? WHERE id = ?")
-    .run(when.toISOString(), new Date().toISOString(), submissionId);
+    .prepare("UPDATE submissions SET status = ?, returned_at = ?, updated_at = ? WHERE id = ?")
+    .run(complete ? "returned" : "sent", complete ? when.toISOString() : null, new Date().toISOString(), submissionId);
   return getSubmission(submissionId)!;
 }
 

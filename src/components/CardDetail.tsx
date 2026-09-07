@@ -113,7 +113,9 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
           quantity: Number(saleForm.quantity),
           unitPrice: Number(saleForm.unitPrice),
           fees: saleForm.fees.trim() === "" ? 0 : Number(saleForm.fees),
-          soldAt: saleForm.soldAt ? new Date(saleForm.soldAt).toISOString() : undefined,
+          // "2026-09-07" alone parses as UTC midnight, which reads as the day
+          // before in the Americas; the time suffix makes it local.
+          soldAt: saleForm.soldAt ? new Date(`${saleForm.soldAt}T12:00:00`).toISOString() : undefined,
           venue: saleForm.venue,
           notes: saleForm.notes,
         }),

@@ -34,12 +34,12 @@ function salesCsv(): string {
 
 /** GET — the collection as CSV, or `?type=sales` for the sales ledger. */
 export async function GET(request: Request) {
-  const date0 = new Date().toISOString().slice(0, 10);
+  const date = new Date().toISOString().slice(0, 10);
   if (new URL(request.url).searchParams.get("type") === "sales") {
     return new Response(salesCsv(), {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="collectcollect-sales-${date0}.csv"`,
+        "Content-Disposition": `attachment; filename="collectcollect-sales-${date}.csv"`,
       },
     });
   }
@@ -60,7 +60,6 @@ export async function GET(request: Request) {
         .join(","),
     );
   }
-  const date = new Date().toISOString().slice(0, 10);
   return new Response(lines.join("\r\n") + "\r\n", {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",

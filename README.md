@@ -91,6 +91,7 @@ src/app/                 Next.js App Router pages and API routes
   api/sales              GET all sales with realized totals; DELETE /api/sales/[id] undoes one
   api/submissions[/id]   Grading batches; PATCH adds/removes cards, marks sent, records grades
   api/alerts[/id]        GET the feed, POST marks all read, DELETE dismisses one
+  api/cards/intake       POST — atomic add-or-merge used by scan mode
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema
 src/lib/pricing/         Providers, matching heuristics, summary/valuation, refresh pipeline

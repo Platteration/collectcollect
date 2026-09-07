@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
 const VERDICT_ORDER = { prime: 0, insufficient: 1, wait: 2, skip: 3 } as const;
 
 export default function HomePage() {
-  const cards = listCards();
+  // Cards with no copies left were sold; they keep their history but are not holdings.
+  const cards = listCards().filter((c) => c.quantity > 0);
   const snapshots = allSnapshots();
   const settings = getSettings();
   const latest = latestSnapshotsByCard();

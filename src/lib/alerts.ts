@@ -59,13 +59,15 @@ export function deleteAlert(id: number): boolean {
  * Pure, so the thresholds can be tested without a database.
  */
 export function alertsForRefresh(
-  card: Pick<CardRecord, "id" | "name" | "grade" | "gradingCompany" | "identification">,
+  card: Pick<CardRecord, "id" | "name" | "grade" | "gradingCompany" | "identification" | "quantity">,
   previous: PriceSummary | null,
   next: PriceSummary,
   history: PriceSnapshot[],
   settings: Settings,
 ): NewAlert[] {
   const out: NewAlert[] = [];
+  // Nothing to say about a card the owner no longer holds.
+  if (card.quantity <= 0) return out;
 
   // A meaningful move in what this copy is worth.
   const before = previous?.yourCopyValue ?? null;

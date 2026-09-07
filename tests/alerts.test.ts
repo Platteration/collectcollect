@@ -19,7 +19,7 @@ const summary = (over: Partial<PriceSummary>): PriceSummary => ({
 });
 
 const card = (over: Partial<CardRecord> = {}) =>
-  ({ id: 1, name: "Charizard", grade: null, gradingCompany: null, identification: null, ...over }) as CardRecord;
+  ({ id: 1, name: "Charizard", grade: null, gradingCompany: null, identification: null, quantity: 1, ...over }) as CardRecord;
 
 const day = (n: number) => new Date(Date.UTC(2026, 0, n)).toISOString();
 const snap = (i: number, s: PriceSummary): PriceSnapshot => ({ id: i, cardId: 1, fetchedAt: day(i), summary: { ...s, fetchedAt: day(i) } });
@@ -34,6 +34,11 @@ describe("alertsForRefresh", () => {
     expect(down[0].title).toMatch(/down 30.0%/);
     const small = alertsForRefresh(card(), before, summary({ yourCopyValue: 105 }), [], DEFAULT_SETTINGS);
     expect(small.map((a) => a.kind)).not.toContain("price_move");
+  });
+
+  it("stays quiet about a card whose copies have all been sold", () => {
+    const fired = alertsForRefresh(card({ quantity: 0 }), summary({ yourCopyValue: 100 }), summary({ yourCopyValue: 400 }), [], DEFAULT_SETTINGS);
+    expect(fired).toEqual([]);
   });
 
   it("says nothing about a move when there is no earlier price", () => {

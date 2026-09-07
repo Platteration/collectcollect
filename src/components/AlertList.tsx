@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
@@ -23,6 +23,17 @@ export function AlertList({ alerts: initial, unreadIds }: { alerts: Alert[]; unr
   const router = useRouter();
   const [alerts, setAlerts] = useState(initial);
   const unread = new Set(unreadIds);
+  const marked = useRef(false);
+
+  // Seeing the list is the acknowledgement. Done once, then refresh so the
+  // layout's unread badge recomputes.
+  useEffect(() => {
+    if (marked.current || unreadIds.length === 0) return;
+    marked.current = true;
+    void api("/api/alerts", { method: "POST" })
+      .then(() => router.refresh())
+      .catch(() => undefined);
+  }, [unreadIds, router]);
 
   const dismiss = async (id: number) => {
     setAlerts((prev) => prev.filter((a) => a.id !== id));
