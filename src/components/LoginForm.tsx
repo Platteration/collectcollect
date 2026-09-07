@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 
 export function LoginForm({ next }: { next: string }) {
-  const router = useRouter();
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -16,9 +14,11 @@ export function LoginForm({ next }: { next: string }) {
     setError(null);
     try {
       await api("/api/auth", { method: "POST", body: JSON.stringify({ password }) });
-      // A relative path only, so a crafted ?next= cannot bounce to another site.
-      router.replace(next.startsWith("/") && !next.startsWith("//") ? next : "/");
-      router.refresh();
+      // A full navigation rather than a client-side one, so the request that
+      // renders the destination carries the session cookie and no cached
+      // router entry from before signing in is reused. A relative path only,
+      // so a crafted ?next= cannot bounce to another site.
+      window.location.assign(next.startsWith("/") && !next.startsWith("//") ? next : "/");
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);

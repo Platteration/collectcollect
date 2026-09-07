@@ -43,3 +43,8 @@ next-env.d.ts
 # app data (SQLite database + uploaded photos)
 /data/
 !.env.example
+
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/

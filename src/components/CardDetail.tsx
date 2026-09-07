@@ -204,6 +204,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             <div className="flex items-center gap-2">
               <span className="badge bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100">{GAMES[card.game]}</span>
               {card.sport && <span className="badge bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100">{card.sport}</span>}
+              {card.quantity === 0 && <span className="badge bg-neutral-900 text-white dark:bg-white dark:text-neutral-900">Sold</span>}
             </div>
             <h1 className="mt-1 font-display text-3xl font-semibold leading-tight">{card.name}</h1>
             <p className="text-sm text-neutral-500">

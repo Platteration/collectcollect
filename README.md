@@ -110,7 +110,24 @@ tests/                   Vitest suites (providers with mocked fetch, valuation, 
 ```bash
 npm run dev         # development server
 npm run build       # production build
-npm test            # unit tests
+npm test            # unit tests (vitest)
+npm run e2e         # end-to-end tests (playwright, boots its own servers)
+npm run e2e:ui      # the same suite in Playwright's UI mode
 npm run typecheck   # tsc (after generating Next route types)
 npm run lint
 ```
+
+## Testing
+
+Unit tests cover the pieces where a mistake is silent: price matching and the
+provider adapters (against recorded responses, never the network), the
+valuation and grading-outlook maths, the repository and its migrations, sales,
+submissions, alert rules, and the password gate.
+
+The end-to-end suite drives a real production build in Chromium against a
+throwaway data directory. Identification and price lookups are intercepted, so
+the tests never call Anthropic or a price API, but everything else, including
+the database, runs for real. It covers adding a card by hand, duplicate
+merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
+grading submission from draft to booked outcome, and the password gate. Both
+suites plus lint, typecheck and build run in CI on every push.
