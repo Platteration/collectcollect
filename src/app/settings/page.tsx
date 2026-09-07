@@ -1,6 +1,7 @@
 import { SettingsForm } from "@/components/SettingsForm";
 import { getSettings } from "@/lib/settings";
 import { backupSummary } from "@/lib/backup";
+import { RestoreForm } from "@/components/RestoreForm";
 import { providerStatuses } from "@/lib/status";
 import { GAMES } from "@/lib/types";
 
@@ -49,13 +50,13 @@ export default function SettingsPage() {
       <section className="card-surface p-4">
         <h2 className="font-semibold">Backup</h2>
         <p className="mt-1 text-sm text-neutral-500">
-          One zip holding a consistent copy of the database and every photo. To restore, stop the app and unpack it into
-          the data directory. {backup.photos} photo{backup.photos === 1 ? "" : "s"} ({mb(backup.photoBytes)}) plus a{" "}
-          {mb(backup.databaseBytes)} database.
+          One zip holding a consistent copy of the database and every photo: {backup.photos} photo
+          {backup.photos === 1 ? "" : "s"} ({mb(backup.photoBytes)}) plus a {mb(backup.databaseBytes)} database.
         </p>
         <a href="/api/backup" className="btn-secondary mt-3 inline-flex" download>
           Download backup
         </a>
+        <RestoreForm />
       </section>
 
       <SettingsForm initial={getSettings()} />

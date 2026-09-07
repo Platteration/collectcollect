@@ -131,3 +131,105 @@ function concat(parts: Uint8Array[], total: number): Uint8Array {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Reading
+// ---------------------------------------------------------------------------
+
+export interface ReadEntry {
+  name: string;
+  data: Uint8Array;
+}
+
+/** Total uncompressed bytes a caller is willing to extract, so a small archive cannot expand without bound. */
+export interface ReadLimits {
+  maxTotalBytes: number;
+  maxEntries: number;
+}
+
+/**
+ * Read a ZIP produced by this writer or by any ordinary tool: stored and
+ * deflated entries, read through the central directory rather than by scanning
+ * for local headers, so a truncated or doctored archive is rejected instead of
+ * partly trusted.
+ */
+export async function readZip(buffer: Uint8Array, limits: ReadLimits): Promise<ReadEntry[]> {
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  const eocd = findEndOfCentralDirectory(buffer, view);
+  const count = view.getUint16(eocd + 10, true);
+  if (count > limits.maxEntries) throw new Error(`Archive holds ${count} entries, more than the ${limits.maxEntries} allowed`);
+  let offset = view.getUint32(eocd + 16, true);
+
+  const entries: ReadEntry[] = [];
+  let total = 0;
+  for (let i = 0; i < count; i++) {
+    if (offset + 46 > buffer.length || view.getUint32(offset, true) !== 0x02014b50) {
+      throw new Error("The archive's directory is damaged");
+    }
+    const method = view.getUint16(offset + 10, true);
+    const crc = view.getUint32(offset + 16, true);
+    const compressedSize = view.getUint32(offset + 20, true);
+    const uncompressedSize = view.getUint32(offset + 24, true);
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const localOffset = view.getUint32(offset + 42, true);
+    const name = new TextDecoder().decode(buffer.subarray(offset + 46, offset + 46 + nameLength));
+    offset += 46 + nameLength + extraLength + commentLength;
+
+    // Directory markers carry no data.
+    if (name.endsWith("/")) continue;
+
+    total += uncompressedSize;
+    if (total > limits.maxTotalBytes) throw new Error("The archive expands to more than the allowed size");
+
+    if (localOffset + 30 > buffer.length || view.getUint32(localOffset, true) !== 0x04034b50) {
+      throw new Error(`Entry ${name} does not point at a valid header`);
+    }
+    // The local header's own name and extra lengths decide where data starts.
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localName = new TextDecoder().decode(buffer.subarray(localOffset + 30, localOffset + 30 + localNameLength));
+    // The directory is authoritative for the name, so a local header claiming a
+    // different one means the archive has been doctored.
+    if (localName !== name) throw new Error(`Entry ${name} disagrees with its own header`);
+    const dataStart = localOffset + 30 + localNameLength + view.getUint16(localOffset + 28, true);
+    const raw = buffer.subarray(dataStart, dataStart + compressedSize);
+    if (raw.length !== compressedSize) throw new Error(`Entry ${name} is truncated`);
+
+    let data: Uint8Array;
+    if (method === 0) {
+      data = raw;
+    } else if (method === 8) {
+      const { inflateRaw } = await import("node:zlib");
+      data = await new Promise<Uint8Array>((resolve, reject) =>
+        inflateRaw(raw, (err, out) => (err ? reject(new Error(`Entry ${name} could not be decompressed`)) : resolve(new Uint8Array(out)))),
+      );
+    } else {
+      throw new Error(`Entry ${name} uses an unsupported compression method`);
+    }
+    if (data.length !== uncompressedSize) throw new Error(`Entry ${name} is not the size its directory claims`);
+    if (crc32(data) !== crc) throw new Error(`Entry ${name} failed its checksum`);
+    entries.push({ name, data });
+  }
+  return entries;
+}
+
+function findEndOfCentralDirectory(buffer: Uint8Array, view: DataView): number {
+  // The record sits at the end, after a comment of up to 64 KB.
+  const earliest = Math.max(0, buffer.length - 22 - 0xffff);
+  for (let i = buffer.length - 22; i >= earliest; i--) {
+    if (view.getUint32(i, true) === 0x06054b50) return i;
+  }
+  throw new Error("That file is not a zip archive");
+}
+
+/**
+ * Names inside an archive are attacker-controlled: refuse anything absolute,
+ * containing a parent segment, or using a backslash that some tools treat as a
+ * separator, so extraction cannot escape its directory.
+ */
+export function isSafeEntryName(name: string): boolean {
+  if (!name || name.length > 255 || name.includes("\\") || name.includes("\0")) return false;
+  if (name.startsWith("/") || /^[a-zA-Z]:/.test(name)) return false;
+  return !name.split("/").some((part) => part === ".." || part === "." || part === "");
+}

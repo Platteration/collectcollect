@@ -70,7 +70,9 @@ Sports cards have no free price API; without a PriceCharting token you can still
 
 **Bulk actions.** Tick several cards on the Collection page to refresh their prices, set a grading plan, add them to a draft submission, or delete them in one go.
 
-**Backup.** Settings offers a single zip holding a consistent copy of the database (taken through SQLite's own backup, so it is safe while the app is running) and every photo. Restore by stopping the app and unpacking it into the data directory. The archive is written by a small built-in zip writer, checked in tests against the system `unzip` and Python's `zipfile`; it refuses rather than writing a truncated archive if a collection would exceed the format's 4 GB limit.
+**Backup and restore.** Settings offers a single zip holding a consistent copy of the database (taken through SQLite's own backup, so it is safe while the app is running) and every photo, and takes one back to restore it. A restore validates the whole archive and opens its database before touching anything, refuses names that would escape the data directory or files the app did not write, and moves the collection being replaced into a dated folder rather than deleting it, so restoring the wrong file can be undone by hand.
+
+The archive is written and read by a small built-in zip writer and reader rather than a dependency. Tests check the writer against the system `unzip` and Python's `zipfile`, read back archives made by the system `zip` in both stored and deflated form, and confirm that a corrupted payload, a doctored entry name, a path that escapes, an oversized expansion and a database that will not open are each refused with the collection left untouched.
 
 **Export.** The Collection page has an *Export CSV* button (also `GET /api/export`) with every card, its grade or condition, purchase price, and latest ungraded / PSA 10 / your-copy prices.
 
@@ -100,7 +102,7 @@ src/app/                 Next.js App Router pages and API routes
   api/submissions[/id]   Grading batches; PATCH adds/removes cards, marks sent, records grades
   api/alerts[/id]        GET the feed, POST marks all read, DELETE dismisses one
   api/cards/intake       POST — atomic add-or-merge used by scan mode
-  api/backup             GET — the database and photos as one zip
+  api/backup             GET — the database and photos as one zip; /restore puts one back
   api/import             POST — preview a CSV, or apply it with `apply: true`
   api/auth               POST signs in, DELETE signs out (only when APP_PASSWORD is set)
   api/settings           Multipliers + provider status

@@ -126,3 +126,127 @@ describe("backup archive", () => {
     fsm.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe("zip reader", () => {
+  it("reads archives written by the system zip tool, stored and deflated", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const fsm = await import("node:fs");
+    const osm = await import("node:os");
+    const pathm = await import("node:path");
+    const { readZip } = await import("@/lib/zip");
+    const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), "zip-read-"));
+    fsm.mkdirSync(pathm.join(dir, "src", "uploads"), { recursive: true });
+    const text = "collection\n".repeat(200);
+    fsm.writeFileSync(pathm.join(dir, "src", "manifest.json"), text);
+    fsm.writeFileSync(pathm.join(dir, "src", "uploads", "a.jpg"), Buffer.from([1, 2, 3, 4, 5]));
+
+    for (const [label, flag] of [["deflated", "-r"], ["stored", "-0r"]] as const) {
+      const file = pathm.join(dir, `${label}.zip`);
+      execFileSync("zip", [flag, file, "."], { cwd: pathm.join(dir, "src") });
+      const entries = await readZip(new Uint8Array(fsm.readFileSync(file)), { maxTotalBytes: 1e7, maxEntries: 100 });
+      const manifest = entries.find((e) => e.name.endsWith("manifest.json"));
+      expect(new TextDecoder().decode(manifest!.data), label).toBe(text);
+      expect(entries.find((e) => e.name.endsWith("a.jpg"))!.data).toEqual(new Uint8Array([1, 2, 3, 4, 5]));
+    }
+    fsm.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("refuses damaged, oversized and unrecognised files", async () => {
+    const { readZip } = await import("@/lib/zip");
+    const limits = { maxTotalBytes: 1e6, maxEntries: 10 };
+    await expect(readZip(new Uint8Array([1, 2, 3]), limits)).rejects.toThrow(/not a zip archive/);
+
+    const good = await (async () => {
+      const parts: Uint8Array[] = [];
+      const { zipStream } = await import("@/lib/zip");
+      const body = new TextEncoder().encode("x".repeat(100));
+      for await (const c of zipStream([{ name: "manifest.json", size: body.length, chunks: () => [body] }])) parts.push(c);
+      return Buffer.concat(parts);
+    })();
+    // Corrupting a payload byte trips the checksum. The header is 30 bytes and
+    // the name 13, so the payload starts at 43.
+    const corruptPayload = new Uint8Array(good);
+    corruptPayload[50] ^= 0xff;
+    await expect(readZip(corruptPayload, limits)).rejects.toThrow(/failed its checksum/);
+    // Renaming the entry in its local header, but not the directory, is caught.
+    const renamed = new Uint8Array(good);
+    renamed[31] = "X".charCodeAt(0);
+    await expect(readZip(renamed, limits)).rejects.toThrow(/disagrees with its own header/);
+    await expect(readZip(new Uint8Array(good), { maxTotalBytes: 10, maxEntries: 10 })).rejects.toThrow(/expands to more/);
+    await expect(readZip(new Uint8Array(good), { maxTotalBytes: 1e6, maxEntries: 0 })).rejects.toThrow(/more than the 0 allowed/);
+  });
+
+  it("rejects entry names that would escape the target directory", async () => {
+    const { isSafeEntryName } = await import("@/lib/zip");
+    expect(isSafeEntryName("uploads/a.jpg")).toBe(true);
+    expect(isSafeEntryName("collectcollect.db")).toBe(true);
+    for (const bad of ["../escape", "uploads/../../etc/passwd", "/etc/passwd", "C:\\windows", "uploads\\a.jpg", "", "./x", "a//b", "a\0b"]) {
+      expect(isSafeEntryName(bad), bad).toBe(false);
+    }
+  });
+});
+
+describe("restore", () => {
+  it("round-trips a collection and keeps the replaced one", async () => {
+    const fsm = await import("node:fs");
+    const osm = await import("node:os");
+    const pathm = await import("node:path");
+    const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), "cc-restore-"));
+    process.env.DATA_DIR = dir;
+
+    const { setDb, openDatabase, uploadsDir } = await import("@/lib/db");
+    const { createCard, listCards } = await import("@/lib/cards");
+    const { buildBackup, restoreBackup } = await import("@/lib/backup");
+    setDb(openDatabase(pathm.join(dir, "collectcollect.db")));
+    createCard({ game: "pokemon", name: "Original Charizard" });
+    fsm.writeFileSync(pathm.join(uploadsDir(), "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg"), Buffer.from([9, 9, 9]));
+
+    const { stream } = await buildBackup();
+    const parts: Uint8Array[] = [];
+    for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) parts.push(chunk);
+    const archive = Buffer.concat(parts);
+
+    // Change the collection, then put the backup back over it.
+    createCard({ game: "mtg", name: "Added After The Backup" });
+    expect(listCards()).toHaveLength(2);
+
+    const result = await restoreBackup(new Uint8Array(archive));
+    expect(result).toMatchObject({ photos: 1, cards: 1 });
+    expect(listCards().map((c) => c.name)).toEqual(["Original Charizard"]);
+    expect(fsm.existsSync(pathm.join(uploadsDir(), "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg"))).toBe(true);
+    // The replaced collection is kept rather than deleted.
+    expect(fsm.existsSync(pathm.join(result.movedAsideTo, "collectcollect.db"))).toBe(true);
+
+    delete process.env.DATA_DIR;
+    fsm.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("refuses an archive that is not one of its own backups", async () => {
+    const fsm = await import("node:fs");
+    const osm = await import("node:os");
+    const pathm = await import("node:path");
+    const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), "cc-restore-bad-"));
+    process.env.DATA_DIR = dir;
+    const { setDb, openDatabase } = await import("@/lib/db");
+    const { restoreBackup } = await import("@/lib/backup");
+    const { zipStream } = await import("@/lib/zip");
+    setDb(openDatabase(pathm.join(dir, "collectcollect.db")));
+
+    const build = async (name: string, body: Uint8Array) => {
+      const parts: Uint8Array[] = [];
+      for await (const c of zipStream([{ name, size: body.length, chunks: () => [body] }])) parts.push(c);
+      return new Uint8Array(Buffer.concat(parts));
+    };
+
+    await expect(restoreBackup(await build("notes.txt", new Uint8Array([1])))).rejects.toThrow(/did not write/);
+    await expect(restoreBackup(await build("manifest.json", new Uint8Array([1])))).rejects.toThrow(/no collectcollect.db/);
+    await expect(restoreBackup(await build("uploads/evil.sh", new Uint8Array([1])))).rejects.toThrow(/unexpected photo name/);
+    await expect(restoreBackup(await build("collectcollect.db", new TextEncoder().encode("not a database")))).rejects.toThrow(/could not be opened/);
+    // The collection is untouched after every refusal.
+    expect(fsm.existsSync(pathm.join(dir, "collectcollect.db"))).toBe(true);
+    expect(fsm.readdirSync(dir).filter((n) => n.startsWith("replaced-"))).toHaveLength(0);
+
+    delete process.env.DATA_DIR;
+    fsm.rmSync(dir, { recursive: true, force: true });
+  });
+});
