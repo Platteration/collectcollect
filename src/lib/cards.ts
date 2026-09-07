@@ -34,6 +34,7 @@ interface CardRow {
   notes: string | null;
   image_path: string | null;
   reference_image_url: string | null;
+  accent_color: string | null;
   external_ids: string;
   identification: string | null;
   manual_ungraded: number | null;
@@ -75,6 +76,7 @@ function rowToCard(row: CardRow): CardRecord {
     notes: row.notes,
     imagePath: row.image_path,
     referenceImageUrl: row.reference_image_url,
+    accentColor: row.accent_color,
     externalIds: parseJson(row.external_ids, {}),
     identification: parseJson<Identification | null>(row.identification, null),
     manualUngraded: row.manual_ungraded,
@@ -100,6 +102,11 @@ const httpUrl = (v: unknown): string | null => {
   } catch {
     return null;
   }
+};
+/** Only a #rrggbb literal may be stored, since it goes straight into a style attribute. */
+const hexColor = (v: unknown): string | null => {
+  const s = str(v);
+  return s && /^#[0-9a-f]{6}$/i.test(s) ? s.toLowerCase() : null;
 };
 const num = (v: unknown): number | null => {
   if (v === undefined || v === null || v === "") return null;
@@ -146,6 +153,7 @@ export function normalizeInput(input: CardInput): Required<
     notes: str(input.notes),
     imagePath: str(input.imagePath) && isValidUploadName(str(input.imagePath)!) ? str(input.imagePath) : null,
     referenceImageUrl: httpUrl(input.referenceImageUrl),
+    accentColor: hexColor(input.accentColor),
     externalIds: Object.fromEntries(
       Object.entries(input.externalIds ?? {}).filter(([, v]) => str(v)),
     ) as Record<string, string>,
@@ -163,11 +171,11 @@ export function createCard(input: CardInput): CardRecord {
     .prepare(
       `INSERT INTO cards (game, sport, name, set_name, set_code, card_number, year, rarity, variant,
         language, manufacturer, quantity, condition, grading_company, grade, cert_number, purchase_price,
-        notes, image_path, reference_image_url, external_ids, identification, manual_ungraded, manual_graded,
+        notes, image_path, reference_image_url, accent_color, external_ids, identification, manual_ungraded, manual_graded,
         grading_status, created_at, updated_at)
        VALUES (@game, @sport, @name, @setName, @setCode, @cardNumber, @year, @rarity, @variant,
         @language, @manufacturer, @quantity, @condition, @gradingCompany, @grade, @certNumber, @purchasePrice,
-        @notes, @imagePath, @referenceImageUrl, @externalIds, @identification, @manualUngraded, @manualGraded,
+        @notes, @imagePath, @referenceImageUrl, @accentColor, @externalIds, @identification, @manualUngraded, @manualGraded,
         @gradingStatus, @now, @now)`,
     )
     .run({
@@ -190,7 +198,7 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
         card_number=@cardNumber, year=@year, rarity=@rarity, variant=@variant, language=@language,
         manufacturer=@manufacturer, quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
         grade=@grade, cert_number=@certNumber, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
-        reference_image_url=@referenceImageUrl, external_ids=@externalIds, identification=@identification,
+        reference_image_url=@referenceImageUrl, accent_color=@accentColor, external_ids=@externalIds, identification=@identification,
         manual_ungraded=@manualUngraded, manual_graded=@manualGraded, grading_status=@gradingStatus, updated_at=@now
        WHERE id=@id`,
     )

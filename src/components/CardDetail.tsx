@@ -8,6 +8,7 @@ import { GAMES, GRADING_STATUSES, type CardRecord, type GradingStatus, type Pric
 import { gradingVerdict, isReadyToGrade, outlookSeries } from "@/lib/analytics";
 import { OutlookChart } from "./charts/OutlookChart";
 import { PortfolioChart } from "./charts/PortfolioChart";
+import { Slab } from "./Slab";
 import { VERDICT_STYLE } from "./verdict";
 import { CardForm, formFromCard, formToInput } from "./CardForm";
 import { PricePanel } from "./PricePanel";
@@ -127,12 +128,16 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
   return (
     <div className="grid grid-cols-1 gap-6 md:grid-cols-[300px_1fr]">
       <div className="space-y-3">
-        <div className="card-surface overflow-hidden">
-          {src ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={src} alt={card.name} className="w-full bg-neutral-100 object-contain dark:bg-neutral-800" />
+        <div
+          className={`card-surface overflow-hidden p-2 ${card.accentColor ? "accent-wash" : ""}`}
+          style={card.accentColor ? ({ "--accent": card.accentColor } as React.CSSProperties) : undefined}
+        >
+          {graded ? (
+            <Slab company={card.gradingCompany} grade={card.grade!} certNumber={card.certNumber}>
+              <CardArt src={src} name={card.name} />
+            </Slab>
           ) : (
-            <div className="flex aspect-[3/4] items-center justify-center text-sm text-neutral-400">No image</div>
+            <CardArt src={src} name={card.name} />
           )}
         </div>
         {card.imagePath && card.referenceImageUrl && (
@@ -152,7 +157,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
               <span className="badge bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100">{GAMES[card.game]}</span>
               {card.sport && <span className="badge bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100">{card.sport}</span>}
             </div>
-            <h1 className="mt-1 text-2xl font-semibold">{card.name}</h1>
+            <h1 className="mt-1 font-display text-3xl font-semibold leading-tight">{card.name}</h1>
             <p className="text-sm text-neutral-500">
               {[card.setName, card.setCode, card.cardNumber ? `#${card.cardNumber}` : null, card.year, card.rarity, card.variant]
                 .filter(Boolean)
@@ -345,4 +350,12 @@ function Field({ label, value }: { label: string; value: string }) {
       <dd>{value}</dd>
     </div>
   );
+}
+
+function CardArt({ src, name }: { src: string | null; name: string }) {
+  if (!src) {
+    return <div className="flex aspect-[3/4] items-center justify-center text-sm text-neutral-400">No image</div>;
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt={name} className="w-full rounded-[0.35rem] object-contain" />;
 }

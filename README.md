@@ -58,6 +58,10 @@ Sports cards have no free price API; without a PriceCharting token you can still
 
 Identification runs on Claude (`claude-opus-5` by default; override with `CLAUDE_MODEL`). Photos are downscaled server-side before being sent. The model returns a structured identification with a confidence score and alternative matches when the card is ambiguous; you can add a back or slab-label photo, give it a hint ("it's Japanese"), and re-identify. Without an Anthropic key the app still works for manual entry and pricing.
 
+## Look and feel
+
+Graded cards render in a slab frame with the grading company's label colour, so a PSA 9 in the grid reads as a slab rather than a photo. Each uploaded photo's average colour is sampled at save time and tints that card's tile and page. The hero value and card names use a condensed display face. Everything is theme-aware; dark mode is a designed palette, not an inverted one.
+
 ## Project layout
 
 ```

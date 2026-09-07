@@ -87,6 +87,8 @@ export interface CardRecord {
   notes: string | null;
   imagePath: string | null;
   referenceImageUrl: string | null;
+  /** Average colour of the card art (#rrggbb), used to tint its page. */
+  accentColor: string | null;
   externalIds: Record<string, string>;
   identification: Identification | null;
   manualUngraded: number | null;

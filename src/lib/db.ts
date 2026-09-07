@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS settings (
 /** Columns added after the first release; applied when missing so older databases keep working. */
 const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "cards", column: "grading_status", ddl: "ALTER TABLE cards ADD COLUMN grading_status TEXT NOT NULL DEFAULT 'undecided'" },
+  { table: "cards", column: "accent_color", ddl: "ALTER TABLE cards ADD COLUMN accent_color TEXT" },
 ];
 
 export function openDatabase(file: string): Database.Database {

@@ -127,7 +127,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="text-sm text-neutral-500">Collection value</div>
-            <div className="text-5xl font-semibold tracking-tight">{money(shown?.value ?? 0)}</div>
+            <div className="hero-figure reveal text-6xl">{money(shown?.value ?? 0)}</div>
             <div className={`mt-1 flex flex-wrap items-center gap-x-3 text-sm ${up ? "delta-up" : "delta-down"}`}>
               <span className="font-medium">
                 {up ? "▲" : "▼"} {money(Math.abs(delta.amount))}
@@ -183,7 +183,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
       <section>
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold">Grading outlook</h2>
+            <h2 className="font-display text-xl font-semibold uppercase tracking-wide">Grading outlook</h2>
             <p className="text-sm text-neutral-500">
               Your ungraded cards. The band is the range of outcomes if you graded today (mid grade to gem mint); the line is the raw value. The wider the band above the line, the more grading could add.
             </p>
@@ -286,7 +286,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
 
       {allocation.length > 1 && (
         <section>
-          <h2 className="mb-3 text-lg font-semibold">By game</h2>
+          <h2 className="mb-3 font-display text-xl font-semibold uppercase tracking-wide">By game</h2>
           <div className="card-surface p-4">
             <div className="flex h-3 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800" role="img" aria-label="Share of collection value by game">
               {allocation.map((a) => (
@@ -312,7 +312,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
       {holdings.length > 0 && (
         <section>
           <div className="mb-3 flex items-end justify-between">
-            <h2 className="text-lg font-semibold">Top holdings</h2>
+            <h2 className="font-display text-xl font-semibold uppercase tracking-wide">Top holdings</h2>
             <Link href="/collection" className="text-sm underline decoration-dotted">
               View all {cardCount} cards
             </Link>

@@ -21,6 +21,7 @@ interface Item {
   pricing: boolean;
   savedId: number | null;
   hint: string;
+  accentColor: string | null;
   /** Existing cards that look like this one; shown before saving. */
   duplicates: CardRecord[] | null;
 }
@@ -89,6 +90,7 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
         pricing: false,
         savedId: null,
         hint: "",
+        accentColor: null,
         duplicates: null,
       }));
       setItems((prev) => [...fresh, ...prev]);
@@ -97,9 +99,9 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
           const fd = new FormData();
           fd.append("files", images[i]);
           try {
-            const { uploads } = await api<{ uploads: { name: string }[] }>("/api/uploads", { method: "POST", body: fd });
+            const { uploads } = await api<{ uploads: Array<{ name: string; color: string | null }> }>("/api/uploads", { method: "POST", body: fd });
             const names = uploads.map((u) => u.name);
-            patch(item.key, { uploads: names, previews: names.map((n) => `/api/uploads/${n}`) });
+            patch(item.key, { uploads: names, previews: names.map((n) => `/api/uploads/${n}`), accentColor: uploads[0]?.color ?? null });
             if (claudeConfigured) await identify(item.key, names, "");
             else patch(item.key, { status: "review", error: "Claude is not configured, so enter the details by hand." });
           } catch (e) {
@@ -125,6 +127,7 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
         pricing: false,
         savedId: null,
         hint: "",
+        accentColor: null,
         duplicates: null,
       },
       ...prev,
@@ -174,7 +177,7 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
       }
       const { card } = await api<{ card: CardRecord }>("/api/cards", {
         method: "POST",
-        body: JSON.stringify({ ...input, imagePath: item.uploads[0] ?? null, identification: item.identification }),
+        body: JSON.stringify({ ...input, imagePath: item.uploads[0] ?? null, accentColor: item.accentColor, identification: item.identification }),
       });
       // Store a first price snapshot so the collection view has a value right away.
       api(`/api/cards/${card.id}/price`, { method: "POST" }).catch(() => undefined);
