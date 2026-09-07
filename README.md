@@ -66,6 +66,10 @@ Sports cards have no free price API; without a PriceCharting token you can still
 
 **Appraisal report.** `/report` is a printable valuation of everything you own, with photos, identifications, grades, per-copy and total values, and the source and date behind each price. Print to PDF from the browser. Set the owner name in Settings.
 
+**Bulk actions.** Tick several cards on the Collection page to refresh their prices, set a grading plan, add them to a draft submission, or delete them in one go.
+
+**Backup.** Settings offers a single zip holding a consistent copy of the database (taken through SQLite's own backup, so it is safe while the app is running) and every photo. Restore by stopping the app and unpacking it into the data directory. The archive is written by a small built-in zip writer, checked in tests against the system `unzip` and Python's `zipfile`; it refuses rather than writing a truncated archive if a collection would exceed the format's 4 GB limit.
+
 **Export.** The Collection page has an *Export CSV* button (also `GET /api/export`) with every card, its grade or condition, purchase price, and latest ungraded / PSA 10 / your-copy prices.
 
 ## Card identification
@@ -94,12 +98,18 @@ src/app/                 Next.js App Router pages and API routes
   api/submissions[/id]   Grading batches; PATCH adds/removes cards, marks sent, records grades
   api/alerts[/id]        GET the feed, POST marks all read, DELETE dismisses one
   api/cards/intake       POST — atomic add-or-merge used by scan mode
+  api/backup             GET — the database and photos as one zip
+  api/auth               POST signs in, DELETE signs out (only when APP_PASSWORD is set)
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema
 src/lib/pricing/         Providers, matching heuristics, summary/valuation, refresh pipeline
 src/lib/analytics.ts     Portfolio value series, grading outlook (min/max/upside) and timing verdict
 src/lib/scheduler.ts     Hourly auto-refresh of stale prices (started from src/instrumentation.ts)
 src/components/charts/   Inline-SVG portfolio line and min/max outlook band charts
+src/lib/zip.ts           Dependency-free streaming zip writer used by the backup
+src/lib/auth.ts          Optional password gate (Web Crypto, shared by proxy and routes)
+src/proxy.ts             Guards every route when APP_PASSWORD is set
+e2e/                     Playwright suite driving a real build
 src/lib/cards.ts, db.ts  SQLite (better-sqlite3) repository and schema
 src/components/          UI (add flow, card detail, price panel, settings)
 tests/                   Vitest suites (providers with mocked fetch, valuation, repository)

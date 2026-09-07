@@ -3,11 +3,11 @@ import { imageSrc, money } from "@/lib/format";
 import { GAMES, type CardRecord, type PriceSummary } from "@/lib/types";
 import { Slab } from "./Slab";
 
-export function CardTile({ card, price }: { card: CardRecord; price: PriceSummary | null }) {
+export function CardTile({ card, price, selected = false }: { card: CardRecord; price: PriceSummary | null; selected?: boolean }) {
   const src = imageSrc(card);
   const graded = Boolean(card.grade);
   return (
-    <Link href={`/cards/${card.id}`} className={`card-surface group flex flex-col overflow-hidden hover:shadow-md ${card.quantity === 0 ? "opacity-60" : ""}`}>
+    <Link href={`/cards/${card.id}`} className={`card-surface group flex flex-col overflow-hidden hover:shadow-md ${card.quantity === 0 ? "opacity-60" : ""} ${selected ? "ring-2 ring-amber-500" : ""}`}>
       <div
         className={`relative aspect-[3/4] bg-neutral-100 p-2 dark:bg-neutral-800 ${card.accentColor ? "accent-wash" : ""}`}
         style={card.accentColor ? ({ "--accent": card.accentColor } as React.CSSProperties) : undefined}
@@ -19,7 +19,7 @@ export function CardTile({ card, price }: { card: CardRecord; price: PriceSummar
         ) : (
           <Art src={src} name={card.name} className="h-full w-full object-contain" />
         )}
-        <span className="badge absolute left-2 top-2 bg-black/70 text-white">{GAMES[card.game]}</span>
+        <span className="badge absolute left-11 top-2 bg-black/70 text-white">{GAMES[card.game]}</span>
         {card.quantity > 1 && (
           <span className="badge absolute right-2 top-2 bg-amber-600 text-white">×{card.quantity}</span>
         )}

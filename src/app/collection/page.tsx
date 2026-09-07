@@ -2,7 +2,8 @@ import Link from "next/link";
 import { latestSnapshotsByCard, listCards } from "@/lib/cards";
 import { money } from "@/lib/format";
 import { GAMES, GAME_IDS, type Game } from "@/lib/types";
-import { CardTile } from "@/components/CardTile";
+import { CollectionGrid } from "@/components/CollectionGrid";
+import { listSubmissions } from "@/lib/submissions";
 
 export const dynamic = "force-dynamic";
 
@@ -79,11 +80,12 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
           </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {cards.map((c) => (
-            <CardTile key={c.id} card={c} price={prices.get(c.id)?.summary ?? null} />
-          ))}
-        </div>
+        <CollectionGrid
+          cards={cards.map((c) => ({ card: c, price: prices.get(c.id)?.summary ?? null }))}
+          drafts={listSubmissions()
+            .filter((s) => s.status === "draft")
+            .map((s) => ({ id: s.id, name: s.name, company: s.company }))}
+        />
       )}
     </div>
   );

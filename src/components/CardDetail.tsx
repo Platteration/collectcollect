@@ -328,6 +328,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
                 <button
                   key={k}
                   type="button"
+                  aria-pressed={card.gradingStatus === k}
                   onClick={() => setStatus(k)}
                   className={`rounded-full px-3 py-1 text-xs font-medium ${card.gradingStatus === k ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900" : "bg-black/5 text-neutral-700 hover:bg-black/10 dark:bg-white/10 dark:text-neutral-200"}`}
                 >
