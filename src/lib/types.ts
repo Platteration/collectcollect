@@ -55,6 +55,16 @@ export interface Identification {
     cert_number: string | null;
   };
   condition_notes: string | null;
+  /** Condition read from the photo; absent on identifications made before this existed. */
+  condition_assessment?: {
+    centering: string | null;
+    corners: string | null;
+    edges: string | null;
+    surface: string | null;
+    estimated_grade_low: string | null;
+    estimated_grade_high: string | null;
+    caveat: string | null;
+  } | null;
   confidence: number;
   alternatives: Array<{
     name: string;

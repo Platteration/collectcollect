@@ -103,6 +103,9 @@ export interface Outlook {
   downside: number;
   /** Whether min/max came from real graded sales (true) or from the multiplier estimates. */
   fromRealData: boolean;
+  /** Value at the grade the photo suggests this copy would receive, when one was estimated. */
+  likely: number | null;
+  likelyLabel: string | null;
 }
 
 const MAX_KEYS = ["PSA 10", "BGS 10", "CGC 10", "SGC 10"];
@@ -114,15 +117,31 @@ function pick(summary: PriceSummary, keys: string[]): { value: number; label: st
   return null;
 }
 
+/** Price at a specific expected grade, from real data first then the multiplier estimates. */
+function atGrade(summary: PriceSummary, grade: string | null | undefined): { value: number; label: string } | null {
+  const g = (grade ?? "").trim().replace(/[^0-9.]/g, "");
+  if (!g) return null;
+  for (const key of [`PSA ${g}`, `Grade ${g}`, `CGC ${g}`, `BGS ${g}`]) {
+    if (summary.graded[key]) return { value: summary.graded[key], label: key };
+  }
+  for (const key of [`PSA ${g}`, `Grade ${g}`, `CGC ${g}`, `BGS ${g}`]) {
+    if (summary.estimatedGraded[key]) return { value: summary.estimatedGraded[key], label: key };
+  }
+  return null;
+}
+
 /** Outlook from one snapshot; null when the card has no usable ungraded price. */
-export function gradingOutlook(summary: PriceSummary, settings: Settings): Outlook | null {
+export function gradingOutlook(summary: PriceSummary, settings: Settings, expectedGrade?: string | null): Outlook | null {
   const raw = summary.yourCopyValue ?? summary.ungraded;
   if (!raw) return null;
   const max = pick(summary, MAX_KEYS);
   if (!max) return null;
   const min = pick(summary, MIN_KEYS) ?? { value: raw, label: "Ungraded", real: false };
   const fee = settings.gradingFee;
+  const likely = atGrade(summary, expectedGrade);
   return {
+    likely: likely?.value ?? null,
+    likelyLabel: likely?.label ?? null,
     raw,
     min: min.value,
     minLabel: min.label,
@@ -139,11 +158,11 @@ export interface OutlookPoint extends Outlook {
   t: string;
 }
 
-export function outlookSeries(snapshots: PriceSnapshot[], settings: Settings): OutlookPoint[] {
+export function outlookSeries(snapshots: PriceSnapshot[], settings: Settings, expectedGrade?: string | null): OutlookPoint[] {
   return [...snapshots]
     .sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt) || a.id - b.id)
     .flatMap((s) => {
-      const o = gradingOutlook(s.summary, settings);
+      const o = gradingOutlook(s.summary, settings, expectedGrade);
       return o ? [{ t: s.fetchedAt, ...o }] : [];
     });
 }

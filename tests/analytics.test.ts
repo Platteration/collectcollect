@@ -74,6 +74,18 @@ describe("gradingOutlook", () => {
   });
 });
 
+describe("expected grade from the photo", () => {
+  it("prices the copy at the grade the photo suggests, real data before estimates", async () => {
+    const { gradingOutlook } = await import("@/lib/analytics");
+    const s = summary({ ungraded: 100, yourCopyValue: 100, graded: { "PSA 9": 210 }, estimatedGraded: { "PSA 10": 300, "PSA 8": 100 } });
+    expect(gradingOutlook(s, DEFAULT_SETTINGS, "9")).toMatchObject({ likely: 210, likelyLabel: "PSA 9" });
+    expect(gradingOutlook(s, DEFAULT_SETTINGS, "10")).toMatchObject({ likely: 300, likelyLabel: "PSA 10" });
+    expect(gradingOutlook(s, DEFAULT_SETTINGS, "6")).toMatchObject({ likely: null, likelyLabel: null });
+    expect(gradingOutlook(s, DEFAULT_SETTINGS, null)).toMatchObject({ likely: null });
+    expect(gradingOutlook(s, DEFAULT_SETTINGS, "grade 9")).toMatchObject({ likely: 210 });
+  });
+});
+
 describe("gradingVerdict", () => {
   const series = (upsides: number[]) =>
     outlookSeries(

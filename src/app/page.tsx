@@ -30,7 +30,8 @@ export default function HomePage() {
   const opportunities: Opportunity[] = cards
     .filter((c) => !c.grade)
     .map((c) => {
-      const series = outlookSeries(byCard.get(c.id) ?? [], settings);
+      const assess = c.identification?.condition_assessment ?? null;
+      const series = outlookSeries(byCard.get(c.id) ?? [], settings, assess?.estimated_grade_high ?? assess?.estimated_grade_low ?? null);
       const verdict = gradingVerdict(series);
       return {
         id: c.id,

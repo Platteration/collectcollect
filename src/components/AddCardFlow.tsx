@@ -26,6 +26,17 @@ interface Item {
   duplicates: CardRecord[] | null;
 }
 
+/** Map an estimated 10-point grade onto the raw condition scale the app stores. */
+function conditionFromGrade(grade: string | null | undefined): string {
+  const n = Number((grade ?? "").replace(/[^0-9.]/g, ""));
+  if (!Number.isFinite(n) || n <= 0) return "NM";
+  if (n >= 8) return "NM";
+  if (n >= 6) return "LP";
+  if (n >= 4) return "MP";
+  if (n >= 2) return "HP";
+  return "DMG";
+}
+
 let counter = 0;
 const nextKey = () => `item-${Date.now()}-${counter++}`;
 
@@ -46,6 +57,7 @@ function formFromIdentification(id: Identification): CardFormState {
     grade: id.grading.grade ?? "",
     certNumber: id.grading.cert_number ?? "",
     notes: id.condition_notes ? `Condition notes: ${id.condition_notes}` : "",
+    condition: conditionFromGrade(id.condition_assessment?.estimated_grade_low),
   };
 }
 
@@ -366,6 +378,18 @@ function ItemCard({
                   {Math.round(id.confidence * 100)}% confident
                 </span>
               </div>
+              {id.condition_assessment?.estimated_grade_low && (
+                <div className="mt-2 text-xs text-neutral-600 dark:text-neutral-300">
+                  Photo suggests a raw grade around{" "}
+                  <strong>
+                    {id.condition_assessment.estimated_grade_low}
+                    {id.condition_assessment.estimated_grade_high && id.condition_assessment.estimated_grade_high !== id.condition_assessment.estimated_grade_low
+                      ? `–${id.condition_assessment.estimated_grade_high}`
+                      : ""}
+                  </strong>
+                  {id.condition_assessment.caveat ? ` · ${id.condition_assessment.caveat}` : ""}
+                </div>
+              )}
               {id.alternatives.length > 0 && (
                 <div className="mt-2 space-y-1">
                   <div className="text-xs text-neutral-500">Could also be:</div>

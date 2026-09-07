@@ -44,6 +44,8 @@ Every refresh stores a snapshot, so a card's detail page shows how its price has
 
 **Keeping history flowing.** The server re-prices any card whose latest snapshot is older than `AUTO_REFRESH_HOURS` (default 24, set 0 to disable) once an hour while it is running, and the Portfolio page has a *Refresh all prices* button. The min/max curves need a few refreshes before the timing verdict says anything stronger than "not enough history yet".
 
+**Condition from the photo.** Identification also reports centering, corners, edges and surface, plus a conservative-to-optimistic estimate of the 10-point grade a raw card would likely receive and a caveat naming what the photo could not show. That estimate seeds the card's raw condition when you save it, and prices a "likely outcome" line in the grading outlook. It is a first look, not a prediction of what a grader would return.
+
 **Grading plans.** Each raw card carries a plan: undecided, plan to grade, at the grader, or keeping raw. A card is flagged **Ready** when the timing verdict is good and its upside after the fee clears the thresholds in Settings (default $40 and 50% of the raw price). The portfolio page counts ready cards, totals their upside, and lets you filter by plan; when a card comes back from the grader, edit it and enter the grade.
 
 **Duplicates.** Saving a card that matches one you already have (same game and name, with the same number or set) offers to add it as another copy instead.

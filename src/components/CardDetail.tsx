@@ -164,7 +164,9 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
     .map((s) => ({ t: s.fetchedAt, value: s.summary.yourCopyValue!, ungraded: s.summary.ungraded ?? 0, priced: 1 }));
   const valueChange = valuePoints.length > 1 ? valuePoints[valuePoints.length - 1].value - valuePoints[0].value : 0;
   const ret = card.purchasePrice !== null && latest?.yourCopyValue ? latest.yourCopyValue - card.purchasePrice : null;
-  const outlook = graded ? [] : outlookSeries(history, settings);
+  const assessment = card.identification?.condition_assessment ?? null;
+  const expectedGrade = assessment?.estimated_grade_high ?? assessment?.estimated_grade_low ?? null;
+  const outlook = graded ? [] : outlookSeries(history, settings, expectedGrade);
   const verdict = gradingVerdict(outlook);
   const lastOutlook = outlook[outlook.length - 1];
   const ready = isReadyToGrade(outlook, verdict, settings);
@@ -343,11 +345,56 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
                 <Field label="Upside after fee" value={money(lastOutlook.upside)} />
               </div>
             )}
+            {lastOutlook?.likely !== null && lastOutlook?.likelyLabel && (
+              <p className="mb-3 rounded-md bg-neutral-100 px-3 py-2 text-sm dark:bg-neutral-800">
+                The photo suggests this copy would grade around{" "}
+                <strong>
+                  {assessment?.estimated_grade_low && assessment.estimated_grade_low !== assessment.estimated_grade_high
+                    ? `${assessment.estimated_grade_low}–${assessment.estimated_grade_high}`
+                    : (expectedGrade ?? "")}
+                </strong>
+                , worth <strong>{money(lastOutlook.likely)}</strong> at {lastOutlook.likelyLabel} against {money(lastOutlook.raw)} raw
+                {lastOutlook.likely - lastOutlook.raw - lastOutlook.fee > 0
+                  ? `, so about ${money(lastOutlook.likely - lastOutlook.raw - lastOutlook.fee)} after the fee.`
+                  : `, which does not cover the ${money(lastOutlook.fee)} fee.`}
+              </p>
+            )}
             <OutlookChart series={outlook} />
             <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">{verdict.detail}</p>
             {lastOutlook && !lastOutlook.fromRealData && (
               <p className="mt-1 text-xs text-neutral-500">Graded outcomes are estimates from your Settings multipliers; a PriceCharting token replaces them with real graded sales.</p>
             )}
+          </section>
+        )}
+
+        {assessment && (assessment.centering || assessment.corners || assessment.edges || assessment.surface || assessment.estimated_grade_high) && (
+          <section className="card-surface p-4">
+            <h3 className="font-semibold">Condition from the photo</h3>
+            {assessment.estimated_grade_low && (
+              <p className="mt-1 text-sm">
+                Estimated grade{" "}
+                <strong>
+                  {assessment.estimated_grade_low}
+                  {assessment.estimated_grade_high && assessment.estimated_grade_high !== assessment.estimated_grade_low ? `–${assessment.estimated_grade_high}` : ""}
+                </strong>{" "}
+                on the 10-point scale.
+              </p>
+            )}
+            <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+              {([["Centering", assessment.centering], ["Corners", assessment.corners], ["Edges", assessment.edges], ["Surface", assessment.surface]] as const).map(
+                ([label, value]) =>
+                  value && (
+                    <div key={label}>
+                      <dt className="text-xs uppercase tracking-wide text-neutral-500">{label}</dt>
+                      <dd>{value}</dd>
+                    </div>
+                  ),
+              )}
+            </dl>
+            <p className="mt-3 text-xs text-neutral-500">
+              {assessment.caveat ? `${assessment.caveat.replace(/[.;,]?\s*$/, "")}. ` : ""}A photo is not a grading service; treat this as a first
+              look, not a prediction of what a grader would return.
+            </p>
           </section>
         )}
 

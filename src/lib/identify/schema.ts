@@ -33,6 +33,26 @@ export const IdentificationSchema = z.object({
     .string()
     .nullable()
     .describe("Visible wear: whitening, scratches, creases, centering issues. Null if the card looks clean or condition is not assessable."),
+  condition_assessment: z
+    .object({
+      centering: z.string().nullable().describe("Centering as seen, e.g. '60/40 left-right, 55/45 top-bottom', or a plain description. Null if not assessable from the photo."),
+      corners: z.string().nullable().describe("Corner sharpness and any whitening or fraying. Null if not assessable."),
+      edges: z.string().nullable().describe("Edge wear, chipping or whitening. Null if not assessable."),
+      surface: z.string().nullable().describe("Surface: scratches, print lines, dents, gloss, creases. Null if not assessable."),
+      estimated_grade_low: z
+        .string()
+        .nullable()
+        .describe("Conservative end of the 10-point grade this raw card would likely receive, as a number like '7' or '8.5'. Null for a card already in a slab, or when the photo cannot support a guess."),
+      estimated_grade_high: z
+        .string()
+        .nullable()
+        .describe("Optimistic end of that range, e.g. '9'. Null under the same conditions as estimated_grade_low."),
+      caveat: z
+        .string()
+        .nullable()
+        .describe("Why the estimate could be wrong: glare, low resolution, only the front visible, sleeve or toploader in the way. Null if the photo is clear."),
+    })
+    .describe("Condition read from the photo. Every field may be null; only judge what is actually visible."),
   confidence: z
     .number()
     .min(0)
