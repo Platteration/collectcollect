@@ -50,6 +50,8 @@ Every refresh stores a snapshot, so a card's detail page shows how its price has
 
 **Submissions.** `/submissions` groups raw cards into a grading batch. Adding a card captures what it is worth raw and what gem mint would fetch at that moment; marking the batch sent moves those cards to "at the grader"; entering the grades that came back applies each grade to its card, so it is valued as a graded copy from then on, and books the batch's net outcome (value returned less raw value in less fees). Per-card lines show which cards paid for themselves and which did not, which is the feedback that makes the timing verdict worth trusting.
 
+**Scan mode.** `/scan` is for working through a binder or a stack. Shoot one card at a time with the camera, or drop in a batch of photos. Each shot runs through upload, identification and saving on its own, two at a time, and a card that matches something you already own is merged as an extra copy automatically. Anything the model was less than 80% sure of, or that matches more than one card you own, is set aside for review instead of being saved unattended.
+
 **Duplicates.** Saving a card that matches one you already have (same game and name, with the same number or set) offers to add it as another copy instead.
 
 **Grading outlook math.** *max* is the PSA 10 price (real if a source reports it, otherwise ungraded × the PSA 10 multiplier); *min* is the PSA 8 / Grade 8 price on the same basis, falling back to the raw price; *upside* is max − raw − grading fee (Settings). "Good time to grade" means today's upside is within 10% of the highest upside in the card's history and positive.
@@ -77,6 +79,7 @@ Graded cards render in a slab frame with the grading company's label colour, so 
 ```
 src/app/                 Next.js App Router pages and API routes
   /                      Portfolio: hero value, change, value chart, grading outlook
+  /scan                  Batch capture with automatic identify, merge and save
   /collection            Card grid with search and game filter
   api/identify           POST — identify a card from uploaded photos
   api/uploads            POST photos / GET stored photo
