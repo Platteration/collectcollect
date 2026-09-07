@@ -53,10 +53,38 @@ describe("import preview", () => {
     expect(rows.map((r) => r.input?.condition)).toEqual(["LP", "MP", "DMG", "NM"]);
   });
 
-  it("treats a grade column holding a condition as a condition, not a grade", () => {
-    const [graded, raw] = previewImport(["name,game,grading company,grade", "A,pokemon,PSA,9", "B,pokemon,,NM"].join("\n")).rows;
-    expect(graded.input).toMatchObject({ gradingCompany: "PSA", grade: "9" });
-    expect(raw.input).toMatchObject({ gradingCompany: null, grade: null, condition: "NM" });
+  it("reads grades however they are written, and only falls back to condition without a number", () => {
+    const rows = previewImport(
+      [
+        "name,game,grading company,grade",
+        "A,pokemon,PSA,9",
+        "B,pokemon,,NM",
+        "C,pokemon,,PSA 10",
+        "D,pokemon,,Gem Mint 9.5",
+        "E,pokemon,BGS,9.5",
+      ].join("\n"),
+    ).rows;
+    expect(rows[0].input).toMatchObject({ gradingCompany: "PSA", grade: "9" });
+    expect(rows[1].input).toMatchObject({ gradingCompany: null, grade: null, condition: "NM" });
+    // A company embedded in the grade cell is recognised rather than dropped.
+    expect(rows[2].input).toMatchObject({ gradingCompany: "PSA", grade: "10" });
+    // No company named, but the grade is still a grade, not a condition.
+    expect(rows[3].input).toMatchObject({ gradingCompany: null, grade: "9.5" });
+    expect(rows[4].input).toMatchObject({ gradingCompany: "BGS", grade: "9.5" });
+  });
+
+  it("warns rather than silently calling an unknown condition near mint", () => {
+    const [known, unknown] = previewImport(["name,game,condition", "A,pokemon,LP", "B,pokemon,Played"].join("\n")).rows;
+    expect(known).toMatchObject({ warning: null });
+    expect(known.input?.condition).toBe("LP");
+    expect(unknown.input?.condition).toBe("NM");
+    expect(unknown.warning).toMatch(/"Played" was not recognised/);
+  });
+
+  it("reports the line each row came from, even after blank ones", () => {
+    const preview = previewImport(["name,game", "A,pokemon", "", "", "B,pokemon", ",pokemon"].join("\n"));
+    expect(preview.rows.map((r) => r.line)).toEqual([2, 5, 6]);
+    expect(preview.rows[2].problem).toMatch(/No card name/);
   });
 
   it("explains rows it cannot use", () => {

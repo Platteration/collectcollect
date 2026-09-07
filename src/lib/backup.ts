@@ -2,7 +2,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { dataDir, getDb, openDatabase, setDb, uploadsDir } from "./db";
+import { dataDir, databaseFile, getDb, lockDatabase, openDatabase, setDb, unlockDatabase, uploadsDir } from "./db";
 import { isValidUploadName } from "./images";
 import { isSafeEntryName, readZip, zipStream, type ZipEntry } from "./zip";
 
@@ -70,6 +70,11 @@ export async function buildBackup(): Promise<{ filename: string; stream: Readabl
   return { filename: `collectcollect-backup-${new Date().toISOString().slice(0, 10)}.zip`, stream };
 }
 
+/** The live connection without going through the restore lock. */
+function getDbUnlocked() {
+  return (globalThis as unknown as { __collectcollectDb?: { close: () => void } }).__collectcollectDb;
+}
+
 async function* fileChunks(file: string): AsyncGenerator<Uint8Array> {
   const handle = await fsp.open(file, "r");
   try {
@@ -104,8 +109,14 @@ export function backupSummary(): { photos: number; databaseBytes: number; photoB
 // Restore
 // ---------------------------------------------------------------------------
 
-/** Ceilings for an uploaded archive, so a small file cannot expand without bound. */
-const RESTORE_LIMITS = { maxTotalBytes: 4 * 1024 * 1024 * 1024, maxEntries: 100_000 };
+/**
+ * Ceilings for an uploaded archive. A restore holds the archive and each
+ * entry in memory, so this is deliberately well below what the writer can
+ * produce; a collection larger than this is restored by unpacking the zip into
+ * the data directory by hand.
+ */
+export const RESTORE_MAX_BYTES = 512 * 1024 * 1024;
+const RESTORE_LIMITS = { maxTotalBytes: RESTORE_MAX_BYTES, maxEntries: 100_000 };
 
 export interface RestoreResult {
   photos: number;
@@ -156,32 +167,53 @@ export async function restoreBackup(archive: Uint8Array): Promise<RestoreResult>
   }
 
   const root = dataDir();
+  const live = databaseFile();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const aside = path.join(root, `replaced-${stamp}`);
-  await fsp.mkdir(aside, { recursive: true });
 
-  // Close the live connection so the file can be replaced on every platform.
+  if (!lockDatabase("A restore is in progress; try again in a moment.")) {
+    await fsp.rm(staging, { recursive: true, force: true });
+    throw new Error("A restore is already in progress");
+  }
+
   try {
-    getDb().close();
-  } catch {
-    /* already closed */
-  }
-  setDb(undefined);
+    await fsp.mkdir(aside, { recursive: true });
+    // Close the live connection so the file can be replaced on every platform.
+    try {
+      getDbUnlocked()?.close();
+    } catch {
+      /* already closed */
+    }
+    setDb(undefined);
 
-  for (const name of await fsp.readdir(root)) {
-    if (name === "uploads" || name.startsWith("replaced-")) continue;
-    if (name.startsWith("collectcollect.db")) await fsp.rename(path.join(root, name), path.join(aside, name));
-  }
-  const uploads = uploadsDir();
-  const oldUploads = path.join(aside, "uploads");
-  await fsp.mkdir(oldUploads, { recursive: true });
-  for (const name of await fsp.readdir(uploads)) {
-    await fsp.rename(path.join(uploads, name), path.join(oldUploads, name));
-  }
+    // The database may live outside the data directory when DATABASE_FILE is
+    // set, so move the live file and its write-ahead siblings by their own path.
+    const liveDir = path.dirname(live);
+    const liveName = path.basename(live);
+    for (const name of await fsp.readdir(liveDir)) {
+      if (name === liveName || name.startsWith(`${liveName}-`)) {
+        await fsp.rename(path.join(liveDir, name), path.join(aside, name));
+      }
+    }
+    const uploads = uploadsDir();
+    const oldUploads = path.join(aside, "uploads");
+    await fsp.mkdir(oldUploads, { recursive: true });
+    for (const name of await fsp.readdir(uploads)) {
+      await fsp.rename(path.join(uploads, name), path.join(oldUploads, name));
+    }
 
-  await fsp.copyFile(stagedDb, path.join(root, "collectcollect.db"));
-  for (const photo of photos) await fsp.writeFile(path.join(uploads, photo.name), photo.data);
-  await fsp.rm(staging, { recursive: true, force: true });
+    await fsp.copyFile(stagedDb, live);
+    for (const photo of photos) await fsp.writeFile(path.join(uploads, photo.name), photo.data);
+  } catch (e) {
+    // Past this point the old collection is already in `aside`, so say so
+    // plainly rather than leaving someone to guess where it went.
+    throw new Error(
+      `The restore failed part way through: ${e instanceof Error ? e.message : e}. Your previous collection was moved to ${aside} and can be put back by hand.`,
+    );
+  } finally {
+    await fsp.rm(staging, { recursive: true, force: true });
+    unlockDatabase();
+  }
 
   // Reopen through the normal path, which also applies any pending migrations.
   getDb();

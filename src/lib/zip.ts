@@ -180,8 +180,12 @@ export async function readZip(buffer: Uint8Array, limits: ReadLimits): Promise<R
     // Directory markers carry no data.
     if (name.endsWith("/")) continue;
 
+    // Budget against the declared size first, then hand the remaining budget to
+    // the decompressor, so a small archive claiming to be small cannot inflate
+    // to gigabytes in memory before anyone checks.
     total += uncompressedSize;
     if (total > limits.maxTotalBytes) throw new Error("The archive expands to more than the allowed size");
+    const remaining = limits.maxTotalBytes - (total - uncompressedSize);
 
     if (localOffset + 30 > buffer.length || view.getUint32(localOffset, true) !== 0x04034b50) {
       throw new Error(`Entry ${name} does not point at a valid header`);
@@ -202,7 +206,9 @@ export async function readZip(buffer: Uint8Array, limits: ReadLimits): Promise<R
     } else if (method === 8) {
       const { inflateRaw } = await import("node:zlib");
       data = await new Promise<Uint8Array>((resolve, reject) =>
-        inflateRaw(raw, (err, out) => (err ? reject(new Error(`Entry ${name} could not be decompressed`)) : resolve(new Uint8Array(out)))),
+        inflateRaw(raw, { maxOutputLength: Math.min(remaining, uncompressedSize) + 1 }, (err, out) =>
+          err ? reject(new Error(`Entry ${name} could not be decompressed within its declared size`)) : resolve(new Uint8Array(out)),
+        ),
       );
     } else {
       throw new Error(`Entry ${name} uses an unsupported compression method`);

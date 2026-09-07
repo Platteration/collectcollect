@@ -19,7 +19,7 @@ const COLUMNS: Record<string, string[]> = {
   language: ["language", "lang"],
   manufacturer: ["manufacturer", "brand", "publisher"],
   quantity: ["quantity", "qty", "count", "copies"],
-  condition: ["condition", "cond", "grade condition"],
+  condition: ["condition", "cond", "gradecondition"],
   gradingCompany: ["gradingcompany", "grader", "gradingservice", "company"],
   grade: ["grade", "cardgrade"],
   certNumber: ["certnumber", "cert", "certification", "serial"],
@@ -68,9 +68,12 @@ const CONDITION_ALIASES: Record<string, Condition> = {
 };
 
 export interface ImportRow {
+  /** Line in the original file, counting the header as line 1. */
   line: number;
   input: CardInput | null;
   problem: string | null;
+  /** Something was assumed rather than read; the row still imports. */
+  warning: string | null;
 }
 
 export interface ImportPreview {
@@ -84,10 +87,14 @@ export interface ImportPreview {
 
 /** Read a CSV into card inputs, reporting what could not be understood. */
 export function previewImport(text: string, defaults: { game?: Game } = {}): ImportPreview {
-  const table = parseCsv(text).filter((r) => r.some((cell) => cell.trim() !== ""));
-  if (table.length === 0) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0 };
+  // Keep each row's position in the file so reported line numbers still point
+  // at the right place after blank rows are dropped.
+  const numbered = parseCsv(text)
+    .map((cells, i) => ({ cells, line: i + 1 }))
+    .filter((r) => r.cells.some((cell) => cell.trim() !== ""));
+  if (numbered.length === 0) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0 };
 
-  const headers = table[0].map((h) => h.trim());
+  const headers = numbered[0].cells.map((h) => h.trim());
   const keys = headers.map(headerKey);
   const mapping: Record<string, string> = {};
   const index: Record<string, number> = {};
@@ -103,25 +110,32 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
 
   const value = (row: string[], field: string): string => (index[field] === undefined ? "" : (row[index[field]] ?? "").trim());
 
-  const rows: ImportRow[] = table.slice(1).map((row, i) => {
-    const line = i + 2; // 1-based, and the header is line 1
+  const rows: ImportRow[] = numbered.slice(1).map(({ cells: row, line }) => {
     const name = value(row, "name");
-    if (!name) return { line, input: null, problem: "No card name in this row" };
+    if (!name) return { line, input: null, problem: "No card name in this row", warning: null };
 
     const rawGame = headerKey(value(row, "game"));
     const game = GAME_ALIASES[rawGame] ?? defaults.game ?? (rawGame && rawGame in GAMES ? (rawGame as Game) : null);
     if (!game) {
-      return { line, input: null, problem: value(row, "game") ? `Unknown game "${value(row, "game")}"` : "No game column; choose one to apply to every row" };
+      return {
+        line,
+        input: null,
+        problem: value(row, "game") ? `Unknown game "${value(row, "game")}"` : "No game column; choose one to apply to every row",
+        warning: null,
+      };
     }
 
     const quantity = Number(value(row, "quantity") || "1");
-    const grade = value(row, "grade");
-    // A grade column sometimes holds a raw condition instead, e.g. "NM".
-    const gradeIsCondition = grade !== "" && !/^\d/.test(grade);
-    const conditionText = headerKey(value(row, "condition") || (gradeIsCondition ? grade : ""));
+    const { grade, company, asCondition } = readGrade(value(row, "grade"), value(row, "gradingCompany"));
+    const conditionText = headerKey(value(row, "condition") || asCondition || "");
+    const condition = CONDITION_ALIASES[conditionText] ?? (conditionText.toUpperCase() in CONDITIONS ? (conditionText.toUpperCase() as Condition) : null);
+
+    const warnings: string[] = [];
+    if (conditionText && !condition) warnings.push(`Condition "${value(row, "condition") || asCondition}" was not recognised, so Near Mint was assumed`);
 
     return {
       line,
+      warning: warnings.length ? warnings.join("; ") : null,
       input: {
         game,
         name,
@@ -135,9 +149,9 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
         language: value(row, "language") || null,
         manufacturer: value(row, "manufacturer") || null,
         quantity: Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1,
-        condition: CONDITION_ALIASES[conditionText] ?? (conditionText.toUpperCase() in CONDITIONS ? (conditionText.toUpperCase() as Condition) : "NM"),
-        gradingCompany: gradeIsCondition ? null : value(row, "gradingCompany") || null,
-        grade: gradeIsCondition ? null : grade || null,
+        condition: condition ?? "NM",
+        gradingCompany: company,
+        grade,
         certNumber: value(row, "certNumber") || null,
         purchasePrice: parseMoney(value(row, "purchasePrice")),
         notes: value(row, "notes") || null,
@@ -173,6 +187,21 @@ export function applyImport(preview: ImportPreview): ImportResult {
     }
   }
   return result;
+}
+
+const COMPANY_PATTERN = /\b(PSA|BGS|BVG|CGC|SGC|TAG|HGA|ACE)\b/i;
+
+/**
+ * A grade cell holds anything from "10" to "PSA 10" to "Gem Mint 10" to "NM".
+ * Pull out a number wherever there is one, and only treat the cell as a raw
+ * condition when it has no number at all.
+ */
+function readGrade(cell: string, companyColumn: string): { grade: string | null; company: string | null; asCondition: string } {
+  const text = cell.trim();
+  const company = companyColumn.trim() || COMPANY_PATTERN.exec(text)?.[1].toUpperCase() || null;
+  const number = /(\d+(?:\.\d+)?)/.exec(text)?.[1];
+  if (!number) return { grade: null, company: companyColumn.trim() || null, asCondition: text };
+  return { grade: number, company, asCondition: "" };
 }
 
 function parseMoney(text: string): number | null {

@@ -158,7 +158,10 @@ export function ImportForm() {
                     <td className="py-1 pr-3 text-neutral-500">{row.line}</td>
                     {row.input ? (
                       <>
-                        <td className="py-1 pr-3 font-medium">{row.input.name}</td>
+                        <td className="py-1 pr-3 font-medium">
+                          {row.input.name}
+                          {row.warning && <div className="text-xs font-normal text-amber-700 dark:text-amber-300">{row.warning}</div>}
+                        </td>
                         <td className="py-1 pr-3 text-neutral-500">
                           {[GAMES[row.input.game], row.input.setName, row.input.cardNumber ? `#${row.input.cardNumber}` : null, row.input.year]
                             .filter(Boolean)

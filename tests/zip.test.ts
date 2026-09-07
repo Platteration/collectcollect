@@ -176,6 +176,23 @@ describe("zip reader", () => {
     await expect(readZip(new Uint8Array(good), { maxTotalBytes: 1e6, maxEntries: 0 })).rejects.toThrow(/more than the 0 allowed/);
   });
 
+  it("refuses to inflate past the allowed size, not merely to notice afterwards", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const fsm = await import("node:fs");
+    const osm = await import("node:os");
+    const pathm = await import("node:path");
+    const { readZip } = await import("@/lib/zip");
+    const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), "zip-bomb-"));
+    // 32 MB of zeroes compresses to a few tens of kilobytes.
+    fsm.writeFileSync(pathm.join(dir, "big.bin"), Buffer.alloc(32 * 1024 * 1024));
+    const file = pathm.join(dir, "bomb.zip");
+    execFileSync("zip", ["-q", "-9", file, "big.bin"], { cwd: dir });
+    const archive = new Uint8Array(fsm.readFileSync(file));
+    expect(archive.length).toBeLessThan(1024 * 1024);
+    await expect(readZip(archive, { maxTotalBytes: 1_000_000, maxEntries: 10 })).rejects.toThrow(/expands to more/);
+    fsm.rmSync(dir, { recursive: true, force: true });
+  });
+
   it("rejects entry names that would escape the target directory", async () => {
     const { isSafeEntryName } = await import("@/lib/zip");
     expect(isSafeEntryName("uploads/a.jpg")).toBe(true);
@@ -218,6 +235,38 @@ describe("restore", () => {
     expect(fsm.existsSync(pathm.join(result.movedAsideTo, "collectcollect.db"))).toBe(true);
 
     delete process.env.DATA_DIR;
+    fsm.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("replaces the database the app is actually using, not just the default path", async () => {
+    const fsm = await import("node:fs");
+    const osm = await import("node:os");
+    const pathm = await import("node:path");
+    const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), "cc-dbfile-"));
+    const custom = pathm.join(dir, "elsewhere.db");
+    process.env.DATA_DIR = dir;
+    process.env.DATABASE_FILE = custom;
+
+    const { setDb, openDatabase } = await import("@/lib/db");
+    const { createCard, listCards } = await import("@/lib/cards");
+    const { buildBackup, restoreBackup } = await import("@/lib/backup");
+    setDb(openDatabase(custom));
+    createCard({ game: "pokemon", name: "In The Custom File" });
+
+    const { stream } = await buildBackup();
+    const parts: Uint8Array[] = [];
+    for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) parts.push(chunk);
+
+    createCard({ game: "mtg", name: "Added Later" });
+    expect(listCards()).toHaveLength(2);
+
+    await restoreBackup(new Uint8Array(Buffer.concat(parts)));
+    // The live database really was replaced, so the later card is gone.
+    expect(listCards().map((c) => c.name)).toEqual(["In The Custom File"]);
+
+    delete process.env.DATABASE_FILE;
+    delete process.env.DATA_DIR;
+    setDb(undefined);
     fsm.rmSync(dir, { recursive: true, force: true });
   });
 

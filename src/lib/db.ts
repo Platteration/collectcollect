@@ -126,15 +126,37 @@ export function openDatabase(file: string): Database.Database {
 }
 
 // Next.js reloads server modules in development; keep one connection per process.
-const globalForDb = globalThis as unknown as { __collectcollectDb?: Database.Database };
+const globalForDb = globalThis as unknown as { __collectcollectDb?: Database.Database; __collectcollectLocked?: string };
+
+/** The file the live connection uses, which a restore has to replace. */
+export function databaseFile(): string {
+  return process.env.DATABASE_FILE ?? path.join(dataDir(), "collectcollect.db");
+}
 
 export function getDb(): Database.Database {
+  if (globalForDb.__collectcollectLocked) {
+    // A restore is swapping the file out; opening it now would either cache a
+    // connection to a file about to be replaced or create an empty one.
+    throw new Error(globalForDb.__collectcollectLocked);
+  }
   if (!globalForDb.__collectcollectDb) {
-    const file =
-      process.env.DATABASE_FILE ?? path.join(dataDir(), "collectcollect.db");
-    globalForDb.__collectcollectDb = openDatabase(file);
+    globalForDb.__collectcollectDb = openDatabase(databaseFile());
   }
   return globalForDb.__collectcollectDb;
+}
+
+/**
+ * Refuse new connections while the database file is being replaced. Returns
+ * false when a swap is already under way, so two restores cannot interleave.
+ */
+export function lockDatabase(reason: string): boolean {
+  if (globalForDb.__collectcollectLocked) return false;
+  globalForDb.__collectcollectLocked = reason;
+  return true;
+}
+
+export function unlockDatabase(): void {
+  globalForDb.__collectcollectLocked = undefined;
 }
 
 /** Swap the shared connection (used by tests to point at an in-memory database). */
