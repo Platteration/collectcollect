@@ -48,6 +48,8 @@ Every refresh stores a snapshot, so a card's detail page shows how its price has
 
 **Grading plans.** Each raw card carries a plan: undecided, plan to grade, at the grader, or keeping raw. A card is flagged **Ready** when the timing verdict is good and its upside after the fee clears the thresholds in Settings (default $40 and 50% of the raw price). The portfolio page counts ready cards, totals their upside, and lets you filter by plan; when a card comes back from the grader, edit it and enter the grade.
 
+**Submissions.** `/submissions` groups raw cards into a grading batch. Adding a card captures what it is worth raw and what gem mint would fetch at that moment; marking the batch sent moves those cards to "at the grader"; entering the grades that came back applies each grade to its card, so it is valued as a graded copy from then on, and books the batch's net outcome (value returned less raw value in less fees). Per-card lines show which cards paid for themselves and which did not, which is the feedback that makes the timing verdict worth trusting.
+
 **Duplicates.** Saving a card that matches one you already have (same game and name, with the same number or set) offers to add it as another copy instead.
 
 **Grading outlook math.** *max* is the PSA 10 price (real if a source reports it, otherwise ungraded × the PSA 10 multiplier); *min* is the PSA 8 / Grade 8 price on the same basis, falling back to the raw price; *upside* is max − raw − grading fee (Settings). "Good time to grade" means today's upside is within 10% of the highest upside in the card's history and positive.
@@ -82,6 +84,7 @@ src/app/                 Next.js App Router pages and API routes
   api/export             GET — the collection as CSV (?type=sales for the sales ledger)
   api/cards/[id]/sales   GET / POST — a card's sales; POST removes the copies sold
   api/sales              GET all sales with realized totals; DELETE /api/sales/[id] undoes one
+  api/submissions[/id]   Grading batches; PATCH adds/removes cards, marks sent, records grades
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema
 src/lib/pricing/         Providers, matching heuristics, summary/valuation, refresh pipeline

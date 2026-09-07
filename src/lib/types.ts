@@ -182,6 +182,46 @@ export interface SaleWithCard extends Sale {
   game: Game;
 }
 
+export type SubmissionStatus = "draft" | "sent" | "returned";
+
+export const SUBMISSION_STATUSES: Record<SubmissionStatus, string> = {
+  draft: "Draft",
+  sent: "Sent",
+  returned: "Returned",
+};
+
+export interface SubmissionCard {
+  cardId: number;
+  /** Value of the raw copy when it was added to the submission. */
+  rawValue: number | null;
+  /** What a gem-mint outcome was worth at that moment. */
+  expectedValue: number | null;
+  returnedGrade: string | null;
+  /** Value at the returned grade, captured when the grades were entered. */
+  returnedValue: number | null;
+  name: string;
+  detail: string;
+  game: Game;
+  imagePath: string | null;
+  referenceImageUrl: string | null;
+}
+
+export interface Submission {
+  id: number;
+  name: string;
+  company: string;
+  serviceLevel: string | null;
+  feePerCard: number;
+  shipping: number;
+  status: SubmissionStatus;
+  sentAt: string | null;
+  returnedAt: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  cards: SubmissionCard[];
+}
+
 export interface PriceSnapshot {
   id: number;
   cardId: number;

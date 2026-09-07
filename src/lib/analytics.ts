@@ -311,6 +311,53 @@ export function realizedReturn(sales: Array<{ quantity: number; unitPrice: numbe
   };
 }
 
+export interface SubmissionOutcome {
+  cards: number;
+  /** Grading fees plus shipping. */
+  cost: number;
+  /** Raw value of the cards when they went in. */
+  rawValue: number;
+  /** Value at the grades that came back, for the cards graded so far. */
+  returnedValue: number;
+  /** Best case at the time of sending, for a batch still out. */
+  expectedValue: number;
+  graded: number;
+  /** returnedValue − rawValue − cost, once grades are in. */
+  gain: number | null;
+}
+
+/** What a grading submission actually earned, or stands to earn while it is out. */
+export function submissionOutcome(sub: {
+  feePerCard: number;
+  shipping: number;
+  status: string;
+  cards: Array<{ rawValue: number | null; expectedValue: number | null; returnedValue: number | null; returnedGrade: string | null }>;
+}): SubmissionOutcome {
+  const cards = sub.cards.length;
+  const cost = round2(sub.feePerCard * cards + sub.shipping);
+  let rawValue = 0;
+  let returnedValue = 0;
+  let expectedValue = 0;
+  let graded = 0;
+  for (const c of sub.cards) {
+    rawValue += c.rawValue ?? 0;
+    expectedValue += c.expectedValue ?? c.rawValue ?? 0;
+    if (c.returnedGrade) {
+      graded++;
+      returnedValue += c.returnedValue ?? c.rawValue ?? 0;
+    }
+  }
+  return {
+    cards,
+    cost,
+    rawValue: round2(rawValue),
+    returnedValue: round2(returnedValue),
+    expectedValue: round2(expectedValue),
+    graded,
+    gain: graded > 0 ? round2(returnedValue - rawValue - cost) : null,
+  };
+}
+
 export interface Allocation {
   game: CardRecord["game"];
   value: number;

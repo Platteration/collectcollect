@@ -66,6 +66,31 @@ CREATE TABLE IF NOT EXISTS sales (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sales_card ON sales(card_id, sold_at DESC);
+CREATE TABLE IF NOT EXISTS submissions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  company TEXT NOT NULL,
+  service_level TEXT,
+  fee_per_card REAL NOT NULL DEFAULT 0,
+  shipping REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'draft',
+  sent_at TEXT,
+  returned_at TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS submission_cards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+  card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  raw_value REAL,
+  expected_value REAL,
+  returned_grade TEXT,
+  returned_value REAL,
+  UNIQUE (submission_id, card_id)
+);
+CREATE INDEX IF NOT EXISTS idx_submission_cards ON submission_cards(submission_id);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

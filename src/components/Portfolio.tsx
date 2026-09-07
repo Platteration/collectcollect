@@ -231,6 +231,11 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
                 <div className="text-xs text-neutral-500">
                   threshold {money(settings.readyMinUpside)} and {settings.readyMinUpsidePercent}% over raw
                 </div>
+                {ready.length > 0 && (
+                  <Link href="/submissions" className="text-xs underline decoration-dotted">
+                    Start a submission
+                  </Link>
+                )}
               </div>
             </div>
             <div className="flex flex-wrap gap-1">
