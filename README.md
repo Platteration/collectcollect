@@ -58,6 +58,8 @@ Sports cards have no free price API; without a PriceCharting token you can still
 
 **Sales.** Log a sale from a card's page: copies leave the collection, the cost basis is captured at sale time so later edits don't rewrite history, and the portfolio shows realized gains (proceeds less fees less cost) beside unrealized ones. A sale can be undone, which puts the copies back. Fully sold cards stay in the collection greyed out with a "Sold" badge so their history survives.
 
+**Alerts.** Every price refresh checks whether anything is worth mentioning: a card crossing your ready-to-grade thresholds, a move bigger than the percentage set in Settings, or real graded sales appearing where the app previously had only a multiplier estimate. Alerts collect in `/alerts` with an unread count in the nav. Setting a webhook URL POSTs each alert as JSON so you can forward them to email, push or chat through a service you control; a failing webhook is logged and never breaks a refresh.
+
 **Appraisal report.** `/report` is a printable valuation of everything you own, with photos, identifications, grades, per-copy and total values, and the source and date behind each price. Print to PDF from the browser. Set the owner name in Settings.
 
 **Export.** The Collection page has an *Export CSV* button (also `GET /api/export`) with every card, its grade or condition, purchase price, and latest ungraded / PSA 10 / your-copy prices.
@@ -85,6 +87,7 @@ src/app/                 Next.js App Router pages and API routes
   api/cards/[id]/sales   GET / POST — a card's sales; POST removes the copies sold
   api/sales              GET all sales with realized totals; DELETE /api/sales/[id] undoes one
   api/submissions[/id]   Grading batches; PATCH adds/removes cards, marks sent, records grades
+  api/alerts[/id]        GET the feed, POST marks all read, DELETE dismisses one
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema
 src/lib/pricing/         Providers, matching heuristics, summary/valuation, refresh pipeline

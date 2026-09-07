@@ -13,6 +13,8 @@ export function SettingsForm({ initial }: { initial: Settings }) {
   const [readyMinUpside, setReadyMinUpside] = useState(String(initial.readyMinUpside));
   const [readyMinUpsidePercent, setReadyMinUpsidePercent] = useState(String(initial.readyMinUpsidePercent));
   const [ownerName, setOwnerName] = useState(initial.ownerName);
+  const [alertMovePercent, setAlertMovePercent] = useState(String(initial.alertMovePercent));
+  const [alertWebhookUrl, setAlertWebhookUrl] = useState(initial.alertWebhookUrl);
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -23,7 +25,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
       const gradeMultipliers: Record<string, number> = {};
       for (const [k, v] of grades) if (k.trim() && v.trim() !== "") gradeMultipliers[k.trim()] = Number(v);
       const conditionMultipliers = Object.fromEntries(Object.entries(conditions).map(([k, v]) => [k, Number(v)])) as Settings["conditionMultipliers"];
-      await api("/api/settings", { method: "PUT", body: JSON.stringify({ gradeMultipliers, conditionMultipliers, gradingFee: Number(gradingFee), readyMinUpside: Number(readyMinUpside), readyMinUpsidePercent: Number(readyMinUpsidePercent), ownerName }) });
+      await api("/api/settings", { method: "PUT", body: JSON.stringify({ gradeMultipliers, conditionMultipliers, gradingFee: Number(gradingFee), readyMinUpside: Number(readyMinUpside), readyMinUpsidePercent: Number(readyMinUpsidePercent), ownerName, alertMovePercent: Number(alertMovePercent), alertWebhookUrl }) });
       setStatus("Saved. New multipliers apply the next time a card's prices are refreshed.");
     } catch (e) {
       setStatus((e as Error).message);
@@ -90,6 +92,24 @@ export function SettingsForm({ initial }: { initial: Settings }) {
           </label>
         </div>
         <p className="mt-2 text-xs text-neutral-500">A raw card is flagged “Ready” when the timing looks right and its upside after the fee clears both thresholds.</p>
+      </section>
+
+      <section className="card-surface p-4">
+        <h2 className="font-semibold">Alerts</h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          Raised when prices refresh. The webhook is optional: every alert is POSTed to it as JSON, so you can forward
+          them to email, push or chat through a service you control.
+        </p>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <label className="block">
+            <span className="label">Alert on moves of at least (%)</span>
+            <input className="input" value={alertMovePercent} onChange={(e) => setAlertMovePercent(e.target.value)} inputMode="decimal" />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="label">Webhook URL (optional)</span>
+            <input className="input" value={alertWebhookUrl} onChange={(e) => setAlertWebhookUrl(e.target.value)} placeholder="https://…" />
+          </label>
+        </div>
       </section>
 
       <section className="card-surface p-4">

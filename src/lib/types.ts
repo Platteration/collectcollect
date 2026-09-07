@@ -182,6 +182,18 @@ export interface SaleWithCard extends Sale {
   game: Game;
 }
 
+export type AlertKind = "ready_to_grade" | "price_move" | "graded_data";
+
+export interface Alert {
+  id: number;
+  kind: AlertKind;
+  cardId: number | null;
+  title: string;
+  body: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
 export type SubmissionStatus = "draft" | "sent" | "returned";
 
 export const SUBMISSION_STATUSES: Record<SubmissionStatus, string> = {
@@ -241,6 +253,10 @@ export interface Settings {
   readyMinUpsidePercent: number;
   /** Shown on the printable appraisal report. */
   ownerName: string;
+  /** Raise a price-move alert when a card's value changes by at least this much between refreshes. */
+  alertMovePercent: number;
+  /** Optional URL that new alerts are POSTed to, for wiring up email or push. */
+  alertWebhookUrl: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -269,6 +285,8 @@ export const DEFAULT_SETTINGS: Settings = {
   readyMinUpside: 40,
   readyMinUpsidePercent: 50,
   ownerName: "",
+  alertMovePercent: 15,
+  alertWebhookUrl: "",
 };
 
 export interface ProviderStatus {

@@ -1,4 +1,5 @@
-import { addSnapshot, getCard, latestSnapshot, latestSnapshotsByCard, listCards, updateCard } from "../cards";
+import { addSnapshot, getCard, latestSnapshot, latestSnapshotsByCard, listCards, listSnapshots, updateCard } from "../cards";
+import { alertsForRefresh, createAlert, deliver } from "../alerts";
 import { getSettings } from "../settings";
 import type { CardRecord, PriceSnapshot, PriceSummary } from "../types";
 import { learnFromQuotes, priceCard } from "./index";
@@ -15,7 +16,10 @@ function hasPrice(s: PriceSummary): boolean {
  * not erase a card's last known value from the portfolio history.
  */
 export async function refreshCard(card: CardRecord): Promise<{ card: CardRecord; snapshot: PriceSnapshot; stored: boolean }> {
-  const summary = await priceCard(card, getSettings());
+  const settings = getSettings();
+  const history = listSnapshots(card.id, 200);
+  const previous = history[0]?.summary ?? null;
+  const summary = await priceCard(card, settings);
   const failed = !hasPrice(summary) && latestSnapshot(card.id) !== null;
   const snapshot: PriceSnapshot = failed
     ? { id: 0, cardId: card.id, fetchedAt: summary.fetchedAt, summary }
@@ -25,6 +29,14 @@ export async function refreshCard(card: CardRecord): Promise<{ card: CardRecord;
   if (Object.keys(learned.externalIds).length) patch.externalIds = { ...card.externalIds, ...learned.externalIds };
   if (!card.referenceImageUrl && learned.referenceImageUrl) patch.referenceImageUrl = learned.referenceImageUrl;
   const updated = Object.keys(patch).length ? (updateCard(card.id, patch) ?? card) : card;
+
+  if (!failed) {
+    // History is newest-first from listSnapshots; alertsForRefresh wants it oldest-first.
+    const ordered = [...history].reverse();
+    for (const a of alertsForRefresh(updated, previous, summary, ordered, settings)) {
+      void deliver(createAlert(a), settings);
+    }
+  }
   return { card: updated, snapshot, stored: !failed };
 }
 

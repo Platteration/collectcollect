@@ -22,6 +22,8 @@ export function getSettings(): Settings {
       readyMinUpside: Number.isFinite(stored.readyMinUpside) ? Number(stored.readyMinUpside) : DEFAULT_SETTINGS.readyMinUpside,
       readyMinUpsidePercent: Number.isFinite(stored.readyMinUpsidePercent) ? Number(stored.readyMinUpsidePercent) : DEFAULT_SETTINGS.readyMinUpsidePercent,
       ownerName: typeof stored.ownerName === "string" ? stored.ownerName.slice(0, 120) : DEFAULT_SETTINGS.ownerName,
+      alertMovePercent: Number.isFinite(stored.alertMovePercent) ? Number(stored.alertMovePercent) : DEFAULT_SETTINGS.alertMovePercent,
+      alertWebhookUrl: typeof stored.alertWebhookUrl === "string" ? stored.alertWebhookUrl : DEFAULT_SETTINGS.alertWebhookUrl,
     };
   } catch {
     return structuredClone(DEFAULT_SETTINGS);
@@ -39,6 +41,8 @@ export function saveSettings(settings: Settings): Settings {
     readyMinUpside: nonNegative(settings.readyMinUpside, DEFAULT_SETTINGS.readyMinUpside),
     readyMinUpsidePercent: nonNegative(settings.readyMinUpsidePercent, DEFAULT_SETTINGS.readyMinUpsidePercent),
     ownerName: (typeof settings.ownerName === "string" ? settings.ownerName : "").trim().slice(0, 120),
+    alertMovePercent: nonNegative(settings.alertMovePercent, DEFAULT_SETTINGS.alertMovePercent),
+    alertWebhookUrl: webhookUrl(settings.alertWebhookUrl),
   };
   getDb()
     .prepare(
@@ -46,6 +50,18 @@ export function saveSettings(settings: Settings): Settings {
     )
     .run(KEY, JSON.stringify(clean));
   return clean;
+}
+
+/** Only http(s) URLs are accepted; the server POSTs to this on its own. */
+function webhookUrl(v: unknown): string {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (!s) return "";
+  try {
+    const u = new URL(s);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.toString() : "";
+  } catch {
+    return "";
+  }
 }
 
 function nonNegative(v: unknown, fallback: number): number {

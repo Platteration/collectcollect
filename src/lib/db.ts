@@ -91,6 +91,16 @@ CREATE TABLE IF NOT EXISTS submission_cards (
   UNIQUE (submission_id, card_id)
 );
 CREATE INDEX IF NOT EXISTS idx_submission_cards ON submission_cards(submission_id);
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  card_id INTEGER REFERENCES cards(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  read_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_unread ON alerts(read_at, created_at DESC);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

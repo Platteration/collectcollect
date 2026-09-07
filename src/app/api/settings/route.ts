@@ -23,6 +23,8 @@ export async function PUT(request: Request) {
     readyMinUpside: body.readyMinUpside ?? current.readyMinUpside,
     readyMinUpsidePercent: body.readyMinUpsidePercent ?? current.readyMinUpsidePercent,
     ownerName: body.ownerName ?? current.ownerName,
+    alertMovePercent: body.alertMovePercent ?? current.alertMovePercent,
+    alertWebhookUrl: body.alertWebhookUrl ?? current.alertWebhookUrl,
   });
   return NextResponse.json({ settings, providers: providerStatuses() });
 }

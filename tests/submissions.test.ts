@@ -3,7 +3,7 @@ import { openDatabase, setDb } from "@/lib/db";
 import { addSnapshot, createCard, getCard } from "@/lib/cards";
 import { addCard, createSubmission, deleteSubmission, getSubmission, listSubmissions, markSent, recordReturn, removeCard } from "@/lib/submissions";
 import { submissionOutcome } from "@/lib/analytics";
-import { DEFAULT_SETTINGS, type PriceSummary } from "@/lib/types";
+import { type PriceSummary } from "@/lib/types";
 
 const summary = (over: Partial<PriceSummary>): PriceSummary => ({
   currency: "USD",

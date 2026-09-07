@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Barlow_Condensed } from "next/font/google";
 import Link from "next/link";
+import { unreadCount } from "@/lib/alerts";
 import "./globals.css";
 
 // Condensed display face for the hero value, card names and headings.
@@ -16,6 +17,7 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
+  const unread = unreadCount();
   return (
     <html lang="en" className={`${display.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
@@ -34,6 +36,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               </Link>
               <Link href="/submissions" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
                 Grading
+              </Link>
+              <Link href="/alerts" className="relative rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
+                Alerts
+                {unread > 0 && (
+                  <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-amber-600 px-1.5 text-xs font-medium text-white">
+                    {unread > 99 ? "99+" : unread}
+                  </span>
+                )}
               </Link>
               <Link href="/report" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
                 Report

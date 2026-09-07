@@ -88,7 +88,7 @@ describe("settings", () => {
 
   it("returns defaults and merges saved values", () => {
     expect(getSettings()).toEqual(DEFAULT_SETTINGS);
-    saveSettings({ gradeMultipliers: { "PSA 10": 4, " bad": -1 as number, "": 2 }, conditionMultipliers: { ...DEFAULT_SETTINGS.conditionMultipliers, LP: 0.9 }, gradingFee: 30, readyMinUpside: 10, readyMinUpsidePercent: 20, ownerName: "  Ada  " });
+    saveSettings({ gradeMultipliers: { "PSA 10": 4, " bad": -1 as number, "": 2 }, conditionMultipliers: { ...DEFAULT_SETTINGS.conditionMultipliers, LP: 0.9 }, gradingFee: 30, readyMinUpside: 10, readyMinUpsidePercent: 20, ownerName: "  Ada  ", alertMovePercent: 5, alertWebhookUrl: "javascript:alert(1)" });
     const s = getSettings();
     expect(s.gradeMultipliers).toEqual({ "PSA 10": 4 });
     expect(s.conditionMultipliers.LP).toBe(0.9);
@@ -96,5 +96,7 @@ describe("settings", () => {
     expect(s.gradingFee).toBe(30);
     expect(s.readyMinUpside).toBe(10);
     expect(s.ownerName).toBe("Ada");
+    expect(s.alertMovePercent).toBe(5);
+    expect(s.alertWebhookUrl).toBe(""); // only http(s) is stored
   });
 });
