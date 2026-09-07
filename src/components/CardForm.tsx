@@ -108,8 +108,8 @@ export function CardForm({ value, onChange, disabled }: Props) {
 
   return (
     <fieldset disabled={disabled} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <div>
-        <label className="label">Game / category</label>
+      <label className="block">
+        <span className="label">Game / category</span>
         <select className="input" value={value.game} onChange={set("game")}>
           {GAME_IDS.map((g) => (
             <option key={g} value={g}>
@@ -117,61 +117,61 @@ export function CardForm({ value, onChange, disabled }: Props) {
             </option>
           ))}
         </select>
-      </div>
-      <div>
-        <label className="label">{isSports ? "Player" : "Card name"}</label>
+      </label>
+      <label className="block">
+        <span className="label">{isSports ? "Player" : "Card name"}</span>
         <input className="input" value={value.name} onChange={set("name")} required />
-      </div>
+      </label>
       {isSports && (
-        <div>
-          <label className="label">Sport</label>
+        <label className="block">
+          <span className="label">Sport</span>
           <input className="input" value={value.sport} onChange={set("sport")} placeholder="baseball" />
-        </div>
+        </label>
       )}
       {isSports && (
-        <div>
-          <label className="label">Manufacturer / brand</label>
+        <label className="block">
+          <span className="label">Manufacturer / brand</span>
           <input className="input" value={value.manufacturer} onChange={set("manufacturer")} placeholder="Topps" />
-        </div>
+        </label>
       )}
-      <div>
-        <label className="label">Set / product</label>
+      <label className="block">
+        <span className="label">Set / product</span>
         <input className="input" value={value.setName} onChange={set("setName")} placeholder={isSports ? "2011 Topps Update" : "Base Set"} />
-      </div>
-      <div>
-        <label className="label">Set code</label>
+      </label>
+      <label className="block">
+        <span className="label">Set code</span>
         <input className="input" value={value.setCode} onChange={set("setCode")} placeholder={value.game === "yugioh" ? "LOB" : value.game === "mtg" ? "MH2" : ""} />
-      </div>
-      <div>
-        <label className="label">Card number</label>
+      </label>
+      <label className="block">
+        <span className="label">Card number</span>
         <input className="input" value={value.cardNumber} onChange={set("cardNumber")} placeholder={value.game === "pokemon" ? "4/102" : "#"} />
-      </div>
-      <div>
-        <label className="label">Year</label>
+      </label>
+      <label className="block">
+        <span className="label">Year</span>
         <input className="input" value={value.year} onChange={set("year")} inputMode="numeric" />
-      </div>
-      <div>
-        <label className="label">Rarity</label>
+      </label>
+      <label className="block">
+        <span className="label">Rarity</span>
         <input className="input" value={value.rarity} onChange={set("rarity")} />
-      </div>
-      <div>
-        <label className="label">Variant</label>
+      </label>
+      <label className="block">
+        <span className="label">Variant</span>
         <input className="input" value={value.variant} onChange={set("variant")} placeholder="holo, 1st edition, refractor…" />
-      </div>
-      <div>
-        <label className="label">Language</label>
+      </label>
+      <label className="block">
+        <span className="label">Language</span>
         <input className="input" value={value.language} onChange={set("language")} placeholder="English" />
-      </div>
-      <div>
-        <label className="label">Quantity</label>
+      </label>
+      <label className="block">
+        <span className="label">Quantity</span>
         <input className="input" value={value.quantity} onChange={set("quantity")} inputMode="numeric" />
-      </div>
+      </label>
 
       <div className="sm:col-span-2 mt-2 border-t border-black/10 pt-3 text-sm font-medium dark:border-white/10">
         Your copy
       </div>
-      <div>
-        <label className="label">Grading company</label>
+      <label className="block">
+        <span className="label">Grading company</span>
         <select className="input" value={value.gradingCompany} onChange={set("gradingCompany")}>
           <option value="">Not graded (raw)</option>
           {GRADING_COMPANIES.map((c) => (
@@ -180,21 +180,21 @@ export function CardForm({ value, onChange, disabled }: Props) {
             </option>
           ))}
         </select>
-      </div>
+      </label>
       {isGraded ? (
         <>
-          <div>
-            <label className="label">Grade</label>
+          <label className="block">
+            <span className="label">Grade</span>
             <input className="input" value={value.grade} onChange={set("grade")} placeholder="10" />
-          </div>
-          <div>
-            <label className="label">Cert number</label>
+          </label>
+          <label className="block">
+            <span className="label">Cert number</span>
             <input className="input" value={value.certNumber} onChange={set("certNumber")} />
-          </div>
+          </label>
         </>
       ) : (
-        <div>
-          <label className="label">Condition</label>
+        <label className="block">
+          <span className="label">Condition</span>
           <select className="input" value={value.condition} onChange={set("condition")}>
             {Object.entries(CONDITIONS).map(([k, label]) => (
               <option key={k} value={k}>
@@ -202,16 +202,16 @@ export function CardForm({ value, onChange, disabled }: Props) {
               </option>
             ))}
           </select>
-        </div>
+        </label>
       )}
-      <div>
-        <label className="label">Purchase price (USD)</label>
+      <label className="block">
+        <span className="label">Purchase price (USD)</span>
         <input className="input" value={value.purchasePrice} onChange={set("purchasePrice")} inputMode="decimal" />
-      </div>
-      <div className="sm:col-span-2">
-        <label className="label">Notes</label>
+      </label>
+      <label className="block sm:col-span-2">
+        <span className="label">Notes</span>
         <textarea className="input" rows={2} value={value.notes} onChange={set("notes")} />
-      </div>
+      </label>
     </fieldset>
   );
 }

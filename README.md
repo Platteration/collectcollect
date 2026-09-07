@@ -52,6 +52,8 @@ Every refresh stores a snapshot, so a card's detail page shows how its price has
 
 Sports cards have no free price API; without a PriceCharting token you can still enter prices manually.
 
+**Sales.** Log a sale from a card's page: copies leave the collection, the cost basis is captured at sale time so later edits don't rewrite history, and the portfolio shows realized gains (proceeds less fees less cost) beside unrealized ones. A sale can be undone, which puts the copies back. Fully sold cards stay in the collection greyed out with a "Sold" badge so their history survives.
+
 **Export.** The Collection page has an *Export CSV* button (also `GET /api/export`) with every card, its grade or condition, purchase price, and latest ungraded / PSA 10 / your-copy prices.
 
 ## Card identification
@@ -73,7 +75,9 @@ src/app/                 Next.js App Router pages and API routes
   api/cards[/id]         CRUD; /price refreshes prices, /prices returns history
   api/prices/lookup      Price a not-yet-saved card
   api/prices/refresh     POST — refresh every card (?stale=24 limits to stale ones)
-  api/export             GET — the collection as CSV
+  api/export             GET — the collection as CSV (?type=sales for the sales ledger)
+  api/cards/[id]/sales   GET / POST — a card's sales; POST removes the copies sold
+  api/sales              GET all sales with realized totals; DELETE /api/sales/[id] undoes one
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema
 src/lib/pricing/         Providers, matching heuristics, summary/valuation, refresh pipeline

@@ -149,6 +149,29 @@ export interface PriceSummary {
   errors: Array<{ source: string; message: string }>;
 }
 
+export interface Sale {
+  id: number;
+  cardId: number;
+  quantity: number;
+  /** What each copy sold for, before fees. */
+  unitPrice: number;
+  /** Marketplace and shipping fees for the whole sale. */
+  fees: number;
+  /** Cost basis per copy, captured at sale time so later edits don't rewrite history. */
+  unitCost: number | null;
+  soldAt: string;
+  venue: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+/** A sale joined to the card it came from, for lists that span cards. */
+export interface SaleWithCard extends Sale {
+  cardName: string;
+  cardDetail: string;
+  game: Game;
+}
+
 export interface PriceSnapshot {
   id: number;
   cardId: number;

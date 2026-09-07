@@ -7,7 +7,7 @@ export function CardTile({ card, price }: { card: CardRecord; price: PriceSummar
   const src = imageSrc(card);
   const graded = Boolean(card.grade);
   return (
-    <Link href={`/cards/${card.id}`} className="card-surface group flex flex-col overflow-hidden hover:shadow-md">
+    <Link href={`/cards/${card.id}`} className={`card-surface group flex flex-col overflow-hidden hover:shadow-md ${card.quantity === 0 ? "opacity-60" : ""}`}>
       <div
         className={`relative aspect-[3/4] bg-neutral-100 p-2 dark:bg-neutral-800 ${card.accentColor ? "accent-wash" : ""}`}
         style={card.accentColor ? ({ "--accent": card.accentColor } as React.CSSProperties) : undefined}
@@ -22,6 +22,9 @@ export function CardTile({ card, price }: { card: CardRecord; price: PriceSummar
         <span className="badge absolute left-2 top-2 bg-black/70 text-white">{GAMES[card.game]}</span>
         {card.quantity > 1 && (
           <span className="badge absolute right-2 top-2 bg-amber-600 text-white">×{card.quantity}</span>
+        )}
+        {card.quantity === 0 && (
+          <span className="badge absolute right-2 top-2 bg-neutral-900 text-white dark:bg-white dark:text-neutral-900">Sold</span>
         )}
       </div>
       <div className="flex flex-1 flex-col gap-1 p-3">

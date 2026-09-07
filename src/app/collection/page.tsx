@@ -13,6 +13,7 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
   const cards = listCards({ game: gameParam, search: q });
   const prices = latestSnapshotsByCard();
 
+  const owned = cards.filter((c) => c.quantity > 0);
   let totalQty = 0;
   let totalValue = 0;
   let totalUngraded = 0;
@@ -22,7 +23,7 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
     const s = prices.get(c.id)?.summary;
     if (s?.yourCopyValue) {
       totalValue += s.yourCopyValue * c.quantity;
-      priced++;
+      if (c.quantity > 0) priced++;
     }
     if (s?.ungraded) totalUngraded += s.ungraded * c.quantity;
   }
@@ -30,13 +31,13 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
   return (
     <div className="space-y-6">
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Cards" value={String(cards.length)} sub={`${totalQty} total copies`} />
-        <Stat label="Collection value" value={money(totalValue)} sub={`${priced} of ${cards.length} priced`} />
+        <Stat label="Cards" value={String(owned.length)} sub={`${totalQty} total copies${cards.length - owned.length ? ` · ${cards.length - owned.length} sold` : ""}`} />
+        <Stat label="Collection value" value={money(totalValue)} sub={`${priced} of ${owned.length} priced`} />
         <Stat label="Ungraded value" value={money(totalUngraded)} sub="if every copy were raw NM" />
         <Stat
           label="Unpriced"
-          value={String(cards.length - priced)}
-          sub={cards.length - priced ? "open a card and refresh prices" : "everything is priced"}
+          value={String(Math.max(0, owned.length - priced))}
+          sub={owned.length - priced ? "open a card and refresh prices" : "everything is priced"}
         />
       </section>
 
@@ -60,6 +61,9 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
         )}
         <a href="/api/export" className="btn-secondary ml-auto" download>
           Export CSV
+        </a>
+        <a href="/api/export?type=sales" className="btn-secondary" download>
+          Sales CSV
         </a>
       </form>
 

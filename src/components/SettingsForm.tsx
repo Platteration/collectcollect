@@ -61,12 +61,12 @@ export function SettingsForm({ initial }: { initial: Settings }) {
         <p className="mt-1 text-sm text-neutral-500">Market prices are for Near Mint copies. Played copies are valued at ungraded price × multiplier.</p>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
           {(Object.keys(CONDITIONS) as Condition[]).map((c) => (
-            <div key={c}>
-              <label className="label">
+            <label className="block" key={c}>
+              <span className="label">
                 {c} · {CONDITIONS[c]}
-              </label>
+              </span>
               <input className="input" value={conditions[c]} onChange={(e) => setConditions((s) => ({ ...s, [c]: e.target.value }))} inputMode="decimal" />
-            </div>
+            </label>
           ))}
         </div>
       </section>
@@ -75,18 +75,18 @@ export function SettingsForm({ initial }: { initial: Settings }) {
         <h2 className="font-semibold">Grading cost</h2>
         <p className="mt-1 text-sm text-neutral-500">Per-card cost to grade (submission fee plus shipping). The grading outlook subtracts it from the graded outcomes.</p>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div>
-            <label className="label">Fee per card (USD)</label>
+          <label className="block">
+            <span className="label">Fee per card (USD)</span>
             <input className="input" value={gradingFee} onChange={(e) => setGradingFee(e.target.value)} inputMode="decimal" />
-          </div>
-          <div>
-            <label className="label">Ready when upside ≥ (USD)</label>
+          </label>
+          <label className="block">
+            <span className="label">Ready when upside ≥ (USD)</span>
             <input className="input" value={readyMinUpside} onChange={(e) => setReadyMinUpside(e.target.value)} inputMode="decimal" />
-          </div>
-          <div>
-            <label className="label">and upside ≥ (% of raw)</label>
+          </label>
+          <label className="block">
+            <span className="label">and upside ≥ (% of raw)</span>
             <input className="input" value={readyMinUpsidePercent} onChange={(e) => setReadyMinUpsidePercent(e.target.value)} inputMode="decimal" />
-          </div>
+          </label>
         </div>
         <p className="mt-2 text-xs text-neutral-500">A raw card is flagged “Ready” when the timing looks right and its upside after the fee clears both thresholds.</p>
       </section>

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { RANGES, change, sliceRange, type Allocation, type OutlookPoint, type PortfolioPoint, type Range, type Returns, type Verdict } from "@/lib/analytics";
+import { RANGES, change, sliceRange, type Allocation, type OutlookPoint, type PortfolioPoint, type Range, type Realized, type Returns, type Verdict } from "@/lib/analytics";
 import { money, when } from "@/lib/format";
 import { GAMES, GRADING_STATUSES, type Game, type GradingStatus, type Settings } from "@/lib/types";
 import { PortfolioChart } from "./charts/PortfolioChart";
@@ -44,6 +44,19 @@ interface Props {
   returns: Returns;
   allocation: Allocation[];
   settings: Settings;
+  realized: Realized;
+  recentSales: RecentSale[];
+}
+
+export interface RecentSale {
+  id: number;
+  cardId: number;
+  name: string;
+  detail: string;
+  soldAt: string;
+  quantity: number;
+  net: number;
+  gain: number | null;
 }
 
 type OutlookFilter = "active" | "ready" | "planned" | "submitted" | "keep_raw";
@@ -56,7 +69,7 @@ const GAME_COLORS: Record<Game, string> = {
   other: "var(--chart-series-5)",
 };
 
-export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefreshed, opportunities, holdings, returns, allocation, settings }: Props) {
+export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefreshed, opportunities, holdings, returns, allocation, settings, realized, recentSales }: Props) {
   const router = useRouter();
   const [range, setRange] = useState<Range>("1M");
   const [filter, setFilter] = useState<OutlookFilter>("active");
@@ -91,7 +104,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
     }
   };
 
-  if (cardCount === 0) {
+  if (cardCount === 0 && realized.sales === 0) {
     return (
       <div className="card-surface flex flex-col items-center gap-3 p-12 text-center">
         <p className="text-lg font-medium">Your portfolio is empty</p>
@@ -137,9 +150,23 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
                 {hover ? `on ${when(hover.t)}` : delta.from ? `since ${when(delta.from)}` : "no earlier snapshot to compare"}
               </span>
             </div>
+            {realized.sales > 0 && (
+              <div className="mt-1 text-sm">
+                <span className="text-neutral-500">Realized </span>
+                <span className={`font-medium ${realized.gain >= 0 ? "delta-up" : "delta-down"}`}>
+                  {realized.gain >= 0 ? "▲" : "▼"} {money(Math.abs(realized.gain))}
+                  {realized.percent !== null ? ` (${Math.abs(realized.percent).toFixed(2)}%)` : ""}
+                </span>
+                <span className="text-neutral-500">
+                  {" "}
+                  from {realized.copies} cop{realized.copies === 1 ? "y" : "ies"} sold for {money(realized.proceeds)}
+                  {realized.fees > 0 ? ` less ${money(realized.fees)} fees` : ""}
+                </span>
+              </div>
+            )}
             {returns.cardsWithCost > 0 && (
               <div className="mt-1 text-sm">
-                <span className="text-neutral-500">Total return </span>
+                <span className="text-neutral-500">Unrealized </span>
                 <span className={`font-medium ${returnsUp ? "delta-up" : "delta-down"}`}>
                   {returnsUp ? "▲" : "▼"} {money(Math.abs(returns.amount))}
                   {returns.percent !== null ? ` (${Math.abs(returns.percent).toFixed(2)}%)` : ""}
@@ -306,6 +333,38 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
               ))}
             </ul>
           </div>
+        </section>
+      )}
+
+      {recentSales.length > 0 && (
+        <section>
+          <h2 className="mb-3 font-display text-xl font-semibold uppercase tracking-wide">Recent sales</h2>
+          <ul className="card-surface divide-y divide-black/5 dark:divide-white/5">
+            {recentSales.map((s) => (
+              <li key={s.id}>
+                <Link href={`/cards/${s.cardId}`} className="flex items-center gap-3 px-3 py-2 hover:bg-black/[0.03] dark:hover:bg-white/5">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">
+                      {s.name}
+                      {s.quantity > 1 ? ` ×${s.quantity}` : ""}
+                    </div>
+                    <div className="truncate text-xs text-neutral-500">
+                      {s.detail} · {when(s.soldAt)}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-semibold">{money(s.net)}</div>
+                    {s.gain !== null && (
+                      <div className={`text-xs ${s.gain >= 0 ? "delta-up" : "delta-down"}`}>
+                        {s.gain >= 0 ? "+" : "−"}
+                        {money(Math.abs(s.gain))}
+                      </div>
+                    )}
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 

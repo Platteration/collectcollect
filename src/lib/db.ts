@@ -53,6 +53,19 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
   summary TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_card ON price_snapshots(card_id, fetched_at DESC);
+CREATE TABLE IF NOT EXISTS sales (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  quantity INTEGER NOT NULL,
+  unit_price REAL NOT NULL,
+  fees REAL NOT NULL DEFAULT 0,
+  unit_cost REAL,
+  sold_at TEXT NOT NULL,
+  venue TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sales_card ON sales(card_id, sold_at DESC);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

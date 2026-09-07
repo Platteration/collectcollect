@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { imageSrc, money, when } from "@/lib/format";
-import { GAMES, GRADING_STATUSES, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Settings } from "@/lib/types";
+import { GAMES, GRADING_STATUSES, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Sale, type Settings } from "@/lib/types";
 import { gradingVerdict, isReadyToGrade, outlookSeries } from "@/lib/analytics";
 import { OutlookChart } from "./charts/OutlookChart";
 import { PortfolioChart } from "./charts/PortfolioChart";
@@ -18,9 +18,10 @@ interface Props {
   latest: PriceSummary | null;
   history: PriceSnapshot[];
   settings: Settings;
+  sales: Sale[];
 }
 
-export function CardDetail({ card: initial, latest: initialLatest, history: initialHistory, settings }: Props) {
+export function CardDetail({ card: initial, latest: initialLatest, history: initialHistory, settings, sales: initialSales }: Props) {
   const router = useRouter();
   const [card, setCard] = useState(initial);
   const [latest, setLatest] = useState(initialLatest);
@@ -33,7 +34,10 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
       .map(([k, v]) => `${k}=${v}`)
       .join(", "),
   );
-  const [busy, setBusy] = useState<"" | "price" | "save" | "delete">("");
+  const [sales, setSales] = useState(initialSales);
+  const [selling, setSelling] = useState(false);
+  const [saleForm, setSaleForm] = useState({ quantity: "1", unitPrice: "", fees: "", soldAt: new Date().toISOString().slice(0, 10), venue: "", notes: "" });
+  const [busy, setBusy] = useState<"" | "price" | "save" | "delete" | "sell">("");
   const [error, setError] = useState<string | null>(null);
 
   const refreshPrice = async () => {
@@ -92,6 +96,46 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
     setError(null);
     try {
       const res = await api<{ card: CardRecord }>(`/api/cards/${card.id}`, { method: "PATCH", body: JSON.stringify({ gradingStatus }) });
+      setCard(res.card);
+      router.refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const logSale = async () => {
+    setBusy("sell");
+    setError(null);
+    try {
+      const res = await api<{ sale: Sale; card: CardRecord }>(`/api/cards/${card.id}/sales`, {
+        method: "POST",
+        body: JSON.stringify({
+          quantity: Number(saleForm.quantity),
+          unitPrice: Number(saleForm.unitPrice),
+          fees: saleForm.fees.trim() === "" ? 0 : Number(saleForm.fees),
+          soldAt: saleForm.soldAt ? new Date(saleForm.soldAt).toISOString() : undefined,
+          venue: saleForm.venue,
+          notes: saleForm.notes,
+        }),
+      });
+      setSales((prev) => [res.sale, ...prev]);
+      setCard(res.card);
+      setSelling(false);
+      setSaleForm((f) => ({ ...f, unitPrice: "", fees: "", venue: "", notes: "" }));
+      router.refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const undoSale = async (sale: Sale) => {
+    if (!confirm(`Undo this sale? ${sale.quantity} cop${sale.quantity === 1 ? "y" : "ies"} will go back into your collection.`)) return;
+    try {
+      await api(`/api/sales/${sale.id}`, { method: "DELETE" });
+      setSales((prev) => prev.filter((s) => s.id !== sale.id));
+      const res = await api<{ card: CardRecord }>(`/api/cards/${card.id}`);
       setCard(res.card);
       router.refresh();
     } catch (e) {
@@ -195,14 +239,14 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             <div className="border-t border-black/10 pt-3 dark:border-white/10">
               <div className="mb-2 text-sm font-medium">Manual price overrides (USD)</div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="label">Ungraded price</label>
+                <label className="block">
+                  <span className="label">Ungraded price</span>
                   <input className="input" value={manualUngraded} onChange={(e) => setManualUngraded(e.target.value)} inputMode="decimal" placeholder="leave blank to use market data" />
-                </div>
-                <div>
-                  <label className="label">Graded prices</label>
+                </label>
+                <label className="block">
+                  <span className="label">Graded prices</span>
                   <input className="input" value={manualGraded} onChange={(e) => setManualGraded(e.target.value)} placeholder="PSA 10=450, PSA 9=120" />
-                </div>
+                </label>
               </div>
               <p className="mt-1 text-xs text-neutral-500">Manual entries take priority over provider data the next time prices are refreshed.</p>
             </div>
@@ -306,6 +350,94 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             )}
           </section>
         )}
+
+        <section className="card-surface p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-semibold">Sales</h3>
+            {card.quantity > 0 && !selling && (
+              <button type="button" className="btn-secondary" onClick={() => setSelling(true)}>
+                Log a sale
+              </button>
+            )}
+          </div>
+
+          {selling && (
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <label className="block">
+                <span className="label">Copies</span>
+                <input className="input" value={saleForm.quantity} onChange={(e) => setSaleForm({ ...saleForm, quantity: e.target.value })} inputMode="numeric" />
+              </label>
+              <label className="block">
+                <span className="label">Price each (USD)</span>
+                <input className="input" value={saleForm.unitPrice} onChange={(e) => setSaleForm({ ...saleForm, unitPrice: e.target.value })} inputMode="decimal" autoFocus />
+              </label>
+              <label className="block">
+                <span className="label">Fees total</span>
+                <input className="input" value={saleForm.fees} onChange={(e) => setSaleForm({ ...saleForm, fees: e.target.value })} inputMode="decimal" placeholder="shipping + commission" />
+              </label>
+              <label className="block">
+                <span className="label">Date</span>
+                <input className="input" type="date" value={saleForm.soldAt} onChange={(e) => setSaleForm({ ...saleForm, soldAt: e.target.value })} />
+              </label>
+              <label className="block">
+                <span className="label">Where</span>
+                <input className="input" value={saleForm.venue} onChange={(e) => setSaleForm({ ...saleForm, venue: e.target.value })} placeholder="eBay, show, trade" />
+              </label>
+              <label className="block">
+                <span className="label">Notes</span>
+                <input className="input" value={saleForm.notes} onChange={(e) => setSaleForm({ ...saleForm, notes: e.target.value })} />
+              </label>
+              <div className="col-span-2 flex gap-2 sm:col-span-3">
+                <button type="button" className="btn-primary" onClick={logSale} disabled={busy !== "" || saleForm.unitPrice.trim() === ""}>
+                  {busy === "sell" ? "Saving…" : "Record sale"}
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => setSelling(false)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {sales.length === 0 ? (
+            !selling && (
+              <p className="mt-2 text-sm text-neutral-500">
+                {card.quantity === 0 ? "Every copy is gone but no sale is recorded." : "No sales recorded. Logging one takes the copies out of your collection and books the gain."}
+              </p>
+            )
+          ) : (
+            <ul className="mt-3 divide-y divide-black/5 text-sm dark:divide-white/5">
+              {sales.map((s) => {
+                const net = s.unitPrice * s.quantity - s.fees;
+                const gain = s.unitCost === null ? null : net - s.unitCost * s.quantity;
+                return (
+                  <li key={s.id} className="flex flex-wrap items-baseline justify-between gap-x-3 py-2">
+                    <div>
+                      <div>
+                        <strong>{money(net)}</strong> net for {s.quantity} cop{s.quantity === 1 ? "y" : "ies"}
+                        {s.venue ? ` · ${s.venue}` : ""}
+                      </div>
+                      <div className="text-xs text-neutral-500">
+                        {money(s.unitPrice)} each{s.fees ? ` less ${money(s.fees)} fees` : ""} · {when(s.soldAt)}
+                        {s.notes ? ` · ${s.notes}` : ""}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {gain !== null && (
+                        <span className={`font-medium ${gain >= 0 ? "delta-up" : "delta-down"}`}>
+                          {gain >= 0 ? "+" : "−"}
+                          {money(Math.abs(gain))}
+                        </span>
+                      )}
+                      <button type="button" className="text-xs text-neutral-500 underline" onClick={() => undoSale(s)}>
+                        Undo
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
 
         {history.length > 1 && (
           <section className="card-surface p-4">

@@ -250,6 +250,48 @@ export function totalReturn(cards: CardRecord[], valueOf: (card: CardRecord) => 
   };
 }
 
+export interface Realized {
+  /** Sale price × quantity, summed. */
+  proceeds: number;
+  fees: number;
+  /** Cost basis of the copies sold, where it was recorded. */
+  cost: number;
+  /** proceeds − fees − cost. */
+  gain: number;
+  percent: number | null;
+  sales: number;
+  copies: number;
+  /** How many sales had no cost basis, so the gain understates them. */
+  withoutCost: number;
+}
+
+/** Money actually banked: proceeds less fees less what those copies cost. */
+export function realizedReturn(sales: Array<{ quantity: number; unitPrice: number; fees: number; unitCost: number | null }>): Realized {
+  let proceeds = 0;
+  let fees = 0;
+  let cost = 0;
+  let copies = 0;
+  let withoutCost = 0;
+  for (const s of sales) {
+    proceeds += s.unitPrice * s.quantity;
+    fees += s.fees;
+    copies += s.quantity;
+    if (s.unitCost === null) withoutCost++;
+    else cost += s.unitCost * s.quantity;
+  }
+  const gain = proceeds - fees - cost;
+  return {
+    proceeds: round2(proceeds),
+    fees: round2(fees),
+    cost: round2(cost),
+    gain: round2(gain),
+    percent: cost > 0 ? round2((gain / cost) * 100) : null,
+    sales: sales.length,
+    copies,
+    withoutCost,
+  };
+}
+
 export interface Allocation {
   game: CardRecord["game"];
   value: number;

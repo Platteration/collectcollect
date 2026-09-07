@@ -1,9 +1,10 @@
 import { allSnapshots, latestSnapshotsByCard, listCards } from "@/lib/cards";
-import { allocationByGame, gradingVerdict, isReadyToGrade, outlookSeries, portfolioSeries, totalReturn } from "@/lib/analytics";
+import { allocationByGame, gradingVerdict, isReadyToGrade, outlookSeries, portfolioSeries, realizedReturn, totalReturn } from "@/lib/analytics";
 import { imageSrc } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { Portfolio, type Holding, type Opportunity } from "@/components/Portfolio";
 import type { PriceSnapshot } from "@/lib/types";
+import { listSales } from "@/lib/sales";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,8 @@ export default function HomePage() {
 
   const valueOf = (c: (typeof cards)[number]) => latest.get(c.id)?.summary.yourCopyValue ?? null;
   const returns = totalReturn(cards, valueOf);
+  const sales = listSales();
+  const realized = realizedReturn(sales);
   const allocation = allocationByGame(cards, valueOf);
 
   let lastRefreshed: string | null = null;
@@ -87,6 +90,17 @@ export default function HomePage() {
       returns={returns}
       allocation={allocation}
       settings={settings}
+      realized={realized}
+      recentSales={sales.slice(0, 5).map((s) => ({
+        id: s.id,
+        cardId: s.cardId,
+        name: s.cardName,
+        detail: s.cardDetail,
+        soldAt: s.soldAt,
+        quantity: s.quantity,
+        net: Math.round((s.unitPrice * s.quantity - s.fees) * 100) / 100,
+        gain: s.unitCost === null ? null : Math.round((s.unitPrice * s.quantity - s.fees - s.unitCost * s.quantity) * 100) / 100,
+      }))}
     />
   );
 }
