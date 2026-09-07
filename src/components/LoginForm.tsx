@@ -3,6 +3,21 @@
 import { useState } from "react";
 import { api } from "@/lib/api-client";
 
+/**
+ * Resolve ?next= against this origin and refuse anything that leaves it, so a
+ * crafted link cannot turn the login into an open redirect. Checking the
+ * resolved origin also catches forms browsers treat as protocol-relative,
+ * such as a leading "/\".
+ */
+export function safeNext(next: string, origin = window.location.origin): string {
+  try {
+    const url = new URL(next, origin);
+    return url.origin === origin ? url.pathname + url.search : "/";
+  } catch {
+    return "/";
+  }
+}
+
 export function LoginForm({ next }: { next: string }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -16,9 +31,8 @@ export function LoginForm({ next }: { next: string }) {
       await api("/api/auth", { method: "POST", body: JSON.stringify({ password }) });
       // A full navigation rather than a client-side one, so the request that
       // renders the destination carries the session cookie and no cached
-      // router entry from before signing in is reused. A relative path only,
-      // so a crafted ?next= cannot bounce to another site.
-      window.location.assign(next.startsWith("/") && !next.startsWith("//") ? next : "/");
+      // router entry from before signing in is reused.
+      window.location.assign(safeNext(next));
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);

@@ -50,3 +50,18 @@ describe("optional password gate", () => {
     expect(timingSafeEqual("", "")).toBe(true);
   });
 });
+
+describe("login redirect target", () => {
+  it("only ever returns a path on this origin", async () => {
+    const { safeNext } = await import("@/components/LoginForm");
+    const origin = "https://cards.example";
+    expect(safeNext("/collection?q=char", origin)).toBe("/collection?q=char");
+    expect(safeNext("/", origin)).toBe("/");
+    // Off-origin forms all fall back to the home page.
+    expect(safeNext("//evil.example/steal", origin)).toBe("/");
+    expect(safeNext("/\\evil.example", origin)).toBe("/");
+    expect(safeNext("https://evil.example/steal", origin)).toBe("/");
+    expect(safeNext("javascript:alert(1)", origin)).toBe("/");
+    expect(safeNext("", origin)).toBe("/");
+  });
+});
