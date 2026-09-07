@@ -12,6 +12,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
   const [gradingFee, setGradingFee] = useState(String(initial.gradingFee));
   const [readyMinUpside, setReadyMinUpside] = useState(String(initial.readyMinUpside));
   const [readyMinUpsidePercent, setReadyMinUpsidePercent] = useState(String(initial.readyMinUpsidePercent));
+  const [ownerName, setOwnerName] = useState(initial.ownerName);
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -22,7 +23,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
       const gradeMultipliers: Record<string, number> = {};
       for (const [k, v] of grades) if (k.trim() && v.trim() !== "") gradeMultipliers[k.trim()] = Number(v);
       const conditionMultipliers = Object.fromEntries(Object.entries(conditions).map(([k, v]) => [k, Number(v)])) as Settings["conditionMultipliers"];
-      await api("/api/settings", { method: "PUT", body: JSON.stringify({ gradeMultipliers, conditionMultipliers, gradingFee: Number(gradingFee), readyMinUpside: Number(readyMinUpside), readyMinUpsidePercent: Number(readyMinUpsidePercent) }) });
+      await api("/api/settings", { method: "PUT", body: JSON.stringify({ gradeMultipliers, conditionMultipliers, gradingFee: Number(gradingFee), readyMinUpside: Number(readyMinUpside), readyMinUpsidePercent: Number(readyMinUpsidePercent), ownerName }) });
       setStatus("Saved. New multipliers apply the next time a card's prices are refreshed.");
     } catch (e) {
       setStatus((e as Error).message);
@@ -89,6 +90,17 @@ export function SettingsForm({ initial }: { initial: Settings }) {
           </label>
         </div>
         <p className="mt-2 text-xs text-neutral-500">A raw card is flagged “Ready” when the timing looks right and its upside after the fee clears both thresholds.</p>
+      </section>
+
+      <section className="card-surface p-4">
+        <h2 className="font-semibold">Appraisal report</h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          The name that appears on the printable valuation report, for insurance or your own records.
+        </p>
+        <label className="mt-3 block max-w-sm">
+          <span className="label">Collection owner</span>
+          <input className="input" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} placeholder="Your name" />
+        </label>
       </section>
 
       <div className="flex items-center gap-3">

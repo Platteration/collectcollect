@@ -54,6 +54,8 @@ Sports cards have no free price API; without a PriceCharting token you can still
 
 **Sales.** Log a sale from a card's page: copies leave the collection, the cost basis is captured at sale time so later edits don't rewrite history, and the portfolio shows realized gains (proceeds less fees less cost) beside unrealized ones. A sale can be undone, which puts the copies back. Fully sold cards stay in the collection greyed out with a "Sold" badge so their history survives.
 
+**Appraisal report.** `/report` is a printable valuation of everything you own, with photos, identifications, grades, per-copy and total values, and the source and date behind each price. Print to PDF from the browser. Set the owner name in Settings.
+
 **Export.** The Collection page has an *Export CSV* button (also `GET /api/export`) with every card, its grade or condition, purchase price, and latest ungraded / PSA 10 / your-copy prices.
 
 ## Card identification

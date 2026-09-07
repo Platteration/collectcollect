@@ -21,6 +21,7 @@ export function getSettings(): Settings {
       gradingFee: Number.isFinite(stored.gradingFee) ? Number(stored.gradingFee) : DEFAULT_SETTINGS.gradingFee,
       readyMinUpside: Number.isFinite(stored.readyMinUpside) ? Number(stored.readyMinUpside) : DEFAULT_SETTINGS.readyMinUpside,
       readyMinUpsidePercent: Number.isFinite(stored.readyMinUpsidePercent) ? Number(stored.readyMinUpsidePercent) : DEFAULT_SETTINGS.readyMinUpsidePercent,
+      ownerName: typeof stored.ownerName === "string" ? stored.ownerName.slice(0, 120) : DEFAULT_SETTINGS.ownerName,
     };
   } catch {
     return structuredClone(DEFAULT_SETTINGS);
@@ -37,6 +38,7 @@ export function saveSettings(settings: Settings): Settings {
     gradingFee: nonNegative(settings.gradingFee, DEFAULT_SETTINGS.gradingFee),
     readyMinUpside: nonNegative(settings.readyMinUpside, DEFAULT_SETTINGS.readyMinUpside),
     readyMinUpsidePercent: nonNegative(settings.readyMinUpsidePercent, DEFAULT_SETTINGS.readyMinUpsidePercent),
+    ownerName: (typeof settings.ownerName === "string" ? settings.ownerName : "").trim().slice(0, 120),
   };
   getDb()
     .prepare(

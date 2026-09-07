@@ -189,6 +189,8 @@ export interface Settings {
   /** A raw card counts as "ready to grade" when its upside clears both of these. */
   readyMinUpside: number;
   readyMinUpsidePercent: number;
+  /** Shown on the printable appraisal report. */
+  ownerName: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -216,6 +218,7 @@ export const DEFAULT_SETTINGS: Settings = {
   gradingFee: 25,
   readyMinUpside: 40,
   readyMinUpsidePercent: 50,
+  ownerName: "",
 };
 
 export interface ProviderStatus {

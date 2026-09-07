@@ -22,6 +22,7 @@ export async function PUT(request: Request) {
     gradingFee: body.gradingFee ?? current.gradingFee,
     readyMinUpside: body.readyMinUpside ?? current.readyMinUpside,
     readyMinUpsidePercent: body.readyMinUpsidePercent ?? current.readyMinUpsidePercent,
+    ownerName: body.ownerName ?? current.ownerName,
   });
   return NextResponse.json({ settings, providers: providerStatuses() });
 }
