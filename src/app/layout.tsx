@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Barlow_Condensed } from "next/font/google";
 import Link from "next/link";
 import { unreadCount } from "@/lib/alerts";
+import { authEnabled } from "@/lib/auth";
+import { SignOut } from "@/components/SignOut";
 import "./globals.css";
 
 // Condensed display face for the hero value, card names and headings.
@@ -52,6 +54,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                 Settings
               </Link>
             </div>
+            {authEnabled() && <SignOut />}
             <Link href="/add" className="btn-primary whitespace-nowrap">
               {/* The button is a flex row with a gap, so the span needs no leading space. */}
               + Add<span className="hidden sm:inline">cards</span>

@@ -22,7 +22,9 @@ Production: `npm run build && npm start`. Everything is stored locally in `./dat
 
 Docker: `docker compose up --build` (reads `.env`, keeps data in a named volume at `/data`).
 
-> **No login.** CollectCollect is a single-user app with no authentication: anyone who can reach the port can see your collection, upload photos, and spend your Anthropic credits on identifications. Run it on your own machine or behind something that adds a login (Tailscale, a reverse proxy with basic auth, and so on). Do not expose it directly to the internet.
+**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach. Failed attempts are rate limited, and changing the password invalidates existing sessions.
+
+> Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
 
 ## How pricing works
 
