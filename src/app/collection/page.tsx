@@ -66,6 +66,9 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
         <a href="/api/export?type=sales" className="btn-secondary" download>
           Sales CSV
         </a>
+        <Link href="/import" className="btn-secondary">
+          Import CSV
+        </Link>
       </form>
 
       {cards.length === 0 ? (

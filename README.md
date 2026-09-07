@@ -66,6 +66,8 @@ Sports cards have no free price API; without a PriceCharting token you can still
 
 **Appraisal report.** `/report` is a printable valuation of everything you own, with photos, identifications, grades, per-copy and total values, and the source and date behind each price. Print to PDF from the browser. Set the owner name in Settings.
 
+**Import.** `/import` reads a CSV, whether it is this app's own export or a spreadsheet from another collection tool. Columns are matched by name, so headers like “Card Name”, “Edition”, “Qty” or “Price Paid” usually need no editing, and game and condition names are understood in the forms people actually write them ("Yu-Gi-Oh!", "Lightly Played", "VG"). A preview shows the matched columns, which columns were ignored, and any row it could not use, before anything is written. Rows matching a card you already own merge into it rather than duplicating.
+
 **Bulk actions.** Tick several cards on the Collection page to refresh their prices, set a grading plan, add them to a draft submission, or delete them in one go.
 
 **Backup.** Settings offers a single zip holding a consistent copy of the database (taken through SQLite's own backup, so it is safe while the app is running) and every photo. Restore by stopping the app and unpacking it into the data directory. The archive is written by a small built-in zip writer, checked in tests against the system `unzip` and Python's `zipfile`; it refuses rather than writing a truncated archive if a collection would exceed the format's 4 GB limit.
@@ -99,6 +101,7 @@ src/app/                 Next.js App Router pages and API routes
   api/alerts[/id]        GET the feed, POST marks all read, DELETE dismisses one
   api/cards/intake       POST — atomic add-or-merge used by scan mode
   api/backup             GET — the database and photos as one zip
+  api/import             POST — preview a CSV, or apply it with `apply: true`
   api/auth               POST signs in, DELETE signs out (only when APP_PASSWORD is set)
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema
@@ -107,6 +110,7 @@ src/lib/analytics.ts     Portfolio value series, grading outlook (min/max/upside
 src/lib/scheduler.ts     Hourly auto-refresh of stale prices (started from src/instrumentation.ts)
 src/components/charts/   Inline-SVG portfolio line and min/max outlook band charts
 src/lib/zip.ts           Dependency-free streaming zip writer used by the backup
+src/lib/csv.ts           RFC 4180 reader; src/lib/import.ts maps columns to cards
 src/lib/auth.ts          Optional password gate (Web Crypto, shared by proxy and routes)
 src/proxy.ts             Guards every route when APP_PASSWORD is set
 e2e/                     Playwright suite driving a real build
