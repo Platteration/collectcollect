@@ -95,6 +95,11 @@ describe("import preview", () => {
     expect(preview.rows[2].problem).toMatch(/No game column/);
   });
 
+  it("maps the column names people use for where a card is kept", () => {
+    const rows = previewImport(["name,game,Storage Box", "A,pokemon,Binder 2"].join("\n")).rows;
+    expect(rows[0].input?.location).toBe("Binder 2");
+  });
+
   it("applies a chosen game when the file has no game column", () => {
     const preview = previewImport(["name,set", "Pikachu,Jungle"].join("\n"), { game: "pokemon" });
     expect(preview.rows[0].input).toMatchObject({ game: "pokemon", setName: "Jungle" });

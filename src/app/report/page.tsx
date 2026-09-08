@@ -68,6 +68,7 @@ export default function ReportPage() {
             <th className="py-2 pr-2">Card</th>
             <th className="py-2 pr-2">Details</th>
             <th className="py-2 pr-2">Condition</th>
+            <th className="py-2 pr-2">Kept in</th>
             <th className="py-2 pr-2 text-right">Qty</th>
             <th className="py-2 pr-2 text-right">Each</th>
             <th className="py-2 text-right">Value</th>
@@ -99,6 +100,7 @@ export default function ReportPage() {
                   {card.grade ? `${card.gradingCompany ?? "Graded"} ${card.grade}` : `Raw · ${card.condition}`}
                   {card.certNumber && <div className="text-xs text-neutral-500">Cert {card.certNumber}</div>}
                 </td>
+                <td className="py-2 pr-2 text-neutral-600 dark:text-neutral-300">{card.location ?? "—"}</td>
                 <td className="py-2 pr-2 text-right tabular-nums">{card.quantity}</td>
                 <td className="py-2 pr-2 text-right tabular-nums">{money(each)}</td>
                 <td className="py-2 text-right tabular-nums font-medium">
@@ -111,7 +113,7 @@ export default function ReportPage() {
         </tbody>
         <tfoot>
           <tr className="border-t-2 border-black/20 dark:border-white/20">
-            <td colSpan={5} className="py-3 pr-2 text-right font-medium">
+            <td colSpan={6} className="py-3 pr-2 text-right font-medium">
               Total
             </td>
             <td className="py-3 text-right text-lg font-semibold tabular-nums">{money(total)}</td>

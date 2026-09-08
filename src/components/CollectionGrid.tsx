@@ -16,9 +16,18 @@ export interface GridCard {
  * is the difference between a chore and a click, so refresh, plan, submission
  * and delete all work over a selection.
  */
-export function CollectionGrid({ cards, drafts }: { cards: GridCard[]; drafts: Array<Pick<Submission, "id" | "name" | "company">> }) {
+export function CollectionGrid({
+  cards,
+  drafts,
+  locations,
+}: {
+  cards: GridCard[];
+  drafts: Array<Pick<Submission, "id" | "name" | "company">>;
+  locations: string[];
+}) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [location, setLocation] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +127,28 @@ export function CollectionGrid({ cards, drafts }: { cards: GridCard[]; drafts: A
                 ))}
               </select>
             )}
+            <span className="flex items-center gap-1">
+              <input
+                className="input max-w-[12rem]"
+                aria-label="Kept in"
+                placeholder="Kept in…"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                list="known-locations"
+              />
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={busy || !location.trim()}
+                onClick={() => {
+                  const value = location.trim();
+                  setLocation("");
+                  void runAll("Filed", (id) => api(`/api/cards/${id}`, { method: "PATCH", body: JSON.stringify({ location: value }) }));
+                }}
+              >
+                File
+              </button>
+            </span>
             <button type="button" className="btn-danger" disabled={busy} onClick={remove}>
               Delete
             </button>
@@ -126,6 +157,14 @@ export function CollectionGrid({ cards, drafts }: { cards: GridCard[]; drafts: A
 
         {progress && <span className="text-sm text-neutral-500">{progress}</span>}
       </div>
+
+      {locations.length > 0 && (
+        <datalist id="known-locations">
+          {locations.map((l) => (
+            <option key={l} value={l} />
+          ))}
+        </datalist>
+      )}
 
       {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-200">{error}</div>}
 

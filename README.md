@@ -68,6 +68,8 @@ Sports cards have no free price API; without a PriceCharting token you can still
 
 **Import.** `/import` reads a CSV, whether it is this app's own export or a spreadsheet from another collection tool. Columns are matched by name, so headers like “Card Name”, “Edition”, “Qty” or “Price Paid” usually need no editing, and game and condition names are understood in the forms people actually write them ("Yu-Gi-Oh!", "Lightly Played", "VG"). A preview shows the matched columns, which columns were ignored, and any row it could not use, before anything is written. Rows matching a card you already own merge into it rather than duplicating.
 
+**Where a card is.** Each card can record where it is physically kept ("Binder 2, page 4", "Slab box"). The Collection page filters by location, including a "no location recorded" option for what still needs putting away, locations already in use are offered as you type, and several cards can be filed at once. The location is searchable, exported, imported, and printed on the appraisal report, which is what makes the report useful for actually locating an insured card.
+
 **Bulk actions.** Tick several cards on the Collection page to refresh their prices, set a grading plan, add them to a draft submission, or delete them in one go.
 
 **Backup and restore.** Settings offers a single zip holding a consistent copy of the database (taken through SQLite's own backup, so it is safe while the app is running) and every photo, and takes one back to restore it. A restore validates the whole archive and opens its database before touching anything, refuses names that would escape the data directory or files the app did not write, and moves the collection being replaced into a dated folder rather than deleting it, so restoring the wrong file can be undone by hand. It holds the archive in memory, so it is capped at 512 MB; a larger collection is restored by unpacking the zip into the data directory with the app stopped.
@@ -104,6 +106,7 @@ src/app/                 Next.js App Router pages and API routes
   api/cards/intake       POST — atomic add-or-merge used by scan mode
   api/backup             GET — the database and photos as one zip; /restore puts one back
   api/import             POST — preview a CSV, or apply it with `apply: true`
+  api/locations          GET — storage locations in use, for autocomplete
   api/auth               POST signs in, DELETE signs out (only when APP_PASSWORD is set)
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema

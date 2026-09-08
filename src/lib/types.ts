@@ -99,6 +99,8 @@ export interface CardRecord {
   referenceImageUrl: string | null;
   /** Average colour of the card art (#rrggbb), used to tint its page. */
   accentColor: string | null;
+  /** Where the physical card is kept, e.g. "Binder 2, page 4" or "Box A". */
+  location: string | null;
   externalIds: Record<string, string>;
   identification: Identification | null;
   manualUngraded: number | null;

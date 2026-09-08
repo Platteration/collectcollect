@@ -261,6 +261,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             <Field label="Quantity" value={String(card.quantity)} />
             <Field label="Your copy" value={graded ? `${card.gradingCompany ?? "Graded"} ${card.grade}${card.certNumber ? ` · #${card.certNumber}` : ""}` : `Raw · ${card.condition}`} />
             <Field label="Purchase price" value={card.purchasePrice ? money(card.purchasePrice) : "—"} />
+            <Field label="Kept in" value={card.location ?? "—"} />
             <Field label="Language" value={card.language ?? "—"} />
             <Field label="Manufacturer" value={card.manufacturer ?? "—"} />
             <Field label="Added" value={when(card.createdAt)} />

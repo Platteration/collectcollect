@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api-client";
 import { CONDITIONS, GAMES, GAME_IDS, GRADING_COMPANIES, type CardInput, type Game } from "@/lib/types";
 
 /** String-typed form state; converted to CardInput on submit. */
@@ -21,6 +23,7 @@ export interface CardFormState {
   grade: string;
   certNumber: string;
   purchasePrice: string;
+  location: string;
   notes: string;
 }
 
@@ -42,6 +45,7 @@ export const emptyForm = (game: Game = "pokemon"): CardFormState => ({
   grade: "",
   certNumber: "",
   purchasePrice: "",
+  location: "",
   notes: "",
 });
 
@@ -65,6 +69,7 @@ export function formFromCard(card: Partial<CardInput> & { game: Game; name: stri
     grade: s(card.grade),
     certNumber: s(card.certNumber),
     purchasePrice: s(card.purchasePrice),
+    location: s(card.location),
     notes: s(card.notes),
   };
 }
@@ -90,6 +95,7 @@ export function formToInput(f: CardFormState): CardInput {
     grade: t(f.grade),
     certNumber: t(f.certNumber),
     purchasePrice: n(f.purchasePrice),
+    location: t(f.location),
     notes: t(f.notes),
   };
 }
@@ -101,6 +107,21 @@ interface Props {
 }
 
 export function CardForm({ value, onChange, disabled }: Props) {
+  // Offer the places cards are already kept, so locations stay consistent
+  // instead of becoming "Binder 2", "binder2" and "Binder two".
+  const [locations, setLocations] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void api<{ locations: Array<{ location: string }> }>("/api/locations")
+      .then((res) => {
+        if (!cancelled) setLocations(res.locations.map((l) => l.location));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const set = (key: keyof CardFormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     onChange({ ...value, [key]: e.target.value });
   const isSports = value.game === "sports";
@@ -207,6 +228,17 @@ export function CardForm({ value, onChange, disabled }: Props) {
       <label className="block">
         <span className="label">Purchase price (USD)</span>
         <input className="input" value={value.purchasePrice} onChange={set("purchasePrice")} inputMode="decimal" />
+      </label>
+      <label className="block">
+        <span className="label">Kept in</span>
+        <input className="input" value={value.location} onChange={set("location")} placeholder="Binder 2, page 4" list="known-locations" />
+        {locations.length > 0 && (
+          <datalist id="known-locations">
+            {locations.map((l) => (
+              <option key={l} value={l} />
+            ))}
+          </datalist>
+        )}
       </label>
       <label className="block sm:col-span-2">
         <span className="label">Notes</span>

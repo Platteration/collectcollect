@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS settings (
 const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "cards", column: "grading_status", ddl: "ALTER TABLE cards ADD COLUMN grading_status TEXT NOT NULL DEFAULT 'undecided'" },
   { table: "cards", column: "accent_color", ddl: "ALTER TABLE cards ADD COLUMN accent_color TEXT" },
+  { table: "cards", column: "location", ddl: "ALTER TABLE cards ADD COLUMN location TEXT" },
 ];
 
 export function openDatabase(file: string): Database.Database {

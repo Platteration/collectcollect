@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { latestSnapshotsByCard, listCards } from "@/lib/cards";
+import { latestSnapshotsByCard, listCards, listLocations } from "@/lib/cards";
 import { money } from "@/lib/format";
 import { GAMES, GAME_IDS, type Game } from "@/lib/types";
 import { CollectionGrid } from "@/components/CollectionGrid";
@@ -11,7 +11,15 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
   const sp = await searchParams;
   const gameParam = typeof sp.game === "string" && sp.game in GAMES ? (sp.game as Game) : undefined;
   const q = typeof sp.q === "string" ? sp.q : "";
-  const cards = listCards({ game: gameParam, search: q });
+  // "none" selects cards with no location recorded, which is how you find what
+  // still needs putting away.
+  const locationParam = typeof sp.location === "string" ? sp.location : undefined;
+  const cards = listCards({
+    game: gameParam,
+    search: q,
+    location: locationParam === undefined ? undefined : locationParam === "none" ? "" : locationParam,
+  });
+  const locations = listLocations();
   const prices = latestSnapshotsByCard();
 
   const owned = cards.filter((c) => c.quantity > 0);
@@ -52,10 +60,21 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
             </option>
           ))}
         </select>
+        {locations.length > 0 && (
+          <select name="location" defaultValue={locationParam ?? ""} className="input max-w-[14rem]" aria-label="Kept in">
+            <option value="">Anywhere</option>
+            {locations.map((l) => (
+              <option key={l.location} value={l.location}>
+                {l.location} ({l.cards})
+              </option>
+            ))}
+            <option value="none">No location recorded</option>
+          </select>
+        )}
         <button className="btn-secondary" type="submit">
           Filter
         </button>
-        {(q || gameParam) && (
+        {(q || gameParam || locationParam) && (
           <Link href="/collection" className="text-sm text-neutral-500 underline">
             Clear
           </Link>
@@ -85,6 +104,7 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
       ) : (
         <CollectionGrid
           cards={cards.map((c) => ({ card: c, price: prices.get(c.id)?.summary ?? null }))}
+          locations={locations.map((l) => l.location)}
           drafts={listSubmissions()
             .filter((s) => s.status === "draft")
             .map((s) => ({ id: s.id, name: s.name, company: s.company }))}

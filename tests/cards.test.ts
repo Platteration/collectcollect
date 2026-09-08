@@ -62,6 +62,36 @@ describe("card repository", () => {
   });
 });
 
+describe("storage locations", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("records where a card is kept and lists the places in use", async () => {
+    const { listLocations } = await import("@/lib/cards");
+    createCard({ game: "pokemon", name: "A", location: "  Binder 2, page 4  " });
+    createCard({ game: "pokemon", name: "B", location: "Binder 2, page 4" });
+    createCard({ game: "mtg", name: "C", location: "Box A" });
+    createCard({ game: "mtg", name: "D" });
+    // A sold-out card is not somewhere you can go and find it.
+    createCard({ game: "mtg", name: "E", location: "Box A", quantity: 0 });
+
+    expect(getCard(1)?.location).toBe("Binder 2, page 4");
+    expect(listLocations()).toEqual([
+      { location: "Binder 2, page 4", cards: 2 },
+      { location: "Box A", cards: 1 },
+    ]);
+  });
+
+  it("filters by location, including cards with none recorded", () => {
+    createCard({ game: "pokemon", name: "Filed", location: "Box A" });
+    createCard({ game: "pokemon", name: "Loose" });
+    expect(listCards({ location: "Box A" }).map((c) => c.name)).toEqual(["Filed"]);
+    expect(listCards({ location: "" }).map((c) => c.name)).toEqual(["Loose"]);
+    expect(listCards()).toHaveLength(2);
+    // Location is searchable, so "where did I put the Box A cards" works too.
+    expect(listCards({ search: "Box A" }).map((c) => c.name)).toEqual(["Filed"]);
+  });
+});
+
 describe("findSimilar", () => {
   beforeEach(() => setDb(openDatabase(":memory:")));
   it("matches on game + name with number or set agreement", () => {

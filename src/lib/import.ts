@@ -25,6 +25,25 @@ const COLUMNS: Record<string, string[]> = {
   certNumber: ["certnumber", "cert", "certification", "serial"],
   purchasePrice: ["purchaseprice", "pricepaid", "cost", "paid", "buyprice"],
   notes: ["notes", "comment", "comments", "description"],
+  // Header matching is exact after normalising, so the phrasings people
+  // actually use are listed rather than guessed at with substrings, which
+  // would let "Boxed Set" match "box".
+  location: [
+    "location",
+    "storage",
+    "box",
+    "binder",
+    "shelf",
+    "keptin",
+    "storedin",
+    "storagebox",
+    "storagelocation",
+    "cardlocation",
+    "binderpage",
+    "boxnumber",
+    "boxname",
+    "where",
+  ],
 };
 
 const GAME_ALIASES: Record<string, Game> = {
@@ -155,6 +174,7 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
         certNumber: value(row, "certNumber") || null,
         purchasePrice: parseMoney(value(row, "purchasePrice")),
         notes: value(row, "notes") || null,
+        location: value(row, "location") || null,
       },
       problem: null,
     };

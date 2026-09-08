@@ -35,6 +35,7 @@ interface CardRow {
   image_path: string | null;
   reference_image_url: string | null;
   accent_color: string | null;
+  location: string | null;
   external_ids: string;
   identification: string | null;
   manual_ungraded: number | null;
@@ -77,6 +78,7 @@ function rowToCard(row: CardRow): CardRecord {
     imagePath: row.image_path,
     referenceImageUrl: row.reference_image_url,
     accentColor: row.accent_color,
+    location: row.location,
     externalIds: parseJson(row.external_ids, {}),
     identification: parseJson<Identification | null>(row.identification, null),
     manualUngraded: row.manual_ungraded,
@@ -154,6 +156,7 @@ export function normalizeInput(input: CardInput): Required<
     imagePath: str(input.imagePath) && isValidUploadName(str(input.imagePath)!) ? str(input.imagePath) : null,
     referenceImageUrl: httpUrl(input.referenceImageUrl),
     accentColor: hexColor(input.accentColor),
+    location: str(input.location)?.slice(0, 120) ?? null,
     externalIds: Object.fromEntries(
       Object.entries(input.externalIds ?? {}).filter(([, v]) => str(v)),
     ) as Record<string, string>,
@@ -171,11 +174,11 @@ export function createCard(input: CardInput): CardRecord {
     .prepare(
       `INSERT INTO cards (game, sport, name, set_name, set_code, card_number, year, rarity, variant,
         language, manufacturer, quantity, condition, grading_company, grade, cert_number, purchase_price,
-        notes, image_path, reference_image_url, accent_color, external_ids, identification, manual_ungraded, manual_graded,
+        notes, image_path, reference_image_url, accent_color, location, external_ids, identification, manual_ungraded, manual_graded,
         grading_status, created_at, updated_at)
        VALUES (@game, @sport, @name, @setName, @setCode, @cardNumber, @year, @rarity, @variant,
         @language, @manufacturer, @quantity, @condition, @gradingCompany, @grade, @certNumber, @purchasePrice,
-        @notes, @imagePath, @referenceImageUrl, @accentColor, @externalIds, @identification, @manualUngraded, @manualGraded,
+        @notes, @imagePath, @referenceImageUrl, @accentColor, @location, @externalIds, @identification, @manualUngraded, @manualGraded,
         @gradingStatus, @now, @now)`,
     )
     .run({
@@ -198,7 +201,7 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
         card_number=@cardNumber, year=@year, rarity=@rarity, variant=@variant, language=@language,
         manufacturer=@manufacturer, quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
         grade=@grade, cert_number=@certNumber, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
-        reference_image_url=@referenceImageUrl, accent_color=@accentColor, external_ids=@externalIds, identification=@identification,
+        reference_image_url=@referenceImageUrl, accent_color=@accentColor, location=@location, external_ids=@externalIds, identification=@identification,
         manual_ungraded=@manualUngraded, manual_graded=@manualGraded, grading_status=@gradingStatus, updated_at=@now
        WHERE id=@id`,
     )
@@ -294,6 +297,7 @@ export function deleteCard(id: number): boolean {
 export interface ListOptions {
   game?: Game;
   search?: string;
+  location?: string;
 }
 
 export function listCards(opts: ListOptions = {}): CardRecord[] {
@@ -304,11 +308,29 @@ export function listCards(opts: ListOptions = {}): CardRecord[] {
     params.game = opts.game;
   }
   if (opts.search?.trim()) {
-    where.push("(name LIKE @q OR set_name LIKE @q OR card_number LIKE @q OR notes LIKE @q OR sport LIKE @q)");
+    where.push("(name LIKE @q OR set_name LIKE @q OR card_number LIKE @q OR notes LIKE @q OR sport LIKE @q OR location LIKE @q)");
     params.q = `%${opts.search.trim()}%`;
+  }
+  if (opts.location !== undefined) {
+    if (opts.location === "") where.push("(location IS NULL OR trim(location) = '')");
+    else {
+      where.push("location = @location");
+      params.location = opts.location;
+    }
   }
   const sql = `SELECT * FROM cards ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY updated_at DESC`;
   return (getDb().prepare(sql).all(params) as CardRow[]).map(rowToCard);
+}
+
+/** Every location in use, with how many cards are kept there. */
+export function listLocations(): Array<{ location: string; cards: number }> {
+  return getDb()
+    .prepare(
+      `SELECT location, COUNT(*) AS cards FROM cards
+       WHERE location IS NOT NULL AND trim(location) != '' AND quantity > 0
+       GROUP BY location ORDER BY location COLLATE NOCASE`,
+    )
+    .all() as Array<{ location: string; cards: number }>;
 }
 
 export function addSnapshot(cardId: number, summary: PriceSummary): PriceSnapshot {
