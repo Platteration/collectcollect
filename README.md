@@ -36,6 +36,8 @@ Docker: `docker compose up --build` (reads `.env`, keeps data in a named volume 
 | [YGOPRODeck](https://ygoprodeck.com/api-guide/) | Yu-Gi-Oh! | none | TCGplayer, eBay, Cardmarket, per-set price |
 | Manual entry | all | — | Your own ungraded / graded prices, which override everything else |
 
+The first four also supply set checklists for completion tracking, except PriceCharting.
+
 For each card the app shows:
 
 - **Ungraded (raw NM)** market price and where it came from.
@@ -67,6 +69,8 @@ Sports cards have no free price API; without a PriceCharting token you can still
 **Appraisal report.** `/report` is a printable valuation of everything you own, with photos, identifications, grades, per-copy and total values, and the source and date behind each price. Print to PDF from the browser. Set the owner name in Settings.
 
 **Import.** `/import` reads a CSV, whether it is this app's own export or a spreadsheet from another collection tool. Columns are matched by name, so headers like “Card Name”, “Edition”, “Qty” or “Price Paid” usually need no editing, and game and condition names are understood in the forms people actually write them ("Yu-Gi-Oh!", "Lightly Played", "VG"). A preview shows the matched columns, which columns were ignored, and any row it could not use, before anything is written. Rows matching a card you already own merge into it rather than duplicating.
+
+**Set completion.** `/sets` lists every set your collection touches. Fetch a set's published checklist and it shows how complete the set is, which cards are still missing, and which you already have. Ownership is matched on collector number however it is written ("4/102" against "4"), falling back to the card name. Checklists come from the same sources as the prices: the Pokémon TCG API, Scryfall for Magic, and YGOPRODeck for Yu-Gi-Oh!. Sports cards have no checklist source, and the page says so rather than offering a button that cannot work.
 
 **Where a card is.** Each card can record where it is physically kept ("Binder 2, page 4", "Slab box"). The Collection page filters by location, including a "no location recorded" option for what still needs putting away, locations already in use are offered as you type, and several cards can be filed at once. The location is searchable, exported, imported, and printed on the appraisal report, which is what makes the report useful for actually locating an insured card.
 
@@ -107,6 +111,7 @@ src/app/                 Next.js App Router pages and API routes
   api/backup             GET — the database and photos as one zip; /restore puts one back
   api/import             POST — preview a CSV, or apply it with `apply: true`
   api/locations          GET — storage locations in use, for autocomplete
+  api/sets/refresh       POST — fetch and store a set's published checklist
   api/auth               POST signs in, DELETE signs out (only when APP_PASSWORD is set)
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema
@@ -116,6 +121,7 @@ src/lib/scheduler.ts     Hourly auto-refresh of stale prices (started from src/i
 src/components/charts/   Inline-SVG portfolio line and min/max outlook band charts
 src/lib/zip.ts           Dependency-free streaming zip writer used by the backup
 src/lib/csv.ts           RFC 4180 reader; src/lib/import.ts maps columns to cards
+src/lib/sets/            Set checklist providers, caching and completion matching
 src/lib/auth.ts          Optional password gate (Web Crypto, shared by proxy and routes)
 src/proxy.ts             Guards every route when APP_PASSWORD is set
 e2e/                     Playwright suite driving a real build

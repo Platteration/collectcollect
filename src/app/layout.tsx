@@ -36,6 +36,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <Link href="/collection" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
                 Collection
               </Link>
+              <Link href="/sets" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
+                Sets
+              </Link>
               <Link href="/submissions" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
                 Grading
               </Link>

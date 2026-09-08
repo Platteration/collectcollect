@@ -87,11 +87,16 @@ export async function stubPrices(page: Page, opts: { ungraded: number; psa10: nu
   );
 }
 
-export async function addCardByHand(page: Page, fields: { name: string; set?: string; number?: string; purchase?: string; quantity?: string }) {
+export async function addCardByHand(
+  page: Page,
+  fields: { name: string; game?: string; set?: string; number?: string; purchase?: string; quantity?: string },
+) {
   await page.goto("/add");
   await page.getByRole("button", { name: "Enter a card manually" }).click();
   const form = page.locator("fieldset").first();
-  await form.getByLabel("Card name").fill(fields.name);
+  if (fields.game) await form.getByLabel("Game / category").selectOption(fields.game);
+  // The name field is labelled "Player" for sports cards.
+  await form.getByLabel(fields.game === "sports" ? "Player" : "Card name").fill(fields.name);
   if (fields.set) await form.getByLabel("Set / product").fill(fields.set);
   if (fields.number) await form.getByLabel("Card number").fill(fields.number);
   if (fields.quantity) await form.getByLabel("Quantity").fill(fields.quantity);

@@ -91,6 +91,15 @@ CREATE TABLE IF NOT EXISTS submission_cards (
   UNIQUE (submission_id, card_id)
 );
 CREATE INDEX IF NOT EXISTS idx_submission_cards ON submission_cards(submission_id);
+CREATE TABLE IF NOT EXISTS set_checklists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  game TEXT NOT NULL,
+  set_id TEXT NOT NULL,
+  set_name TEXT NOT NULL,
+  cards TEXT NOT NULL,
+  fetched_at TEXT NOT NULL,
+  UNIQUE (game, set_id)
+);
 CREATE TABLE IF NOT EXISTS alerts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   kind TEXT NOT NULL,
