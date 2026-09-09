@@ -308,3 +308,66 @@ describe("what an archive cannot hold", () => {
   });
 });
 
+describe("what a restore takes with it", () => {
+  it("moves the write-ahead log aside, drops photos the archive does not have, and refuses a second restore at once", async () => {
+    const fsm = await import("node:fs");
+    const osm = await import("node:os");
+    const pathm = await import("node:path");
+    const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), "cc-restore-wal-"));
+    process.env.DATA_DIR = dir;
+
+    const { setDb, openDatabase, uploadsDir, lockDatabase, unlockDatabase } = await import("@/lib/db");
+    const { createCard } = await import("@/lib/cards");
+    const { buildBackup, restoreBackup } = await import("@/lib/backup");
+    setDb(openDatabase(pathm.join(dir, "collectcollect.db")));
+    createCard({ game: "pokemon", name: "In the backup" });
+    const kept = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg";
+    fsm.writeFileSync(pathm.join(uploadsDir(), kept), Buffer.from([1, 2, 3]));
+
+    const { stream } = await buildBackup();
+    const parts: Uint8Array[] = [];
+    for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) parts.push(chunk);
+    const archive = new Uint8Array(Buffer.concat(parts));
+
+    // A photo added after the backup: the restore has to take it away with the
+    // rest of the collection it is replacing, not leave it orphaned.
+    const later = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff.jpg";
+    fsm.writeFileSync(pathm.join(uploadsDir(), later), Buffer.from([4, 5, 6]));
+    // A sibling of the database file: WAL mode writes these, and a stale one
+    // left next to a restored database is how a good restore goes bad.
+    fsm.writeFileSync(pathm.join(dir, "collectcollect.db-journal"), Buffer.from([7, 7]));
+
+    // While a restore is under way, another one is turned away rather than
+    // interleaved.
+    expect(lockDatabase("test lock")).toBe(true);
+    await expect(restoreBackup(archive)).rejects.toThrow(/already in progress/);
+    unlockDatabase();
+
+    const result = await restoreBackup(archive);
+    expect(result).toMatchObject({ photos: 1, cards: 1 });
+    expect(fsm.readdirSync(uploadsDir()).sort()).toEqual([kept]);
+    const aside = fsm.readdirSync(result.movedAsideTo);
+    expect(aside).toContain("collectcollect.db");
+    expect(aside).toContain("collectcollect.db-journal");
+    expect(fsm.existsSync(pathm.join(dir, "collectcollect.db-journal"))).toBe(false);
+    expect(fsm.readdirSync(pathm.join(result.movedAsideTo, "uploads")).sort()).toEqual([kept, later].sort());
+
+    delete process.env.DATA_DIR;
+    setDb(undefined);
+    fsm.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("upload names", () => {
+  it("only accepts the names it writes itself", async () => {
+    const { isValidUploadName, uploadPath } = await import("@/lib/images");
+    expect(isValidUploadName("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg")).toBe(true);
+    expect(isValidUploadName("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.png")).toBe(true);
+    expect(isValidUploadName("../../etc/passwd")).toBe(false);
+    expect(isValidUploadName("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.exe")).toBe(false);
+    expect(isValidUploadName("AAAAAAAA-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg")).toBe(false);
+    expect(isValidUploadName("")).toBe(false);
+    expect(() => uploadPath("../secrets.jpg")).toThrow(/Invalid upload name/);
+  });
+});
+

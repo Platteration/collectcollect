@@ -244,20 +244,33 @@ export interface Returns {
   valueOfInvested: number;
   amount: number;
   percent: number | null;
-  /** How many cards have a purchase price recorded. */
+  /** How many cards have a purchase price recorded and a price to value them at. */
   cardsWithCost: number;
+  /** Cards bought for a known price that have no current price yet, left out of both sides. */
+  cardsAwaitingPrice: number;
 }
 
-/** Total return over the cards whose cost is known; cards without a purchase price are left out of both sides. */
+/**
+ * Total return over the cards that can be judged: both a purchase price and a
+ * current value have to be known. A card counted at zero because its price has
+ * not been looked up yet would read as a total loss, which is the wrong thing
+ * to tell someone who has just added it.
+ */
 export function totalReturn(cards: CardRecord[], valueOf: (card: CardRecord) => number | null): Returns {
   let invested = 0;
   let valueOfInvested = 0;
   let cardsWithCost = 0;
+  let cardsAwaitingPrice = 0;
   for (const c of cards) {
     if (c.purchasePrice === null || c.purchasePrice < 0) continue;
+    const value = valueOf(c);
+    if (value === null) {
+      cardsAwaitingPrice++;
+      continue;
+    }
     cardsWithCost++;
     invested += c.purchasePrice * c.quantity;
-    valueOfInvested += (valueOf(c) ?? 0) * c.quantity;
+    valueOfInvested += value * c.quantity;
   }
   const amount = round2(valueOfInvested - invested);
   return {
@@ -266,6 +279,7 @@ export function totalReturn(cards: CardRecord[], valueOf: (card: CardRecord) => 
     amount,
     percent: invested > 0 ? round2((amount / invested) * 100) : null,
     cardsWithCost,
+    cardsAwaitingPrice,
   };
 }
 

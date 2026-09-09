@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { change, gradingOutlook, gradingVerdict, outlookSeries, portfolioSeries, sliceRange } from "@/lib/analytics";
+import { allocationByGame, change, gradingOutlook, gradingVerdict, isReadyToGrade, outlookSeries, portfolioSeries, realizedReturn, sliceRange, totalReturn } from "@/lib/analytics";
 import { DEFAULT_SETTINGS, type CardRecord, type PriceSnapshot, type PriceSummary } from "@/lib/types";
+import type { OutlookPoint } from "@/lib/analytics";
 
 const day = (n: number) => new Date(Date.UTC(2026, 0, 1 + n)).toISOString();
 
@@ -133,7 +134,7 @@ describe("returns and allocation", () => {
   const values: Record<number, number | null> = { 1: 150, 2: 8, 3: 500 };
   it("computes total return only over cards with a known cost", async () => {
     const { totalReturn } = await import("@/lib/analytics");
-    expect(totalReturn(cards, (c) => values[c.id])).toEqual({ invested: 120, valueOfInvested: 166, amount: 46, percent: 38.33, cardsWithCost: 2 });
+    expect(totalReturn(cards, (c) => values[c.id])).toEqual({ invested: 120, valueOfInvested: 166, amount: 46, percent: 38.33, cardsWithCost: 2, cardsAwaitingPrice: 0 });
     expect(totalReturn([], () => null).percent).toBeNull();
   });
   it("splits value by game, largest first", async () => {
@@ -160,6 +161,89 @@ describe("ranges with nothing recent in them", () => {
     expect(change([{ t: day(0), value: 200 }, { t: day(1), value: 150 }])).toMatchObject({ amount: -50, percent: -25 });
     // Nothing to divide by: a percentage would be a lie, so there isn't one.
     expect(change([{ t: day(0), value: 0 }, { t: day(1), value: 40 }])).toMatchObject({ amount: 40, percent: null });
+  });
+});
+
+describe("what the return figures leave out", () => {
+  const card = (over: Partial<CardRecord>): CardRecord =>
+    ({ id: 1, game: "pokemon", name: "C", quantity: 1, purchasePrice: null, ...over }) as CardRecord;
+
+  it("does not count a card as a total loss just because it has no price yet", () => {
+    const cards = [card({ id: 1, purchasePrice: 100 }), card({ id: 2, purchasePrice: 50 })];
+    const priced = new Map([[1, 130]]);
+    const r = totalReturn(cards, (c) => priced.get(c.id) ?? null);
+    expect(r).toMatchObject({ invested: 100, valueOfInvested: 130, amount: 30, percent: 30, cardsWithCost: 1, cardsAwaitingPrice: 1 });
+  });
+
+  it("leaves out cards with no purchase price, and negative ones", () => {
+    const cards = [card({ id: 1, purchasePrice: 20, quantity: 3 }), card({ id: 2 }), card({ id: 3, purchasePrice: -5 })];
+    const r = totalReturn(cards, () => 25);
+    expect(r).toMatchObject({ invested: 60, valueOfInvested: 75, cardsWithCost: 1, cardsAwaitingPrice: 0 });
+    expect(totalReturn([], () => 10)).toMatchObject({ invested: 0, amount: 0, percent: null, cardsWithCost: 0 });
+  });
+
+  it("says how many sales it could not price the basis of", () => {
+    const r = realizedReturn([
+      { quantity: 2, unitPrice: 100, fees: 10, unitCost: 40 },
+      { quantity: 1, unitPrice: 50, fees: 0, unitCost: null },
+      // A basis of zero is a recorded basis: free cards are not unknown cards.
+      { quantity: 1, unitPrice: 30, fees: 0, unitCost: 0 },
+    ]);
+    expect(r).toMatchObject({ proceeds: 280, fees: 10, cost: 80, gain: 190, sales: 3, copies: 4, withoutCost: 1 });
+    expect(realizedReturn([])).toMatchObject({ proceeds: 0, gain: 0, percent: null, sales: 0 });
+  });
+
+  it("splits the collection by game, largest first", () => {
+    const cards = [
+      card({ id: 1, game: "pokemon" }),
+      card({ id: 2, game: "pokemon" }),
+      card({ id: 3, game: "mtg" }),
+      card({ id: 4, game: "yugioh" }),
+    ];
+    const value = new Map([[1, 100], [2, 100], [3, 400], [4, 0]]);
+    const split = allocationByGame(cards, (c) => value.get(c.id) ?? null);
+    expect(split.map((a) => [a.game, a.value, a.cards, a.share])).toEqual([
+      ["mtg", 400, 1, 0.6666666666666666],
+      ["pokemon", 200, 2, 0.3333333333333333],
+      ["yugioh", 0, 1, 0],
+    ]);
+    expect(allocationByGame([], () => null)).toEqual([]);
+    // Nothing priced yet: shares are zero rather than NaN.
+    expect(allocationByGame(cards, () => null).every((a) => a.share === 0)).toBe(true);
+  });
+});
+
+describe("when a card is ready to grade", () => {
+  const settings = { ...DEFAULT_SETTINGS, readyMinUpside: 40, readyMinUpsidePercent: 50 };
+  const prime = { kind: "prime", headline: "", detail: "", upsideVsPeak: 1 } as const;
+  const wait = { kind: "wait", headline: "", detail: "", upsideVsPeak: 0.5 } as const;
+  const point = (raw: number, upside: number): OutlookPoint => ({
+    t: day(0),
+    raw,
+    min: raw,
+    minLabel: "PSA 8",
+    max: raw + upside + 25,
+    maxLabel: "PSA 10",
+    fee: 25,
+    upside,
+    downside: -25,
+    fromRealData: true,
+    likely: null,
+    likelyLabel: null,
+  });
+
+  it("wants the timing, the money and the percentage all to line up", () => {
+    expect(isReadyToGrade([point(100, 80)], prime, settings)).toBe(true);
+    // Right timing, but $30 of upside is under the $40 floor.
+    expect(isReadyToGrade([point(100, 30)], prime, settings)).toBe(false);
+    // Enough money, but 45% of the raw price is under the 50% floor.
+    expect(isReadyToGrade([point(100, 45)], prime, settings)).toBe(false);
+    // Everything but the timing.
+    expect(isReadyToGrade([point(100, 80)], wait, settings)).toBe(false);
+    // Nothing to judge.
+    expect(isReadyToGrade([], prime, settings)).toBe(false);
+    // A card with no raw price cannot fail the percentage test.
+    expect(isReadyToGrade([point(0, 80)], prime, settings)).toBe(true);
   });
 });
 

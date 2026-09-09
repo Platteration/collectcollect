@@ -160,11 +160,27 @@ export function addCard(submissionId: number, cardId: number): Submission {
 export function removeCard(submissionId: number, cardId: number): Submission {
   getDb().prepare("DELETE FROM submission_cards WHERE submission_id = ? AND card_id = ?").run(submissionId, cardId);
   const card = getCard(cardId);
-  if (card && card.gradingStatus === "submitted") updateCard(card.id, { gradingStatus: "planned" });
+  if (card && card.gradingStatus === "submitted" && !isAwayWithAnotherBatch(cardId)) {
+    updateCard(card.id, { gradingStatus: "planned" });
+  }
   touch(submissionId);
   const sub = getSubmission(submissionId);
   if (!sub) throw new Error("Submission not found");
   return sub;
+}
+
+/**
+ * Is this card still out with a batch that has been sent? Taking it off a
+ * draft must not say it is back in the drawer when it is at the grader.
+ */
+function isAwayWithAnotherBatch(cardId: number): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM submission_cards sc JOIN submissions s ON s.id = sc.submission_id
+       WHERE sc.card_id = ? AND s.status = 'sent' LIMIT 1`,
+    )
+    .get(cardId);
+  return Boolean(row);
 }
 
 /** Mark as sent: every card in the batch moves to "at the grader". */

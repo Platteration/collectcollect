@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDatabase, setDb } from "@/lib/db";
 import { addSnapshot, createCard, getCard } from "@/lib/cards";
-import { addCard, createSubmission, deleteSubmission, getSubmission, listSubmissions, markSent, recordReturn, removeCard } from "@/lib/submissions";
+import { addCard, createSubmission, deleteSubmission, getSubmission, listSubmissions, markSent, recordReturn, removeCard, updateSubmission } from "@/lib/submissions";
 import { submissionOutcome } from "@/lib/analytics";
 import { type PriceSummary } from "@/lib/types";
 
@@ -154,3 +154,30 @@ describe("what a batch's outcome means before it is all back", () => {
     expect(getCard(card.id)?.gradingStatus).toBe("undecided");
   });
 });
+
+describe("editing a batch and moving cards between batches", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("changes only the fields it was given", () => {
+    const sub = createSubmission({ company: "PSA", name: "Spring batch", serviceLevel: "Value", feePerCard: 25, shipping: 20, notes: "In the post" });
+    const renamed = updateSubmission(sub.id, { company: "PSA", name: "Summer batch" });
+    expect(renamed).toMatchObject({ name: "Summer batch", company: "PSA", serviceLevel: "Value", feePerCard: 25, shipping: 20, notes: "In the post" });
+    const repriced = updateSubmission(sub.id, { company: "CGC", feePerCard: 18, notes: null });
+    expect(repriced).toMatchObject({ company: "CGC", feePerCard: 18, notes: null, name: "Summer batch" });
+    expect(() => updateSubmission(999, { company: "PSA" })).toThrow(/not found/);
+    expect(() => updateSubmission(sub.id, { company: "PSA", shipping: -1 })).toThrow(/at least zero/);
+  });
+
+  it("does not call a card back from a batch it is still away with", () => {
+    const card = pricedCard("Charizard", 100, 900);
+    const away = addCard(createSubmission({ company: "PSA" }).id, card.id);
+    markSent(away.id);
+    expect(getCard(card.id)?.gradingStatus).toBe("submitted");
+
+    // The same card was also listed on a draft that never went anywhere.
+    const draft = addCard(createSubmission({ company: "CGC" }).id, card.id);
+    removeCard(draft.id, card.id);
+    expect(getCard(card.id)?.gradingStatus).toBe("submitted");
+  });
+});
+

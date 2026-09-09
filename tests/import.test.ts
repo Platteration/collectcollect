@@ -148,3 +148,16 @@ describe("spreadsheets from older tools", () => {
   });
 });
 
+describe("rows an import cannot decide about", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("sets aside a row that matches more than one card you own", () => {
+    createCard({ game: "pokemon", name: "Charizard" });
+    createCard({ game: "pokemon", name: "Charizard" });
+    const result = applyImport(previewImport("name,quantity\nCharizard,1\nBlastoise,1", { game: "pokemon" }));
+    expect(result).toMatchObject({ created: 1, merged: 0 });
+    expect(result.skipped).toEqual([{ line: 2, reason: "Charizard matches more than one card you own" }]);
+    expect(listCards()).toHaveLength(3);
+  });
+});
+
