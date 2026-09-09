@@ -59,6 +59,21 @@ test.describe("theme", () => {
   });
 });
 
+test("a card's own colour still tints its tile", async ({ page }) => {
+  // The tile carries both .well and .accent-wash; a background shorthand in
+  // either would silently erase the tint, which is how it broke once.
+  const created = await page.request.post("/api/cards", {
+    data: { game: "pokemon", name: "Tinted Gyarados", setName: "Tint Set", accentColor: "#c2410c" },
+  });
+  expect(created.ok()).toBe(true);
+
+  await page.goto("/collection?q=Tinted");
+  const art = page.locator(".accent-wash").first();
+  await expect(art).toBeVisible();
+  const image = await art.evaluate((el) => getComputedStyle(el).backgroundImage);
+  expect(image).toContain("gradient");
+});
+
 test.describe("installable app", () => {
   test("serves a manifest, icons and a service worker", async ({ request }) => {
     const manifest = await request.get("/manifest.webmanifest");

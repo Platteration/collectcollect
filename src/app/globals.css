@@ -139,7 +139,12 @@ body {
   --chart-grid: rgba(255, 255, 255, 0.09);
   --chart-axis: rgba(255, 255, 255, 0.3);
   --chart-muted: rgba(242, 244, 245, 0.55);
-  /* The two colours the eye is meant to find on a dark ground. */
+  /*
+   * The two colours the eye is meant to find on a dark ground. Deliberately
+   * brighter than the categorical band: this is a status pair, not a
+   * categorical one, and direction is also carried by an arrow and the sign of
+   * the number, so it never rests on colour alone.
+   */
   --chart-good: #2fe08a;
   --chart-good-text: #4ff0a1;
   --chart-bad: #ff5f6d;
@@ -147,11 +152,17 @@ body {
   /* The white wire is reserved for the owner's own line; using it as a
      categorical colour would let one game shout over the others. */
   --chart-raw: #ffffff;
-  --chart-series-1: #7fb2ff;
-  --chart-series-2: #ff9d5c;
-  --chart-series-3: #58d6a8;
-  --chart-series-4: #f5d06a;
-  --chart-series-5: #f19ec2;
+  /*
+   * The categorical slots are the dataviz reference dark palette, which
+   * passes every check of scripts/validate_palette.js against this surface:
+   * lightness band, chroma floor, CVD separation and contrast. Lighter,
+   * prettier values sat outside the band and were rejected.
+   */
+  --chart-series-1: #3987e5;
+  --chart-series-2: #d95926;
+  --chart-series-3: #199e70;
+  --chart-series-4: #c98500;
+  --chart-series-5: #d55181;
 }
 
 .delta-up { color: var(--chart-good-text); }
@@ -257,13 +268,19 @@ body {
   padding-left: max(1rem, env(safe-area-inset-left));
   padding-right: max(1rem, env(safe-area-inset-right));
 }
+/* The installed app fills the screen, so the header clears the status bar. */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
 
 /*
  * Wells: image placeholders and progress tracks. A mid-grey block reads as a
  * slab against the wireline ground, so these are a faint tint with a hairline.
  */
 .well {
-  background: var(--surface-raised);
+  /* background-color, not the shorthand: a tile can also carry .accent-wash,
+     whose gradient lives in background-image and must survive this. */
+  background-color: var(--surface-raised);
   box-shadow: inset 0 0 0 1px var(--line);
 }
 /* Chart tooltips sit over the plot, so they need their own opaque ground. */

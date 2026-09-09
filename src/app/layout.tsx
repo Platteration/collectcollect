@@ -20,7 +20,9 @@ export const metadata: Metadata = {
   title: "CollectCollect",
   description: "Photograph, identify, and price your trading cards.",
   applicationName: "CollectCollect",
-  appleWebApp: { capable: true, title: "CollectCollect", statusBarStyle: "black-translucent" },
+  // Not "black-translucent": that draws the page under the status bar, whose
+  // white glyphs would be unreadable over the light theme.
+  appleWebApp: { capable: true, title: "CollectCollect", statusBarStyle: "default" },
   manifest: "/manifest.webmanifest",
   icons: { icon: "/icons/icon-192.png", apple: "/icons/apple-touch-icon.png" },
 };
@@ -62,7 +64,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body className="flex min-h-full flex-col">
         <ServiceWorker />
-        <header className="sticky top-0 z-20 border-b backdrop-blur" style={{ borderColor: "var(--line)", background: "color-mix(in srgb, var(--background) 88%, transparent)" }}>
+        <header className="safe-top sticky top-0 z-20 border-b backdrop-blur" style={{ borderColor: "var(--line)", background: "color-mix(in srgb, var(--background) 88%, transparent)" }}>
           <nav className="safe-x mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-2 py-3">
             <Link href="/" className="flex items-center gap-2">
               <span aria-hidden className="inline-block h-6 w-4 rounded-sm bg-gradient-to-br from-amber-500 to-rose-500 dark:from-white dark:to-neutral-500" />

@@ -16,8 +16,13 @@ export interface TabItem {
  */
 export function TabBar({ items, unread }: { items: TabItem[]; unread: number }) {
   const pathname = usePathname();
-  // Seven destinations do not fit a phone; the rest live under Settings.
-  const shown = items.filter((i) => ["/", "/collection", "/sets", "/alerts", "/settings"].includes(i.href));
+  // Seven destinations do not fit a phone. The rest are listed on the Settings
+  // page, which is why the last tab is labelled More rather than Settings.
+  const TABS = ["/", "/collection", "/sets", "/alerts", "/settings"];
+  const shown = items
+    .filter((i) => TABS.includes(i.href))
+    .sort((a, b) => TABS.indexOf(a.href) - TABS.indexOf(b.href))
+    .map((i) => (i.href === "/settings" ? { ...i, label: "More", icon: "☰" } : i));
 
   return (
     <nav

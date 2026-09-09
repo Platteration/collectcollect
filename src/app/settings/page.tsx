@@ -2,6 +2,7 @@ import { SettingsForm } from "@/components/SettingsForm";
 import { getSettings } from "@/lib/settings";
 import { backupSummary } from "@/lib/backup";
 import { RestoreForm } from "@/components/RestoreForm";
+import Link from "next/link";
 import { providerStatuses } from "@/lib/status";
 import { GAMES } from "@/lib/types";
 
@@ -18,7 +19,27 @@ export default function SettingsPage() {
   const backup = backupSummary();
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Settings</h1>
+      <h1 className="font-display text-2xl font-semibold uppercase tracking-wide">Settings</h1>
+
+      {/* The phone tab bar holds five destinations; these are the rest. */}
+      <nav className="card-surface p-4 md:hidden" aria-label="More sections">
+        <h2 className="font-semibold">Go to</h2>
+        <ul className="mt-2 grid grid-cols-2 gap-2 text-sm">
+          {[
+            { href: "/add", label: "Add cards" },
+            { href: "/scan", label: "Scan a stack" },
+            { href: "/submissions", label: "Grading submissions" },
+            { href: "/report", label: "Appraisal report" },
+            { href: "/import", label: "Import a CSV" },
+          ].map((item) => (
+            <li key={item.href}>
+              <Link href={item.href} className="btn-secondary w-full justify-start">
+                {item.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
 
       <section className="card-surface p-4">
         <h2 className="font-semibold">Data sources</h2>

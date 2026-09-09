@@ -19,6 +19,19 @@ function apply(preference: ThemePreference) {
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 }
 
+/**
+ * Browser chrome follows the theme that is actually showing. The static
+ * meta tags cover the first paint; once a preference is pinned, only the
+ * resolved theme is right, so the tag is narrowed to a single colour.
+ */
+function setThemeColor() {
+  const dark = document.documentElement.getAttribute("data-theme") === "dark";
+  for (const tag of document.querySelectorAll('meta[name="theme-color"]')) {
+    tag.setAttribute("content", dark ? "#08090a" : "#f6f5f2");
+    tag.removeAttribute("media");
+  }
+}
+
 function read(): ThemePreference {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -44,11 +57,22 @@ export function ThemeToggle() {
   // markup consistent through hydration without an effect writing state.
   const preference = useSyncExternalStore(subscribe, read, () => "system" as ThemePreference);
 
+  // The inline script sets the theme for the first paint; this keeps the
+  // document in step afterwards, including when another tab changes the
+  // preference or a development remount discards the script's work.
+  useEffect(() => {
+    apply(preference);
+    setThemeColor();
+  }, [preference]);
+
   // While following the system, follow it as it changes.
   useEffect(() => {
     if (preference !== "system") return;
     const query = matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => apply("system");
+    const onChange = () => {
+      apply("system");
+      setThemeColor();
+    };
     query.addEventListener("change", onChange);
     return () => query.removeEventListener("change", onChange);
   }, [preference]);
@@ -60,6 +84,7 @@ export function ThemeToggle() {
       /* private browsing; the choice just will not persist */
     }
     apply(next);
+    setThemeColor();
     dispatchEvent(new Event(CHANGED));
   };
 
