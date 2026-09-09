@@ -295,6 +295,32 @@ describe("recovering a collection from its files", () => {
     expect(listCards({ location: "Box A" })).toHaveLength(1);
   });
 
+  it("recognises a card it already holds when the file's id is taken", () => {
+    createCard({ game: "pokemon", name: "Snorlax", setName: "Jungle", quantity: 3 });
+    flushCollection();
+    const files = readCardFiles();
+
+    // A different collection, where id 1 is somebody else entirely.
+    setDb(openDatabase(":memory:"));
+    createCard({ game: "yugioh", name: "Dark Magician" });
+    createCard({ game: "pokemon", name: "Snorlax", setName: "Jungle", quantity: 1 });
+    const first = importCardFiles(files);
+    expect(first).toMatchObject({ created: 0, replaced: 1 });
+    expect(listCards().find((c) => c.name === "Snorlax")!.quantity).toBe(3);
+    // ...and doing it again still changes nothing.
+    expect(importCardFiles(files)).toMatchObject({ created: 0, replaced: 1 });
+    expect(listCards()).toHaveLength(2);
+  });
+
+  it("does not read the folder's own index or explainer as cards", () => {
+    createCard({ game: "pokemon", name: "Snorlax" });
+    flushCollection();
+    const readme = fs.readFileSync(path.join(collectionDir(), "README.md"), "utf8");
+    const index = fs.readFileSync(path.join(collectionDir(), "index.md"), "utf8");
+    expect(parseCardMarkdown(readme)).toBeNull();
+    expect(parseCardMarkdown(index)).toBeNull();
+  });
+
   it("is safe to run twice", () => {
     createCard({ game: "pokemon", name: "Snorlax", quantity: 3 });
     flushCollection();
@@ -355,13 +381,23 @@ describe("recovering a collection from its files", () => {
     expect(parsed.warnings.length).toBeGreaterThan(0);
   });
 
-  it("rebuilds the folder from the database and clears strays", () => {
+  it("rebuilds the folder from the database without deleting cards it does not have", () => {
     createCard({ game: "pokemon", name: "Eevee" });
-    fs.writeFileSync(path.join(cardsDir(), "9999-not-a-card.md"), "leftover\n");
+    // A card this database has never heard of: the folder may be the only copy
+    // of it left, so a rebuild counts it rather than deleting it.
+    fs.writeFileSync(path.join(cardsDir(), "9999-vaporeon.md"), '---\nid: 9999\nname: "Vaporeon"\n---\n\n# Vaporeon\n');
+    // A half-written file from a crash belongs to nobody.
     fs.writeFileSync(path.join(cardsDir(), "0001-half-written.md.tmp"), "half\n");
     const result = rebuildCollection(listCards());
-    expect(result).toMatchObject({ written: 1, removed: 1 });
-    expect(collectionStatus().files).toBe(1);
+    expect(result).toMatchObject({ written: 1, orphans: 1 });
+    expect(fs.readdirSync(cardsDir()).sort()).toEqual(["0001-eevee.md", "9999-vaporeon.md"]);
+    expect(collectionStatus().files).toBe(2);
+  });
+
+  it("clears a file left behind by a card it has just rewritten", () => {
+    const card = createCard({ game: "pokemon", name: "Eevee" });
+    fs.writeFileSync(path.join(cardsDir(), `000${card.id}-old-name.md`), "stale\n");
+    expect(rebuildCollection(listCards())).toMatchObject({ written: 1, orphans: 0 });
     expect(fs.readdirSync(cardsDir())).toEqual(["0001-eevee.md"]);
   });
 

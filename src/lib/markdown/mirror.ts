@@ -290,11 +290,14 @@ you need is here in files any computer can open.
   rebuilt shortly after a change rather than instantly, so the card files are
   the ones to trust if the two ever disagree.
 - \`cards/\` — one file per card, named \`<id>-<card name>.md\`.
-- \`../uploads/\` — the photos. Each card file links to its own photo.
+- \`../uploads/\` — the photos, when this folder is sitting in the app's data
+  directory. Each card file links to its own photo. The Markdown download does
+  not carry them; the full backup in Settings does.
 
 ## How to read a card file
 
-The block between the \`---\` lines at the top is the card's record: name, set,
+Every card file starts with a block between \`---\` lines: the card's record —
+name, set,
 number, grade, how many copies, what you paid, where it is kept. It is written
 as YAML with JSON values, which means both people and programs can read it.
 
@@ -314,8 +317,10 @@ different cataloguing tool can take it from here.
 ## What these files do not hold
 
 The per-provider quotes behind each price are left out — the recorded prices
-themselves are all here. Photos live in the \`uploads\` folder next to this one,
-so keep the two together.
+themselves are all here. Photos are not in this folder: they live in
+\`uploads\` next to it in the app's data directory, so keep the two together,
+and use the full backup rather than the Markdown download if you want both in
+one file.
 `;
 
 function writeReadme(): void {
@@ -326,9 +331,25 @@ function writeReadme(): void {
 // Rebuild and status
 // ---------------------------------------------------------------------------
 
-/** Rewrite the whole folder from the database. */
-export function rebuildCollection(cards: CardRecord[]): { written: number; removed: number } {
-  if (!mirrorEnabled()) return { written: 0, removed: 0 };
+export interface RebuildResult {
+  written: number;
+  /** Files describing cards the database does not have. They are left alone. */
+  orphans: number;
+}
+
+/**
+ * Rewrite the whole folder from the database.
+ *
+ * Files for cards the database does not know about are counted and left
+ * where they are. Deleting a card already takes its file with it, so an
+ * orphan means the two have come apart — and the likeliest way that happens
+ * is someone pointing a fresh, empty install at a folder that is the only
+ * copy of their collection left. Rewriting must never be the thing that
+ * destroys it; the file is the record here, and only a person should decide
+ * it is not wanted.
+ */
+export function rebuildCollection(cards: CardRecord[]): RebuildResult {
+  if (!mirrorEnabled()) return { written: 0, orphans: 0 };
   ensureDirs();
   const keep = new Set<string>();
   let written = 0;
@@ -338,7 +359,8 @@ export function rebuildCollection(cards: CardRecord[]): { written: number; remov
     keep.add(name);
     written++;
   }
-  let removed = 0;
+  const known = new Set(cards.map((c) => c.id));
+  let orphans = 0;
   for (const name of fs.readdirSync(cardsDir())) {
     // .tmp files are half-written cards left by a crash; they belong to nobody.
     if (name.endsWith(".tmp")) {
@@ -346,14 +368,17 @@ export function rebuildCollection(cards: CardRecord[]): { written: number; remov
       continue;
     }
     if (!name.endsWith(".md") || keep.has(name)) continue;
-    fs.rmSync(path.join(cardsDir(), name), { force: true });
-    removed++;
+    const id = idFromFileName(name);
+    // A file left over from a rename of a card that is still here is stale and
+    // says so by its id; anything else describes a card this database lost.
+    if (id !== null && known.has(id)) fs.rmSync(path.join(cardsDir(), name), { force: true });
+    else orphans++;
   }
   state.indexDirty = true;
   flushCollection();
   state.lastError = null;
   state.failures = 0;
-  return { written, removed };
+  return { written, orphans };
 }
 
 export interface CollectionStatus {

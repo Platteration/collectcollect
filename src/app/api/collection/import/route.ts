@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { errorMessage, jsonError } from "@/lib/http";
-import { IMPORT_MAX_BYTES, cardFilesFromZip, importCardFiles } from "@/lib/markdown/restore";
+import { IMPORT_MAX_BYTES, cardFilesFromZip, importCardFiles, isCardFileName } from "@/lib/markdown/restore";
 
 /**
  * POST multipart/form-data — read a collection back out of its Markdown files.
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
       files.push(...(await cardFilesFromZip(new Uint8Array(await archive.arrayBuffer()))));
     }
     for (const file of loose) {
-      if (!file.name.toLowerCase().endsWith(".md")) continue;
+      if (!isCardFileName(file.name)) continue;
       files.push({ name: file.name, text: await file.text() });
     }
     if (!files.length) return jsonError("Nothing in that upload looked like a card file");

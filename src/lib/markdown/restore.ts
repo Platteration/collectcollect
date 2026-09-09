@@ -1,4 +1,4 @@
-import { createCard, discardDeferredMirror, getCard, updateCard } from "../cards";
+import { createCard, discardDeferredMirror, findSimilar, getCard, updateCard } from "../cards";
 import { getDb } from "../db";
 import type { CardRecord } from "../types";
 import { isSafeEntryName, readZip } from "../zip";
@@ -44,8 +44,15 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
       let card: CardRecord | null = null;
       const wanted = parsed.id;
       const holder = wanted === null ? null : getCard(wanted);
-      if (holder && isSameCard(holder, parsed.input.name, parsed.input.setName ?? null)) {
-        card = updateCard(holder.id, parsed.input);
+      const match = holder && isSameCard(holder, parsed.input.name, parsed.input.setName ?? null) ? holder : elsewhere(parsed);
+      if (match) {
+        if (holder && match !== holder) {
+          result.warnings.push({
+            file: file.name,
+            message: `Card ${wanted} here is "${holder.name}", so this file was matched to the copy already in the collection rather than by its id`,
+          });
+        }
+        card = updateCard(match.id, parsed.input);
         if (card) result.replaced++;
       } else {
         if (holder) {
@@ -119,6 +126,22 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
   return result;
 }
 
+/**
+ * The card this file describes, when its id is taken by something else. Without
+ * this an import into a collection whose ids are already in use would add a
+ * fresh copy every time it was run, which is the opposite of what someone
+ * recovering data needs.
+ */
+function elsewhere(parsed: { input: { game: CardRecord["game"]; name: string; setName?: string | null; cardNumber?: string | null } }): CardRecord | null {
+  const candidates = findSimilar({
+    game: parsed.input.game,
+    name: parsed.input.name,
+    cardNumber: parsed.input.cardNumber ?? null,
+    setName: parsed.input.setName ?? null,
+  }).filter((c) => isSameCard(c, parsed.input.name, parsed.input.setName ?? null));
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 function norm(value: string | null | undefined): string {
   return (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -148,8 +171,17 @@ function adoptId(card: CardRecord, wanted: number): CardRecord | null {
   db.prepare("UPDATE cards SET id = ? WHERE id = ?").run(wanted, card.id);
   // AUTOINCREMENT hands out one past the high-water mark, which the update above
   // does not raise; leaving it behind would hand out an id that already exists.
-  db.prepare("UPDATE sqlite_sequence SET seq = (SELECT MAX(id) FROM cards) WHERE name = 'cards'").run();
+  // Never lower the mark: ids that belonged to deleted cards must not be
+  // handed out again.
+  db.prepare("UPDATE sqlite_sequence SET seq = MAX(seq, (SELECT MAX(id) FROM cards)) WHERE name = 'cards'").run();
   return getCard(wanted);
+}
+
+/** The folder's own index and explainer are not cards. */
+export function isCardFileName(name: string): boolean {
+  const base = name.split("/").pop() ?? "";
+  if (!base.toLowerCase().endsWith(".md")) return false;
+  return base !== "index.md" && base.toLowerCase() !== "readme.md";
 }
 
 /** Pull the card files out of an uploaded zip of the collection folder. */
@@ -159,8 +191,7 @@ export async function cardFilesFromZip(archive: Uint8Array): Promise<Array<{ nam
   for (const entry of entries) {
     if (!isSafeEntryName(entry.name)) throw new Error(`The archive contains an unsafe path: ${entry.name}`);
     const base = entry.name.split("/").pop() ?? "";
-    if (!base.toLowerCase().endsWith(".md")) continue;
-    if (base === "index.md" || base === "README.md") continue;
+    if (!isCardFileName(base)) continue;
     files.push({ name: entry.name, text: new TextDecoder().decode(entry.data) });
   }
   files.sort((a, b) => a.name.localeCompare(b.name, "en"));

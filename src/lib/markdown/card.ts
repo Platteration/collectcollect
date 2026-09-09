@@ -285,6 +285,10 @@ function numberRecord(value: unknown): Record<string, number> {
  */
 export function parseCardMarkdown(text: string): ParsedCard | null {
   const { data, body } = parseDocument(text);
+  // Every card file carries front matter. Without it this is prose that
+  // happens to have a title — the folder's own README, most likely — and
+  // reading it as a card would invent one.
+  if (Object.keys(data).length === 0) return null;
   const name = str(data.name) ?? str(/^#\s+(.*)$/m.exec(body)?.[1]);
   if (!name) return null;
   const warnings: string[] = [];
@@ -294,11 +298,11 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
   if (game !== rawGame) warnings.push(`Unknown game "${rawGame}", filed under Other`);
 
   const rawCondition = (str(data.condition) ?? "NM").toUpperCase();
-  const conditionValue = (rawCondition in CONDITIONS ? rawCondition : "NM") as Condition;
+  const conditionValue = (Object.hasOwn(CONDITIONS, rawCondition) ? rawCondition : "NM") as Condition;
   if (conditionValue !== rawCondition) warnings.push(`Unknown condition "${rawCondition}", read as NM`);
 
   const rawStatus = str(data.grading_status) ?? "undecided";
-  const gradingStatus = (rawStatus in GRADING_STATUSES ? rawStatus : "undecided") as GradingStatus;
+  const gradingStatus = (Object.hasOwn(GRADING_STATUSES, rawStatus) ? rawStatus : "undecided") as GradingStatus;
 
   const notesSection = readSection(body, "Notes");
   const identificationJson = readFenced(body, "Identification");

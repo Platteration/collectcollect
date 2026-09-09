@@ -14,7 +14,7 @@ export function CollectionFiles({ enabled }: Props) {
   const [busy, setBusy] = useState<"rebuild" | "import" | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [rebuilt, setRebuilt] = useState<{ written: number; removed: number } | null>(null);
+  const [rebuilt, setRebuilt] = useState<{ written: number; orphans: number } | null>(null);
   const [imported, setImported] = useState<CollectionImport | null>(null);
 
   const rebuild = async () => {
@@ -23,7 +23,7 @@ export function CollectionFiles({ enabled }: Props) {
     setImported(null);
     try {
       const res = await fetch("/api/collection/rebuild", { method: "POST" });
-      const json = (await res.json()) as { result?: { written: number; removed: number }; error?: string };
+      const json = (await res.json()) as { result?: { written: number; orphans: number }; error?: string };
       if (!res.ok) throw new Error(json.error ?? `Could not write the files (${res.status})`);
       setRebuilt(json.result!);
       router.refresh();
@@ -94,8 +94,10 @@ export function CollectionFiles({ enabled }: Props) {
       {error && <p className="text-sm text-red-700 dark:text-red-300">{error}</p>}
       {rebuilt && (
         <p className="text-sm text-green-800 dark:text-green-300">
-          Wrote {rebuilt.written} file{rebuilt.written === 1 ? "" : "s"}
-          {rebuilt.removed > 0 ? ` and cleared ${rebuilt.removed} that no longer matched a card` : ""}.
+          Wrote {rebuilt.written} file{rebuilt.written === 1 ? "" : "s"}.
+          {rebuilt.orphans > 0
+            ? ` ${rebuilt.orphans} other file${rebuilt.orphans === 1 ? " describes a card" : "s describe cards"} that ${rebuilt.orphans === 1 ? "is" : "are"} not in your collection; ${rebuilt.orphans === 1 ? "it was" : "they were"} left alone. Read them back in to recover them.`
+            : ""}
         </p>
       )}
       {imported && (
