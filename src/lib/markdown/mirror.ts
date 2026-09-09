@@ -403,17 +403,29 @@ export function collectionStatus(): CollectionStatus {
 }
 
 /**
- * Every file in the folder, relative to it: the index, the explainer and each
- * card. This is what a "take my collection elsewhere" download contains.
+ * Every file in the folder: the index, the explainer and each card, named
+ * relative to the folder and paired with the path to read it from. This is
+ * what a "take my collection elsewhere" download contains. It lists rather
+ * than reads, so packaging a large collection never holds it all in memory.
  */
-export function collectionFiles(): Array<{ name: string; text: string }> {
+export function collectionFiles(): Array<{ name: string; path: string; size: number }> {
   flushCollection();
-  const out: Array<{ name: string; text: string }> = [];
+  const out: Array<{ name: string; path: string; size: number }> = [];
+  const add = (name: string, file: string) => {
+    try {
+      out.push({ name, path: file, size: fs.statSync(file).size });
+    } catch {
+      /* it went away between listing and stat-ing; it simply is not in the archive */
+    }
+  };
   for (const name of ["README.md", "index.md"]) {
     const file = path.join(collectionDir(), name);
-    if (fs.existsSync(file)) out.push({ name, text: fs.readFileSync(file, "utf8") });
+    if (fs.existsSync(file)) add(name, file);
   }
-  for (const card of readCardFiles()) out.push({ name: `cards/${card.name}`, text: card.text });
+  const dir = cardsDir();
+  for (const name of fs.existsSync(dir) ? fs.readdirSync(dir).sort() : []) {
+    if (name.endsWith(".md")) add(`cards/${name}`, path.join(dir, name));
+  }
   return out;
 }
 

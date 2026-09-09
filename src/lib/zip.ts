@@ -37,6 +37,25 @@ export interface ZipEntry {
 /** The end-of-central-directory record counts entries in 16 bits. */
 export const ZIP_MAX_ENTRIES = 0xffff;
 
+/**
+ * Read a file in pieces, for use as a zip entry's `chunks`. Entries built this
+ * way never hold their file in memory, however many of them an archive has.
+ */
+export async function* fileChunks(file: string): AsyncGenerator<Uint8Array> {
+  const { open } = await import("node:fs/promises");
+  const handle = await open(file, "r");
+  try {
+    const buffer = new Uint8Array(64 * 1024);
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) return;
+      yield buffer.slice(0, bytesRead);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
 export function assertZippable(entries: Array<{ name: string; size: number }>): void {
   if (entries.length > ZIP_MAX_ENTRIES) {
     throw new Error(`An archive can hold ${ZIP_MAX_ENTRIES} files and this would have ${entries.length}. Copy the data directory instead.`);

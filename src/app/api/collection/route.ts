@@ -1,6 +1,6 @@
 import { collectionFiles } from "@/lib/markdown/mirror";
 import { errorMessage, jsonError } from "@/lib/http";
-import { assertZippable, zipStream, type ZipEntry } from "@/lib/zip";
+import { assertZippable, fileChunks, zipStream, type ZipEntry } from "@/lib/zip";
 
 /**
  * GET — the plain-text collection as a zip: one Markdown file per card, an
@@ -11,11 +11,11 @@ export async function GET() {
   try {
     const files = collectionFiles();
     if (!files.length) return jsonError("There is nothing in the collection yet", 404);
-    const encoder = new TextEncoder();
-    const entries: ZipEntry[] = files.map((file) => {
-      const bytes = encoder.encode(file.text);
-      return { name: file.name, size: bytes.length, chunks: () => [bytes] };
-    });
+    const entries: ZipEntry[] = files.map((file) => ({
+      name: file.name,
+      size: file.size,
+      chunks: () => fileChunks(file.path),
+    }));
     assertZippable(entries);
 
     const iterator = zipStream(entries);

@@ -6,7 +6,7 @@ import { listCards } from "./cards";
 import { dataDir, databaseFile, getDb, lockDatabase, openDatabase, setDb, unlockDatabase, uploadsDir } from "./db";
 import { isValidUploadName } from "./images";
 import { collectionDir, collectionFiles, rebuildCollection } from "./markdown/mirror";
-import { isSafeEntryName, readZip, zipStream, type ZipEntry } from "./zip";
+import { fileChunks, isSafeEntryName, readZip, zipStream, type ZipEntry } from "./zip";
 
 /**
  * Everything needed to restore a collection: a consistent copy of the database,
@@ -49,13 +49,11 @@ export async function buildBackup(): Promise<{ filename: string; stream: Readabl
     entries.push({ name: `uploads/${name}`, size, chunks: () => fileChunks(full) });
   }
 
-  const encoder = new TextEncoder();
   // The Markdown is a bonus inside the archive; the database and the photos are
   // the backup. An unreadable collection folder must not cost someone theirs.
   try {
     for (const file of collectionFiles()) {
-      const bytes = encoder.encode(file.text);
-      entries.push({ name: `collection/${file.name}`, size: bytes.length, chunks: () => [bytes] });
+      entries.push({ name: `collection/${file.name}`, size: file.size, chunks: () => fileChunks(file.path) });
     }
   } catch {
     /* the archive still holds everything needed to restore */
@@ -91,19 +89,6 @@ function getDbUnlocked() {
   return (globalThis as unknown as { __collectcollectDb?: { close: () => void } }).__collectcollectDb;
 }
 
-async function* fileChunks(file: string): AsyncGenerator<Uint8Array> {
-  const handle = await fsp.open(file, "r");
-  try {
-    const buffer = Buffer.allocUnsafe(64 * 1024);
-    for (;;) {
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
-      if (bytesRead === 0) return;
-      yield new Uint8Array(buffer.subarray(0, bytesRead));
-    }
-  } finally {
-    await handle.close();
-  }
-}
 
 /** A quick description of what a backup would contain, for the Settings page. */
 export function backupSummary(): { photos: number; databaseBytes: number; photoBytes: number } {
