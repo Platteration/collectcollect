@@ -2,6 +2,7 @@
 
 import type { OutlookPoint } from "@/lib/analytics";
 import { money } from "@/lib/format";
+import { useId } from "react";
 import { INK, bandPath, compactMoney, linePath, niceTicks, shortDate, timeTicks, useContainerWidth, useCrosshair, xScale, yScale, type Layout } from "./chart-utils";
 
 interface Props {
@@ -31,6 +32,7 @@ export function OutlookChart({ series, compact = false }: Props) {
   const lower: Array<[number, number]> = series.map((p, i) => [xs[i], sy(p.min)]);
   const raw: Array<[number, number]> = series.map((p, i) => [xs[i], sy(p.raw)]);
   const { index, onMove, onLeave, onKey, setIndex } = useCrosshair(xs);
+  const bandId = `outlook-band-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
 
   if (series.length === 0) {
     return (
@@ -57,6 +59,12 @@ export function OutlookChart({ series, compact = false }: Props) {
         onPointerLeave={onLeave}
         onKeyDown={onKey}
       >
+        <defs>
+          <linearGradient id={bandId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={INK.max} stopOpacity="0.34" />
+            <stop offset="100%" stopColor={INK.max} stopOpacity="0.05" />
+          </linearGradient>
+        </defs>
         {!compact &&
           ticks.map((v) => (
             <g key={v}>
@@ -74,7 +82,7 @@ export function OutlookChart({ series, compact = false }: Props) {
           </g>
         ) : (
           <g>
-            <path d={bandPath(upper, lower)} fill={INK.max} opacity={0.1} />
+            <path d={bandPath(upper, lower)} fill={`url(#${bandId})`} />
             <path d={linePath(upper)} fill="none" stroke={INK.max} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
             <path d={linePath(lower)} fill="none" stroke={INK.min} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
             <path d={linePath(raw)} fill="none" stroke={INK.raw} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
@@ -100,7 +108,7 @@ export function OutlookChart({ series, compact = false }: Props) {
       </svg>
       {active && (
         <div
-          className="pointer-events-none absolute top-0 z-10 rounded-md border border-black/10 bg-white px-2 py-1 text-xs shadow dark:border-white/10 dark:bg-neutral-900"
+          className="tooltip-surface pointer-events-none absolute top-0 z-10 rounded-md px-2 py-1 text-xs"
           style={{ left: `${(xs[index!] / layout.width) * 100}%`, transform: xs[index!] > layout.width / 2 ? "translateX(-105%)" : "translateX(8px)" }}
         >
           <div className="text-neutral-500">{shortDate(active.t, true)}</div>

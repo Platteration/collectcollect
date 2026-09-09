@@ -88,7 +88,17 @@ Identification runs on Claude (`claude-opus-5` by default; override with `CLAUDE
 
 ## Look and feel
 
-Graded cards render in a slab frame with the grading company's label colour, so a PSA 9 in the grid reads as a slab rather than a photo. Each uploaded photo's average colour is sampled at save time and tints that card's tile and page. The hero value and card names use a condensed display face. Everything is theme-aware; dark mode is a designed palette, not an inverted one.
+Dark is a **wireline** theme: a near-black ground with the interface drawn in white hairlines, so almost nothing is filled. That leaves saturation to mean something, and the only colours that carry are the ones that should — green when the collection is up, red when it is down. The portfolio line takes that colour and its area is a gradient of it, fading out towards the baseline so the line stays the loudest mark. Light mode keeps the validated chart palette and reads as an ordinary document.
+
+The theme follows your system by default; the switch in the header pins it to light or dark and remembers the choice. An inline script resolves the preference to a single `data-theme` attribute before the first paint, so there is no flash of the wrong theme, and both the CSS variables and Tailwind's `dark:` utilities key off that one attribute rather than duplicating the condition.
+
+Graded cards render in a slab frame with the grading company's label colour, so a PSA 9 in the grid reads as a slab rather than a photo. Each uploaded photo's average colour is sampled at save time and tints that card's tile and page. The hero value and card names use a condensed display face.
+
+## On a phone
+
+The app is installable. Add it to a home screen and it opens without browser chrome, with its own icon, in portrait, respecting the notch and home indicator. Phones get a fixed tab bar within thumb reach instead of the header row, and jump straight to scanning or adding a card from a long-press on the icon.
+
+A small service worker makes that work and lets the shell open without a network, showing a plain "no connection" page. It deliberately never caches API responses or page HTML: prices, grades and the collection itself change, and a stale answer about what something is worth would be worse than no answer.
 
 ## Project layout
 

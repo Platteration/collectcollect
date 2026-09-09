@@ -182,11 +182,15 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
               {returns.cardsWithCost === 0 ? " Record purchase prices to see your total return." : ""}
             </p>
           </div>
-          <div className="flex flex-col items-end gap-2">
+          {/* On a phone this wraps under the figure, so it reads left-aligned there
+              and right-aligned only once there is room beside the hero. */}
+          <div className="flex flex-col items-start gap-2 sm:items-end">
             <button type="button" className="btn-secondary" onClick={refreshAll} disabled={refreshing || cardCount === 0}>
               {refreshing ? "Refreshing…" : "Refresh all prices"}
             </button>
-            <span className="text-xs text-neutral-500">{message ?? (lastRefreshed ? `Last refresh ${when(lastRefreshed)}` : "Never refreshed")}</span>
+            <span className="text-xs" style={{ color: "var(--muted)" }}>
+              {message ?? (lastRefreshed ? `Last refresh ${when(lastRefreshed)}` : "Never refreshed")}
+            </span>
           </div>
         </div>
 
@@ -271,7 +275,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
               return (
                 <li key={o.id} className="card-surface p-3">
                   <div className="flex gap-3">
-                    <Link href={`/cards/${o.id}`} className="h-20 w-14 shrink-0 overflow-hidden rounded bg-neutral-100 dark:bg-neutral-800">
+                    <Link href={`/cards/${o.id}`} className="h-20 w-14 shrink-0 overflow-hidden rounded well">
                       {o.image ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={o.image} alt="" className="h-full w-full object-cover" loading="lazy" />
@@ -320,7 +324,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
         <section>
           <h2 className="mb-3 font-display text-xl font-semibold uppercase tracking-wide">By game</h2>
           <div className="card-surface p-4">
-            <div className="flex h-3 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800" role="img" aria-label="Share of collection value by game">
+            <div className="flex h-3 w-full overflow-hidden rounded-full well" role="img" aria-label="Share of collection value by game">
               {allocation.map((a) => (
                 <div key={a.game} style={{ width: `${a.share * 100}%`, background: GAME_COLORS[a.game], marginRight: 2 }} title={`${GAMES[a.game]} ${(a.share * 100).toFixed(0)}%`} />
               ))}
@@ -385,7 +389,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
             {holdings.map((h) => (
               <li key={h.id}>
                 <Link href={`/cards/${h.id}`} className="flex items-center gap-3 px-3 py-2 hover:bg-black/[0.03] dark:hover:bg-white/5">
-                  <div className="h-12 w-9 shrink-0 overflow-hidden rounded bg-neutral-100 dark:bg-neutral-800">
+                  <div className="h-12 w-9 shrink-0 overflow-hidden rounded well">
                     {h.image ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={h.image} alt="" className="h-full w-full object-cover" loading="lazy" />

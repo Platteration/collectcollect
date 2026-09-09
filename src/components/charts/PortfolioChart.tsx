@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import type { PortfolioPoint } from "@/lib/analytics";
 import { money } from "@/lib/format";
+import { useId } from "react";
 import { INK, areaPath, compactMoney, linePath, niceTicks, shortDate, timeTicks, useContainerWidth, useCrosshair, xScale, yScale, type Layout } from "./chart-utils";
 
 interface Props {
@@ -32,6 +33,8 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
   const { index, onMove, onLeave, onKey, setIndex } = useCrosshair(xs);
   const color = up ? INK.good : INK.bad;
   const baseline = sy(lo);
+  // Two charts on one page must not share a gradient id.
+  const gradientId = `value-fill-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
 
   // Pointer, keyboard and hit-rect updates all land on `index`; report every change upward.
   useEffect(() => {
@@ -62,6 +65,15 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
         onPointerLeave={onLeave}
         onKeyDown={onKey}
       >
+        <defs>
+          {/* The fill carries the direction: green climbing, red falling,
+              fading out towards the baseline so the line stays the loudest mark. */}
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+            <stop offset="45%" stopColor={color} stopOpacity="0.08" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
         {ticks.map((v) => (
           <g key={v}>
             <line x1={layout.left} x2={layout.width - layout.right} y1={sy(v)} y2={sy(v)} stroke={INK.grid} strokeWidth={1} />
@@ -70,7 +82,7 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
             </text>
           </g>
         ))}
-        <path d={areaPath(coords, baseline)} fill={color} opacity={0.1} />
+        <path d={areaPath(coords, baseline)} fill={`url(#${gradientId})`} />
         <path d={linePath(coords)} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
         {points.length === 1 && <circle cx={coords[0][0]} cy={coords[0][1]} r={4} fill={color} stroke={INK.surface} strokeWidth={2} />}
         {timeTicks(times, xs, points.map((p) => shortDate(p.t)), narrow ? 3 : 4).map((i) => (
@@ -91,7 +103,7 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
       </svg>
       {active && (
         <div
-          className="pointer-events-none absolute top-0 rounded-md border border-black/10 bg-white px-2 py-1 text-xs shadow dark:border-white/10 dark:bg-neutral-900"
+          className="tooltip-surface pointer-events-none absolute top-0 rounded-md px-2 py-1 text-xs"
           style={{ left: `${(xs[index!] / layout.width) * 100}%`, transform: xs[index!] > layout.width / 2 ? "translateX(-105%)" : "translateX(8px)" }}
         >
           <div className="font-semibold">{money(active.value)}</div>

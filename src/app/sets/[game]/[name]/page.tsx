@@ -50,7 +50,7 @@ export default async function SetPage({ params }: PageProps<"/sets/[game]/[name]
             <ul className="card-surface max-h-[32rem] divide-y divide-black/5 overflow-y-auto dark:divide-white/5">
               {missing.map((c) => (
                 <li key={`${c.number}-${c.name}`} className="flex items-center gap-3 px-3 py-2 text-sm">
-                  <div className="h-12 w-9 shrink-0 overflow-hidden rounded bg-neutral-100 dark:bg-neutral-800">
+                  <div className="h-12 w-9 shrink-0 overflow-hidden rounded well">
                     {c.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={c.imageUrl} alt="" className="h-full w-full object-cover" loading="lazy" />

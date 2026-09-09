@@ -351,7 +351,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
               </div>
             )}
             {lastOutlook?.likely !== null && lastOutlook?.likelyLabel && (
-              <p className="mb-3 rounded-md bg-neutral-100 px-3 py-2 text-sm dark:bg-neutral-800">
+              <p className="mb-3 rounded-md well px-3 py-2 text-sm">
                 The photo suggests this copy would grade around{" "}
                 <strong>
                   {assessment?.estimated_grade_low && assessment.estimated_grade_low !== assessment.estimated_grade_high

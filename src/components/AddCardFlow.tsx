@@ -320,10 +320,10 @@ function ItemCard({
           {item.previews.length ? (
             item.previews.map((src) => (
               // eslint-disable-next-line @next/next/no-img-element
-              <img key={src} src={src} alt="" className="w-full rounded-lg bg-neutral-100 object-contain dark:bg-neutral-800" />
+              <img key={src} src={src} alt="" className="w-full rounded-lg well object-contain" />
             ))
           ) : (
-            <div className="flex aspect-[3/4] items-center justify-center rounded-lg bg-neutral-100 text-sm text-neutral-400 dark:bg-neutral-800">
+            <div className="flex aspect-[3/4] items-center justify-center rounded-lg well text-sm text-neutral-400">
               No photo
             </div>
           )}

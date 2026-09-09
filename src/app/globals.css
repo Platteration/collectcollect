@@ -1,8 +1,32 @@
 @import "tailwindcss";
 
+/*
+ * The theme is always resolved to an explicit data-theme by the inline script
+ * in the layout, so "system" never has to be expressed in CSS: one attribute
+ * decides everything, including Tailwind's dark: utilities.
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
   --background: #f6f5f2;
   --foreground: #1c1b1a;
+  /* Hairlines that draw the interface. In dark they are the whole aesthetic. */
+  --line: rgba(11, 11, 11, 0.12);
+  --line-strong: rgba(11, 11, 11, 0.22);
+  --surface: #ffffff;
+  --surface-raised: rgba(11, 11, 11, 0.03);
+  --muted: rgba(28, 27, 26, 0.62);
+}
+
+[data-theme="dark"] {
+  /* Wireline: a near-black ground with the interface drawn in white hairlines. */
+  --background: #08090a;
+  --foreground: #f2f4f5;
+  --line: rgba(255, 255, 255, 0.16);
+  --line-strong: rgba(255, 255, 255, 0.32);
+  --surface: rgba(255, 255, 255, 0.022);
+  --surface-raised: rgba(255, 255, 255, 0.06);
+  --muted: rgba(242, 244, 245, 0.56);
 }
 
 @theme inline {
@@ -11,46 +35,85 @@
   --font-display: var(--font-display), ui-sans-serif, system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #121110;
-    --foreground: #ece9e4;
-  }
+html {
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* Room for a phone's home indicator and notch when installed. */
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .card-surface {
-  @apply rounded-xl border border-black/10 bg-white shadow-sm dark:border-white/10 dark:bg-neutral-900;
+  border-radius: 0.75rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+:root:not([data-theme="dark"]) .card-surface {
+  box-shadow: 0 1px 2px rgba(11, 11, 11, 0.04);
 }
 @utility btn {
   @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
 }
 .btn-primary {
-  @apply btn bg-amber-600 text-white hover:bg-amber-700;
+  @apply btn;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
 }
 .btn-secondary {
-  @apply btn border border-black/15 bg-white text-neutral-800 hover:bg-neutral-100 dark:border-white/15 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-neutral-700;
+  @apply btn;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--foreground);
+}
+.btn-secondary:hover {
+  background: var(--surface-raised);
 }
 .btn-danger {
-  @apply btn border border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950;
+  @apply btn;
+  border: 1px solid color-mix(in srgb, var(--chart-bad) 45%, transparent);
+  color: var(--chart-bad-text);
+  background: transparent;
+}
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--chart-bad) 12%, transparent);
 }
 .input {
-  @apply w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/30 dark:border-white/15 dark:bg-neutral-800 dark:text-neutral-100;
+  @apply w-full rounded-lg px-3 py-2 text-sm outline-none;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--foreground);
+}
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-solid) 25%, transparent);
 }
 .label {
-  @apply mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400;
+  @apply mb-1 block text-xs font-medium uppercase tracking-wide;
+  color: var(--muted);
 }
 .badge {
   @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
 }
 
-/* Chart chrome + validated series palette (see dataviz reference palette). */
+/*
+ * Chart chrome. In light this is the validated palette from the dataviz
+ * reference; in dark the chrome becomes white hairlines and only the
+ * up/down colours carry saturation, which is what makes the wireline read.
+ */
 :root {
+  --accent: #d97706;
+  --accent-ink: #ffffff;
+  --accent-solid: #d97706;
   --chart-surface: #ffffff;
   --chart-grid: #e1e0d9;
   --chart-axis: #c3c2b7;
@@ -59,27 +122,38 @@ body {
   --chart-good-text: #006300;
   --chart-bad: #d03b3b;
   --chart-bad-text: #b32b2b;
-  --chart-series-1: #2a78d6; /* blue: raw / your copy */
+  --chart-raw: #2a78d6; /* the owner's own copy, in the outlook chart */
+  --chart-series-1: #2a78d6; /* blue */
   --chart-series-2: #eb6834; /* orange: gem-mint outcome */
   --chart-series-3: #1baf7a; /* aqua: mid-grade outcome */
   --chart-series-4: #eda100; /* yellow */
   --chart-series-5: #e87ba4; /* magenta */
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --chart-surface: #171717;
-    --chart-grid: #2c2c2a;
-    --chart-axis: #383835;
-    --chart-muted: #898781;
-    --chart-good-text: #0ca30c;
-    --chart-bad-text: #e66767;
-    --chart-series-1: #3987e5;
-    --chart-series-2: #d95926;
-    --chart-series-3: #199e70;
-    --chart-series-4: #c98500;
-    --chart-series-5: #d55181;
-  }
+
+[data-theme="dark"] {
+  /* In the wireline theme the one filled control is white on black. */
+  --accent: #f5f6f7;
+  --accent-ink: #08090a;
+  --accent-solid: #9aa0a6;
+  --chart-surface: #08090a;
+  --chart-grid: rgba(255, 255, 255, 0.09);
+  --chart-axis: rgba(255, 255, 255, 0.3);
+  --chart-muted: rgba(242, 244, 245, 0.55);
+  /* The two colours the eye is meant to find on a dark ground. */
+  --chart-good: #2fe08a;
+  --chart-good-text: #4ff0a1;
+  --chart-bad: #ff5f6d;
+  --chart-bad-text: #ff8189;
+  /* The white wire is reserved for the owner's own line; using it as a
+     categorical colour would let one game shout over the others. */
+  --chart-raw: #ffffff;
+  --chart-series-1: #7fb2ff;
+  --chart-series-2: #ff9d5c;
+  --chart-series-3: #58d6a8;
+  --chart-series-4: #f5d06a;
+  --chart-series-5: #f19ec2;
 }
+
 .delta-up { color: var(--chart-good-text); }
 .delta-down { color: var(--chart-bad-text); }
 
@@ -172,4 +246,30 @@ body {
   .report thead {
     display: table-header-group;
   }
+}
+
+/* The mobile tab bar sits above the home indicator when installed. */
+.tabbar {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+/* Header respects a notch in landscape. */
+.safe-x {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+/*
+ * Wells: image placeholders and progress tracks. A mid-grey block reads as a
+ * slab against the wireline ground, so these are a faint tint with a hairline.
+ */
+.well {
+  background: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+/* Chart tooltips sit over the plot, so they need their own opaque ground. */
+.tooltip-surface {
+  background: color-mix(in srgb, var(--background) 92%, var(--foreground) 8%);
+  border: 1px solid var(--line-strong);
+  color: var(--foreground);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }

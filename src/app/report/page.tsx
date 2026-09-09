@@ -81,7 +81,7 @@ export default function ReportPage() {
               <tr key={card.id} className="break-inside-avoid border-b border-black/5 align-top dark:border-white/5">
                 <td className="py-2 pr-2">
                   <div className="flex items-center gap-2">
-                    <div className="h-14 w-10 shrink-0 overflow-hidden rounded bg-neutral-100 dark:bg-neutral-800">
+                    <div className="h-14 w-10 shrink-0 overflow-hidden rounded well">
                       {src ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={src} alt="" className="h-full w-full object-cover" />

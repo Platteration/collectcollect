@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, authEnabled, verifyToken } from "@/lib/auth";
 
 /** Paths that must stay reachable without a session, or the login page cannot load. */
-const PUBLIC = ["/login", "/api/auth"];
+const PUBLIC = ["/login", "/api/auth", "/offline", "/manifest.webmanifest", "/icons", "/sw.js"];
 
 export async function proxy(request: NextRequest) {
   if (!authEnabled()) return NextResponse.next();

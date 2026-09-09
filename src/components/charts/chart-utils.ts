@@ -144,7 +144,7 @@ export const INK = {
   surface: "var(--chart-surface)",
   good: "var(--chart-good)",
   bad: "var(--chart-bad)",
-  raw: "var(--chart-series-1)",
+  raw: "var(--chart-raw)",
   max: "var(--chart-series-2)",
   min: "var(--chart-series-3)",
 };

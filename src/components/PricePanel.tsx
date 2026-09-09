@@ -36,7 +36,7 @@ export function PricePanel({ summary, loading, onRefresh, title = "Market prices
               <div className="text-2xl font-semibold">{money(summary.yourCopyValue)}</div>
               <div className="mt-1 text-xs text-neutral-600 dark:text-neutral-300">{summary.yourCopyBasis}</div>
             </div>
-            <div className="rounded-lg bg-neutral-100 p-3 dark:bg-neutral-800">
+            <div className="rounded-lg well p-3">
               <div className="text-xs uppercase tracking-wide text-neutral-500">Ungraded (raw NM)</div>
               <div className="text-2xl font-semibold">{money(summary.ungraded)}</div>
               <div className="mt-1 text-xs text-neutral-600 dark:text-neutral-300">

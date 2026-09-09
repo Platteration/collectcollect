@@ -9,7 +9,7 @@ export function CardTile({ card, price, selected = false }: { card: CardRecord; 
   return (
     <Link href={`/cards/${card.id}`} className={`card-surface group flex flex-col overflow-hidden hover:shadow-md ${card.quantity === 0 ? "opacity-60" : ""} ${selected ? "ring-2 ring-amber-500" : ""}`}>
       <div
-        className={`relative aspect-[3/4] bg-neutral-100 p-2 dark:bg-neutral-800 ${card.accentColor ? "accent-wash" : ""}`}
+        className={`relative aspect-[3/4] well p-2 ${card.accentColor ? "accent-wash" : ""}`}
         style={card.accentColor ? ({ "--accent": card.accentColor } as React.CSSProperties) : undefined}
       >
         {graded ? (

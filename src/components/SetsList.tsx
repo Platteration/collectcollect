@@ -71,7 +71,7 @@ export function SetsList({ sets }: { sets: SetProgress[] }) {
             </div>
 
             {percent !== null && (
-              <div className="mt-3 h-2 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
+              <div className="mt-3 h-2 overflow-hidden rounded-full well">
                 <div className="h-full rounded-full bg-[var(--chart-series-3)]" style={{ width: `${percent}%` }} />
               </div>
             )}

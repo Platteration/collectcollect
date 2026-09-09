@@ -171,7 +171,10 @@ export function CollectionGrid({
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         {cards.map(({ card, price }) => (
           <div key={card.id} className="relative">
-            <label className="absolute left-2 top-2 z-10 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-white/85 shadow-sm dark:bg-neutral-900/85">
+            <label
+              className="absolute left-2 top-2 z-10 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md shadow-sm"
+              style={{ background: "color-mix(in srgb, var(--background) 85%, transparent)" }}
+            >
               <span className="sr-only">Select {card.name}</span>
               <input type="checkbox" className="h-4 w-4" checked={selected.has(card.id)} onChange={() => toggle(card.id)} />
             </label>

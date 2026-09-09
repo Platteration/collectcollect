@@ -348,7 +348,7 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
           <ul className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             {items.map((it) => (
               <li key={it.key} className="overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
-                <div className="relative aspect-[3/4] bg-neutral-100 dark:bg-neutral-800">
+                <div className="relative aspect-[3/4] well">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={it.preview} alt="" className="h-full w-full object-cover" />
                   <span className={`badge absolute left-1.5 top-1.5 ${STATUS_STYLE[it.status]}`}>{STATUS_LABEL[it.status]}</span>
