@@ -84,7 +84,10 @@ export const pokemonTcgProvider: PriceProvider = {
     const knownId = q.externalIds?.pokemontcg;
     if (knownId) {
       const res = await fetchImpl(`https://api.pokemontcg.io/v2/cards/${encodeURIComponent(knownId)}`, { headers });
-      if (res.ok) cards = [((await res.json()) as { data: PtcgCard }).data];
+      // A 200 whose body has no `data` would otherwise put undefined in the
+      // list and blow up in scoring; fall through to the search instead.
+      const one = res.ok ? ((await res.json()) as { data?: PtcgCard }).data : null;
+      if (one) cards = [one];
     }
     if (cards.length === 0) {
       const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(buildQuery(q))}&pageSize=50&orderBy=-set.releaseDate`;

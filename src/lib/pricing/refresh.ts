@@ -51,6 +51,12 @@ export interface RefreshResult {
 /** When each card was last attempted, so cards that yield no price are retried on the normal cadence, not every tick. */
 const lastAttempt = new Map<number, number>();
 
+/** Forget every attempt. Card ids restart with each test database, so a test
+ * that did not clear this would inherit another test's throttling. */
+export function resetRefreshThrottle(): void {
+  lastAttempt.clear();
+}
+
 /**
  * Refresh every card (or only those neither refreshed nor attempted within
  * `staleHours`). Runs a couple at a time to stay polite to the free APIs.

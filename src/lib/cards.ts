@@ -122,14 +122,16 @@ export function normalizeInput(input: CardInput): Required<
   Omit<CardInput, "identification">
 > & { identification: Identification | null } {
   const game = str(input.game) as Game | null;
-  if (!game || !(game in GAMES)) throw new Error(`Unknown game: ${input.game}`);
+  // Object.hasOwn, not `in`: "constructor" and "toString" are on every object's
+  // prototype, and would otherwise pass as a game, a condition or a status.
+  if (!game || !Object.hasOwn(GAMES, game)) throw new Error(`Unknown game: ${input.game}`);
   const name = str(input.name);
   if (!name) throw new Error("Card name is required");
   const condition = (str(input.condition) ?? "NM") as Condition;
-  if (!(condition in CONDITIONS)) throw new Error(`Unknown condition: ${condition}`);
+  if (!Object.hasOwn(CONDITIONS, condition)) throw new Error(`Unknown condition: ${condition}`);
   const quantity = Math.max(0, Math.floor(num(input.quantity) ?? 1));
   const gradingStatus = (str(input.gradingStatus) ?? "undecided") as GradingStatus;
-  if (!(gradingStatus in GRADING_STATUSES)) throw new Error(`Unknown grading status: ${gradingStatus}`);
+  if (!Object.hasOwn(GRADING_STATUSES, gradingStatus)) throw new Error(`Unknown grading status: ${gradingStatus}`);
   const gradedNums: Record<string, number> = {};
   for (const [k, v] of Object.entries(input.manualGraded ?? {})) {
     const n = num(v);
@@ -250,6 +252,27 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
   return card;
 }
 
+function normalizeSet(value: string | null | undefined): string {
+  return (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Two set names for the same set. One being written more fully than the other
+ * is fine ("Base" for "Base Set"), but what the longer one adds must not be a
+ * number: "Base Set" and "Base Set 2" are different sets, and merging a card
+ * from one into the other would quietly lose a card.
+ */
+function sameSet(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [shorter, longer] = a.length < b.length ? [a, b] : [b, a];
+  const extra = longer.startsWith(shorter)
+    ? longer.slice(shorter.length)
+    : longer.endsWith(shorter)
+      ? longer.slice(0, longer.length - shorter.length)
+      : null;
+  return extra !== null && !/\d/.test(extra);
+}
+
 /**
  * Cards that look like the same card (same game and name, and a matching
  * number or set when either side has one). Used to catch accidental
@@ -261,14 +284,13 @@ export function findSimilar(input: { game: Game; name: string; cardNumber?: stri
   const rows = getDb()
     .prepare("SELECT * FROM cards WHERE game = ? AND lower(trim(name)) = ? ORDER BY updated_at DESC")
     .all(input.game, name) as CardRow[];
-  const norm = (v: string | null | undefined) => (v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const num = normalizeNumber(input.cardNumber);
-  const set = norm(input.setName);
+  const set = normalizeSet(input.setName);
   return rows.map(rowToCard).filter((c) => {
     const cnum = normalizeNumber(c.cardNumber);
-    const cset = norm(c.setName);
+    const cset = normalizeSet(c.setName);
     if (num && cnum) return num === cnum;
-    if (set && cset) return set === cset || set.includes(cset) || cset.includes(set);
+    if (set && cset) return sameSet(set, cset);
     return true; // neither side has distinguishing detail: same name is the best we can do
   });
 }
@@ -351,8 +373,11 @@ export function listCards(opts: ListOptions = {}): CardRecord[] {
     params.game = opts.game;
   }
   if (opts.search?.trim()) {
-    where.push("(name LIKE @q OR set_name LIKE @q OR card_number LIKE @q OR notes LIKE @q OR sport LIKE @q OR location LIKE @q)");
-    params.q = `%${opts.search.trim()}%`;
+    // % and _ are LIKE wildcards; someone searching for "50%" or "Ex_2" means
+    // those characters, not "match anything".
+    const clauses = ["name", "set_name", "card_number", "notes", "sport", "location"].map((c) => `${c} LIKE @q ESCAPE '\\'`);
+    where.push(`(${clauses.join(" OR ")})`);
+    params.q = `%${opts.search.trim().replace(/[\\%_]/g, "\\$&")}%`;
   }
   if (opts.location !== undefined) {
     if (opts.location === "") where.push("(location IS NULL OR trim(location) = '')");

@@ -40,8 +40,11 @@ export function parseCsv(text: string): string[][] {
       started = true;
       continue;
     }
-    if (ch === "\r") continue;
-    if (ch === "\n") {
+    // CRLF is one break, and a lone CR is still a break: some exports are
+    // still written with classic Mac endings, which would otherwise read as a
+    // single enormous row.
+    if (ch === "\r" && text[i + 1] === "\n") continue;
+    if (ch === "\n" || ch === "\r") {
       row.push(field);
       rows.push(row);
       row = [];

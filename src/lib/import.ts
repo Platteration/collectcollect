@@ -225,7 +225,7 @@ function readGrade(cell: string, companyColumn: string): { grade: string | null;
 }
 
 function parseMoney(text: string): number | null {
-  if (!text) return null;
+  if (!text || !/\d/.test(text)) return null;
   const n = Number(text.replace(/[$£€,\s]/g, ""));
   return Number.isFinite(n) && n >= 0 ? n : null;
 }

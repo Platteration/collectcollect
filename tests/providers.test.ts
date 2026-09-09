@@ -51,6 +51,21 @@ describe("Pokémon TCG provider", () => {
     expect(quotes[0].ungradedVariants).toEqual({ Holofoil: 400, "1st Edition Holofoil": 5000 });
     expect(quotes[1]).toMatchObject({ currency: "EUR", ungraded: 380.5 });
   });
+  it("falls back to searching when a stored id answers with nothing", async () => {
+    // A 200 with no `data` used to put `undefined` straight into the results.
+    const fetchImpl = fakeFetch([
+      ["v2/cards/base1-4", {}],
+      [
+        "api.pokemontcg.io/v2/cards?q=",
+        { data: [{ id: "base1-4", name: "Charizard", number: "4", set: { id: "base1", name: "Base" }, tcgplayer: { prices: { holofoil: { market: 415 } } } }] },
+      ],
+    ]);
+    const quotes = await pokemonTcgProvider.lookup(
+      { game: "pokemon", name: "Charizard", externalIds: { pokemontcg: "base1-4" } },
+      fetchImpl,
+    );
+    expect(quotes[0].ungraded).toBe(415);
+  });
   it("uses a stored id directly", async () => {
     const fetchImpl = fakeFetch([
       ["v2/cards/base1-4", { data: { id: "base1-4", name: "Charizard", number: "4", set: { id: "base1", name: "Base" }, tcgplayer: { prices: { holofoil: { market: 410 } } } } }],

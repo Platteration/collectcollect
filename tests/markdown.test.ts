@@ -6,6 +6,7 @@ import { addSnapshot, createCard, deleteCard, listCards, updateCard } from "@/li
 import { deleteSale, recordSale } from "@/lib/sales";
 import { cardsDir, collectionDir, collectionStatus, flushCollection, readCardFiles, rebuildCollection } from "@/lib/markdown/mirror";
 import { importCardFiles } from "@/lib/markdown/restore";
+import { latestSnapshotsByCard } from "@/lib/cards";
 import { parseCardMarkdown } from "@/lib/markdown/card";
 import { parseDocument, readSection, readTable, writeFrontMatter } from "@/lib/markdown/format";
 import type { PriceSummary } from "@/lib/types";
@@ -215,6 +216,34 @@ describe("recovering a collection from its files", () => {
     expect(listCards()).toHaveLength(1);
   });
 
+  it("writes the recovered card back under the id its file claimed", () => {
+    createCard({ game: "pokemon", name: "Filler" });
+    createCard({ game: "pokemon", name: "Filler two" });
+    const zapdos = createCard({ game: "pokemon", name: "Zapdos", setName: "Base Set" });
+    flushCollection();
+    const file = readCardFiles().find((f) => f.name.includes("zapdos"))!;
+
+    setDb(openDatabase(":memory:"));
+    importCardFiles([file]);
+    expect(listCards()[0].id).toBe(zapdos.id);
+    expect(fs.readdirSync(cardsDir())).toContain(`000${zapdos.id}-zapdos-base-set.md`);
+  });
+
+  it("never overwrites a card that merely shares an id", () => {
+    createCard({ game: "pokemon", name: "Somebody Else's Charizard", setName: "Base Set" });
+    flushCollection();
+    const [stranger] = readCardFiles();
+
+    setDb(openDatabase(":memory:"));
+    const mine = createCard({ game: "yugioh", name: "Dark Magician" });
+    const result = importCardFiles([stranger]);
+    expect(result).toMatchObject({ created: 1, replaced: 0 });
+    expect(result.warnings[0].message).toContain("Dark Magician");
+    const cards = listCards();
+    expect(cards).toHaveLength(2);
+    expect(cards.find((c) => c.id === mine.id)!.name).toBe("Dark Magician");
+  });
+
   it("keeps handing out fresh ids after adopting the ones in the files", () => {
     createCard({ game: "pokemon", name: "First" });
     createCard({ game: "pokemon", name: "Second" });
@@ -239,8 +268,33 @@ describe("recovering a collection from its files", () => {
   it("rebuilds the folder from the database and clears strays", () => {
     createCard({ game: "pokemon", name: "Eevee" });
     fs.writeFileSync(path.join(cardsDir(), "9999-not-a-card.md"), "leftover\n");
+    fs.writeFileSync(path.join(cardsDir(), "0001-half-written.md.tmp"), "half\n");
     const result = rebuildCollection(listCards());
     expect(result).toMatchObject({ written: 1, removed: 1 });
     expect(collectionStatus().files).toBe(1);
+    expect(fs.readdirSync(cardsDir())).toEqual(["0001-eevee.md"]);
+  });
+
+  it("survives losing the database entirely", () => {
+    // The whole promise: throw away everything but the folder, and the
+    // collection still values the same.
+    const a = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", quantity: 2, purchasePrice: 100 });
+    const b = createCard({ game: "mtg", name: "Black Lotus", quantity: 1, purchasePrice: 400 });
+    addSnapshot(a.id, summary(300, "2026-01-02T10:00:00.000Z"));
+    addSnapshot(b.id, summary(9000, "2026-01-02T10:00:00.000Z"));
+    flushCollection();
+    const before = totalValue();
+    const files = readCardFiles();
+
+    setDb(openDatabase(":memory:"));
+    importCardFiles(files);
+    expect(totalValue()).toBe(before);
+    expect(before).toBe(300 * 2 + 9000);
   });
 });
+
+/** What the portfolio is worth, the way the app totals it. */
+function totalValue(): number {
+  const latest = latestSnapshotsByCard();
+  return listCards().reduce((sum, card) => sum + (latest.get(card.id)?.summary.yourCopyValue ?? 0) * card.quantity, 0);
+}

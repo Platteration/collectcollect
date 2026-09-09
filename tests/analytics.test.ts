@@ -143,3 +143,23 @@ describe("returns and allocation", () => {
     expect(a[0].share).toBeCloseTo(650 / 666);
   });
 });
+
+describe("ranges with nothing recent in them", () => {
+  it("still shows the last known value when every point is older than the window", () => {
+    const points = [
+      { t: day(0), value: 10 },
+      { t: day(1), value: 20 },
+    ];
+    const now = new Date(Date.UTC(2026, 6, 1)).getTime();
+    expect(sliceRange(points, "1W", now)).toEqual([points[1]]);
+    expect(sliceRange(points, "ALL", now)).toHaveLength(2);
+    expect(sliceRange([], "1W", now)).toEqual([]);
+  });
+
+  it("reports a fall as a fall", () => {
+    expect(change([{ t: day(0), value: 200 }, { t: day(1), value: 150 }])).toMatchObject({ amount: -50, percent: -25 });
+    // Nothing to divide by: a percentage would be a lie, so there isn't one.
+    expect(change([{ t: day(0), value: 0 }, { t: day(1), value: 40 }])).toMatchObject({ amount: 40, percent: null });
+  });
+});
+

@@ -80,7 +80,10 @@ export function gradeKey(company: string | null | undefined, grade: string | nul
   const g = (grade ?? "").trim().replace(/^grade\s*/i, "");
   if (!g) return null;
   const c = (company ?? "").trim().toUpperCase();
-  const gnum = g.replace(/[^0-9.]/g, "") || g;
+  const digits = g.replace(/[^0-9.]/g, "");
+  // "10.0" and "9.50" are the same grades as "10" and "9.5"; a trailing zero
+  // would otherwise miss every price a source publishes.
+  const gnum = digits && Number.isFinite(Number(digits)) ? String(Number(digits)) : digits || g;
   return c && c !== "OTHER" ? `${c} ${gnum}` : `Grade ${gnum}`;
 }
 

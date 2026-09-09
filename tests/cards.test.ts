@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { openDatabase, setDb } from "@/lib/db";
+import { getDb, openDatabase, setDb } from "@/lib/db";
 import { addSnapshot, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
+import { recordSale } from "@/lib/sales";
+import { createAlert } from "@/lib/alerts";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { DEFAULT_SETTINGS, type PriceSummary } from "@/lib/types";
 
@@ -170,5 +172,53 @@ describe("intakeCard", () => {
     const merged = intakeCard({ game: "mtg", name: "Ragavan", imagePath: "11111111-2222-4333-8444-555555555555.jpg", accentColor: "#abcdef" });
     if (merged.result !== "merged") throw new Error("expected a merge");
     expect(merged.card).toMatchObject({ imagePath: "11111111-2222-4333-8444-555555555555.jpg", accentColor: "#abcdef", quantity: 2 });
+  });
+});
+
+describe("what the repository refuses and what it matches", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("does not accept a key it inherited from Object as a game or a condition", () => {
+    expect(() => createCard({ game: "constructor" as never, name: "Nice try" })).toThrow(/Unknown game/);
+    expect(() => createCard({ game: "pokemon", name: "Nice try", condition: "toString" as never })).toThrow(/Unknown condition/);
+    expect(() => createCard({ game: "pokemon", name: "Nice try", gradingStatus: "hasOwnProperty" as never })).toThrow(/Unknown grading status/);
+  });
+
+  it("searches for the characters typed, not for LIKE wildcards", () => {
+    createCard({ game: "pokemon", name: "Bulbasaur", notes: "50% off" });
+    createCard({ game: "pokemon", name: "Charmander" });
+    expect(listCards({ search: "50%" }).map((c) => c.name)).toEqual(["Bulbasaur"]);
+    // A bare "%" is a wildcard in LIKE; here it must find only the card that
+    // really has one, not the whole collection.
+    expect(listCards({ search: "%" }).map((c) => c.name)).toEqual(["Bulbasaur"]);
+    expect(listCards({ search: "_" })).toHaveLength(0);
+  });
+
+  it("applies every filter it is given at once", () => {
+    createCard({ game: "pokemon", name: "Gengar", location: "Box A" });
+    createCard({ game: "pokemon", name: "Gengar", location: "Box B" });
+    createCard({ game: "yugioh", name: "Gengar-ish", location: "Box A" });
+    expect(listCards({ game: "pokemon", search: "Gengar", location: "Box A" })).toHaveLength(1);
+  });
+
+  it("treats a differently numbered set as a different set", () => {
+    createCard({ game: "pokemon", name: "Charizard", setName: "Base Set" });
+    // "Base" is how someone writes "Base Set" in a hurry.
+    expect(findSimilar({ game: "pokemon", name: "Charizard", setName: "Base" })).toHaveLength(1);
+    // "Base Set 2" is a different set, and merging into it would lose a card.
+    expect(findSimilar({ game: "pokemon", name: "Charizard", setName: "Base Set 2" })).toHaveLength(0);
+  });
+
+  it("takes a card's prices, sales and alerts with it when it goes", () => {
+    const card = createCard({ game: "pokemon", name: "Doomed", quantity: 2 });
+    addSnapshot(card.id, summary(5));
+    recordSale(card.id, { quantity: 1, unitPrice: 10 });
+    createAlert({ kind: "price_move", cardId: card.id, title: "Moved", body: "up" });
+    const db = getDb();
+    expect(db.prepare("SELECT COUNT(*) AS n FROM price_snapshots").get()).toEqual({ n: 1 });
+    deleteCard(card.id);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM price_snapshots").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM sales").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM alerts").get()).toEqual({ n: 0 });
   });
 });

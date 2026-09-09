@@ -1,9 +1,9 @@
-import { createCard, discardDeferredMirror, flushDeferredMirror, getCard, updateCard } from "../cards";
+import { createCard, discardDeferredMirror, getCard, updateCard } from "../cards";
 import { getDb } from "../db";
 import type { CardRecord } from "../types";
 import { isSafeEntryName, readZip } from "../zip";
 import { parseCardMarkdown } from "./card";
-import { readCardFiles } from "./mirror";
+import { mirrorCard, readCardFiles } from "./mirror";
 
 /**
  * Reading a collection back out of its Markdown files.
@@ -30,6 +30,7 @@ export const IMPORT_MAX_BYTES = 128 * 1024 * 1024;
 export function importCardFiles(files: Array<{ name: string; text: string }>): CollectionImport {
   const result: CollectionImport = { created: 0, replaced: 0, sales: 0, prices: 0, skipped: [], warnings: [] };
   const db = getDb();
+  const touched: number[] = [];
 
   const run = db.transaction(() => {
     for (const file of files) {
@@ -42,14 +43,20 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
 
       let card: CardRecord | null = null;
       const wanted = parsed.id;
-      const existing = wanted === null ? null : getCard(wanted);
-      if (existing) {
-        card = updateCard(existing.id, parsed.input);
+      const holder = wanted === null ? null : getCard(wanted);
+      if (holder && isSameCard(holder, parsed.input.name, parsed.input.setName ?? null)) {
+        card = updateCard(holder.id, parsed.input);
         if (card) result.replaced++;
       } else {
+        if (holder) {
+          result.warnings.push({
+            file: file.name,
+            message: `Card ${wanted} here is "${holder.name}", not "${parsed.input.name}", so this was added as a new card instead of replacing it`,
+          });
+        }
         card = createCard(parsed.input);
         result.created++;
-        if (wanted !== null && wanted !== card.id) {
+        if (!holder && wanted !== null && wanted !== card.id) {
           card = adoptId(card, wanted) ?? card;
         }
       }
@@ -57,6 +64,7 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
         result.skipped.push({ file: file.name, reason: "Could not be written to the collection" });
         continue;
       }
+      touched.push(card.id);
 
       if (parsed.createdAt || parsed.updatedAt) {
         db.prepare("UPDATE cards SET created_at = COALESCE(?, created_at), updated_at = COALESCE(?, updated_at) WHERE id = ?").run(
@@ -95,10 +103,33 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
     discardDeferredMirror();
     throw e;
   }
-  // The files just read are rewritten from what was stored, which normalises
-  // a hand-edited folder and gives every card the file name it should have.
-  flushDeferredMirror();
+  // Mirror by the ids the cards actually ended up with rather than the ones
+  // the repository queued, since a card can be moved onto the id its file
+  // claims. Rewriting also normalises a hand-edited folder, giving every card
+  // the file name and layout it should have.
+  discardDeferredMirror();
+  for (const id of touched) {
+    const card = getCard(id);
+    if (card) mirrorCard(card);
+  }
   return result;
+}
+
+function norm(value: string | null | undefined): string {
+  return (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Is the card sitting at this id the one the file describes? Names have to
+ * agree, and so do sets when both sides name one. Anything less and the file
+ * is treated as a different card, because silently overwriting somebody's
+ * Charizard with a stranger's is the one outcome a recovery tool must not have.
+ */
+function isSameCard(existing: CardRecord, name: string, setName: string | null): boolean {
+  if (norm(existing.name) !== norm(name)) return false;
+  const a = norm(existing.setName);
+  const b = norm(setName);
+  return !a || !b || a === b;
 }
 
 /**

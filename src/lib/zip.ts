@@ -34,7 +34,13 @@ export interface ZipEntry {
   chunks: () => AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
 }
 
+/** The end-of-central-directory record counts entries in 16 bits. */
+export const ZIP_MAX_ENTRIES = 0xffff;
+
 export function assertZippable(entries: Array<{ name: string; size: number }>): void {
+  if (entries.length > ZIP_MAX_ENTRIES) {
+    throw new Error(`An archive can hold ${ZIP_MAX_ENTRIES} files and this would have ${entries.length}. Copy the data directory instead.`);
+  }
   let total = 0;
   for (const e of entries) {
     if (e.size > ZIP_MAX_BYTES) throw new Error(`${e.name} is larger than 4 GB, which this archive format cannot hold`);

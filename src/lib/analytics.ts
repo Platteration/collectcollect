@@ -339,14 +339,21 @@ export function submissionOutcome(sub: {
   let returnedValue = 0;
   let expectedValue = 0;
   let graded = 0;
+  let returnedRaw = 0;
   for (const c of sub.cards) {
     rawValue += c.rawValue ?? 0;
     expectedValue += c.expectedValue ?? c.rawValue ?? 0;
     if (c.returnedGrade) {
       graded++;
       returnedValue += c.returnedValue ?? c.rawValue ?? 0;
+      returnedRaw += c.rawValue ?? 0;
     }
   }
+  // Only the cards that have come back can be judged yet, so weigh them
+  // against their own raw value and their share of the batch's cost. Once
+  // every card is back this is the whole batch, as it should be.
+  const share = cards > 0 ? graded / cards : 0;
+  const costSoFar = graded === cards ? cost : round2(sub.feePerCard * graded + sub.shipping * share);
   return {
     cards,
     cost,
@@ -354,7 +361,7 @@ export function submissionOutcome(sub: {
     returnedValue: round2(returnedValue),
     expectedValue: round2(expectedValue),
     graded,
-    gain: graded > 0 ? round2(returnedValue - rawValue - cost) : null,
+    gain: graded > 0 ? round2(returnedValue - returnedRaw - costSoFar) : null,
   };
 }
 

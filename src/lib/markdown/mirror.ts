@@ -114,8 +114,12 @@ export function mirrorCard(card: CardRecord): void {
     ensureDirs();
     const contents = cardMarkdown({ card, sales: salesFor(card.id), snapshots: snapshotsFor(card.id) });
     const wanted = cardFileName(card);
-    writeAtomic(path.join(cardsDir(), wanted), contents);
-    dropStaleFiles(card.id, wanted);
+    const file = path.join(cardsDir(), wanted);
+    // If the card already has this file, its name cannot have changed, so
+    // there is nothing left behind and no need to scan the folder for it.
+    const renamed = !fs.existsSync(file);
+    writeAtomic(file, contents);
+    if (renamed) dropStaleFiles(card.id, wanted);
     scheduleIndex();
   } catch (e) {
     note(e);
@@ -311,6 +315,11 @@ export function rebuildCollection(cards: CardRecord[]): { written: number; remov
   }
   let removed = 0;
   for (const name of fs.readdirSync(cardsDir())) {
+    // .tmp files are half-written cards left by a crash; they belong to nobody.
+    if (name.endsWith(".tmp")) {
+      fs.rmSync(path.join(cardsDir(), name), { force: true });
+      continue;
+    }
     if (!name.endsWith(".md") || keep.has(name)) continue;
     fs.rmSync(path.join(cardsDir(), name), { force: true });
     removed++;

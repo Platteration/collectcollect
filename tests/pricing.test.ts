@@ -1,6 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { fetchQuotes, gradeKey, gradeLookupKeys, learnFromQuotes, summarize } from "@/lib/pricing";
-import { DEFAULT_SETTINGS, type PriceQuote } from "@/lib/types";
+import { refreshAll, resetRefreshThrottle } from "@/lib/pricing/refresh";
+import { addSnapshot, createCard, listSnapshots, updateCard } from "@/lib/cards";
+import { openDatabase, setDb } from "@/lib/db";
+import { DEFAULT_SETTINGS, type PriceQuote, type PriceSummary } from "@/lib/types";
+
+const blank: PriceSummary = {
+  currency: "USD",
+  fetchedAt: new Date().toISOString(),
+  ungraded: null,
+  ungradedSource: null,
+  graded: {},
+  gradedSource: null,
+  estimatedGraded: {},
+  yourCopyValue: null,
+  yourCopyBasis: "",
+  quotes: [],
+  errors: [],
+};
 import { fakeFetch } from "./helpers";
 
 const quote = (over: Partial<PriceQuote>): PriceQuote => ({
@@ -158,3 +175,67 @@ describe("refreshCard without a configured source", () => {
 function summarizeFixture(v: number) {
   return summarize([quote({ ungraded: v })], [], DEFAULT_SETTINGS, { condition: "NM", gradingCompany: null, grade: null });
 }
+
+describe("grade labels", () => {
+  it("reads a trailing zero as the same grade", () => {
+    expect(gradeKey("PSA", "10.0")).toBe("PSA 10");
+    expect(gradeKey("BGS", "9.50")).toBe("BGS 9.5");
+    expect(gradeKey("psa", "10")).toBe("PSA 10");
+    expect(gradeKey("Other", "9")).toBe("Grade 9");
+    expect(gradeKey(null, " ")).toBeNull();
+    // and so a "10.0" copy still finds the price sources publish as "PSA 10"
+    expect(gradeLookupKeys("CGC", "10.0")).toEqual(["CGC 10", "Grade 10", "PSA 10"]);
+  });
+});
+
+describe("refreshing a whole collection", () => {
+  beforeEach(() => {
+    setDb(openDatabase(":memory:"));
+    resetRefreshThrottle();
+  });
+
+  it("prices only the cards that have gone stale", async () => {
+    // "other" has no configured source here, so a manual price is the only
+    // price, and nothing in this test reaches the network.
+    const fresh = createCard({ game: "other", name: "Freshly priced", manualUngraded: 10 });
+    const stale = createCard({ game: "other", name: "Long forgotten", manualUngraded: 20 });
+    addSnapshot(fresh.id, { ...blank, fetchedAt: new Date().toISOString(), ungraded: 10, yourCopyValue: 10 });
+    addSnapshot(stale.id, { ...blank, fetchedAt: new Date(Date.now() - 72 * 3600e3).toISOString(), ungraded: 20, yourCopyValue: 20 });
+
+    const result = await refreshAll({ staleHours: 24 });
+    expect(result).toMatchObject({ refreshed: 1, skipped: 1, unpriced: 0 });
+    expect(result.failed).toEqual([]);
+    expect(listSnapshots(stale.id)).toHaveLength(2);
+    expect(listSnapshots(fresh.id)).toHaveLength(1);
+
+    // Everything is fresh now, so a second pass has nothing to do.
+    expect(await refreshAll({ staleHours: 24 })).toMatchObject({ refreshed: 0, skipped: 2 });
+    // With no cutoff, everything is priced again.
+    expect(await refreshAll()).toMatchObject({ refreshed: 2, skipped: 0 });
+  });
+
+  it("records the first look even when nothing has a price for the card", async () => {
+    const card = createCard({ game: "other", name: "Nothing knows this card" });
+    expect(await refreshAll({ staleHours: 24 })).toMatchObject({ refreshed: 1, unpriced: 0 });
+    // A card with no history at all gets its "we looked, and found nothing"
+    // snapshot, which is what the card page explains.
+    expect(listSnapshots(card.id)).toHaveLength(1);
+    expect(listSnapshots(card.id)[0].summary.yourCopyValue).toBeNull();
+  });
+
+  it("waits out the window before trying a card that came back empty", async () => {
+    const card = createCard({ game: "other", name: "Was priced once", manualUngraded: 30 });
+    addSnapshot(card.id, { ...blank, fetchedAt: new Date(Date.now() - 72 * 3600e3).toISOString(), ungraded: 30, yourCopyValue: 30 });
+    // The manual price goes away, so the next look finds nothing.
+    updateCard(card.id, { manualUngraded: null });
+
+    const first = await refreshAll({ staleHours: 24 });
+    expect(first).toMatchObject({ refreshed: 0, unpriced: 1, skipped: 0 });
+    // The card keeps its last known value rather than being zeroed out.
+    expect(listSnapshots(card.id)).toHaveLength(1);
+    expect(listSnapshots(card.id)[0].summary.yourCopyValue).toBe(30);
+    // Its stored snapshot is still stale, but it was just tried, so it waits.
+    expect(await refreshAll({ staleHours: 24 })).toMatchObject({ refreshed: 0, unpriced: 0, skipped: 1 });
+  });
+});
+

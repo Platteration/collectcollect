@@ -172,6 +172,9 @@ export function markSent(submissionId: number, sentAt?: string): Submission {
   const sub = getSubmission(submissionId);
   if (!sub) throw new Error("Submission not found");
   if (sub.cards.length === 0) throw new Error("Add at least one card before sending");
+  // Sending a batch that already came back would put graded cards back at the
+  // grader and throw away the outcome that was recorded for it.
+  if (sub.status === "returned") throw new Error("This batch has already come back; start a new one to send these cards again");
   const when = sentAt ? new Date(sentAt) : new Date();
   if (Number.isNaN(when.getTime())) throw new Error("Sent date is not a valid date");
   getDb()

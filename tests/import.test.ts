@@ -131,3 +131,20 @@ describe("applying an import", () => {
     expect(listCards()[0]).toMatchObject({ game: "sports", name: "Mike Trout", cardNumber: "US175", year: 2011, quantity: 2, purchasePrice: 650 });
   });
 });
+
+describe("spreadsheets from older tools", () => {
+  it("reads a file whose rows end with a bare carriage return", () => {
+    const csv = "name,set,quantity\rCharizard,Base Set,2\rBlastoise,Base Set,1";
+    const preview = previewImport(csv, { game: "pokemon" });
+    expect(preview.total).toBe(2);
+    expect(preview.rows.map((r) => r.input?.name)).toEqual(["Charizard", "Blastoise"]);
+  });
+
+  it("does not read a currency symbol on its own as a price of zero", () => {
+    const preview = previewImport("name,purchase price\nCharizard,$", { game: "pokemon" });
+    expect(preview.rows[0].input?.purchasePrice).toBeNull();
+    const withPrice = previewImport("name,purchase price\nCharizard,$12.50", { game: "pokemon" });
+    expect(withPrice.rows[0].input?.purchasePrice).toBe(12.5);
+  });
+});
+

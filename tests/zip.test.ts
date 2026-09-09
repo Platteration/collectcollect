@@ -299,3 +299,12 @@ describe("restore", () => {
     fsm.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe("what an archive cannot hold", () => {
+  it("refuses more files than the format can count", () => {
+    const many = Array.from({ length: 0x10000 }, (_, i) => ({ name: `f${i}.md`, size: 1 }));
+    expect(() => assertZippable(many)).toThrow(/65535 files/);
+    expect(() => assertZippable(many.slice(0, 0xffff))).not.toThrow();
+  });
+});
+

@@ -121,3 +121,36 @@ describe("grading submissions", () => {
     expect(o).toMatchObject({ cost: 60, rawValue: 150, expectedValue: 950, graded: 0, gain: null });
   });
 });
+
+describe("what a batch's outcome means before it is all back", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("judges a partial return on the cards that came back, not the whole batch", () => {
+    const a = pricedCard("Charizard", 100, 900);
+    const b = pricedCard("Blastoise", 50, 300);
+    const sub0 = createSubmission({ company: "PSA", feePerCard: 25, shipping: 20 });
+    addCard(sub0.id, a.id);
+    addCard(sub0.id, b.id);
+    markSent(sub0.id);
+    const partial = recordReturn(sub0.id, [{ cardId: a.id, grade: "10" }]);
+    const o = submissionOutcome(partial);
+    // One card back: 900 for it, against its own 100 raw, one 25 fee and half
+    // the 20 shipping. Charging it for Blastoise's fee too would make a batch
+    // look like a loss purely because the rest of it is still at the grader.
+    expect(o).toMatchObject({ graded: 1, returnedValue: 900, gain: 765 });
+
+    const done = recordReturn(sub0.id, [{ cardId: b.id, grade: "9" }]);
+    const full = submissionOutcome(done);
+    expect(full).toMatchObject({ graded: 2, cost: 70, gain: 780 });
+  });
+
+  it("will not send a batch that has already come back", () => {
+    const card = pricedCard("Mewtwo", 60, 400);
+    const sub0 = createSubmission({ company: "PSA" });
+    addCard(sub0.id, card.id);
+    markSent(sub0.id);
+    recordReturn(sub0.id, [{ cardId: card.id, grade: "10" }]);
+    expect(() => markSent(sub0.id)).toThrow(/already come back/);
+    expect(getCard(card.id)?.gradingStatus).toBe("undecided");
+  });
+});
