@@ -6,7 +6,7 @@ import { listCards } from "./cards";
 import { dataDir, databaseFile, getDb, lockDatabase, openDatabase, setDb, unlockDatabase, uploadsDir } from "./db";
 import { isValidUploadName } from "./images";
 import { collectionDir, collectionFiles, rebuildCollection } from "./markdown/mirror";
-import { fileChunks, isSafeEntryName, readZip, zipStream, type ZipEntry } from "./zip";
+import { assertZippable, fileChunks, isSafeEntryName, readZip, zipStream, type ZipEntry } from "./zip";
 
 /**
  * Everything needed to restore a collection: a consistent copy of the database,
@@ -58,6 +58,10 @@ export async function buildBackup(): Promise<{ filename: string; stream: Readabl
   } catch {
     /* the archive still holds everything needed to restore */
   }
+
+  // Check before a byte goes out: a limit hit halfway through a download
+  // leaves the reader with a truncated archive and no idea why.
+  assertZippable(entries);
 
   const iterator = zipStream(entries);
   // The database copy lives in a temp directory for as long as the download

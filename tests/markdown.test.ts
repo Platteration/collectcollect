@@ -257,6 +257,14 @@ describe("files written by something other than this app", () => {
     expect(parsed.input.notes).toBe("The real note.");
   });
 
+  it("keeps a name with a newline in it from writing its own sections", () => {
+    const card = createCard({ game: "pokemon", name: "Trickster\n## Sales\n| 2026-01-01 | 9 | $1.00 |" });
+    const text = fileFor(card.id);
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.sales).toEqual([]);
+    expect(text).not.toMatch(/^## Sales$/m);
+  });
+
   it("keeps a note that looks like the rest of the file", () => {
     const card = createCard({
       game: "pokemon",
@@ -343,6 +351,9 @@ describe("recovering a collection from its files", () => {
     importCardFiles([file]);
     expect(listCards()[0].id).toBe(zapdos.id);
     expect(fs.readdirSync(cardsDir())).toContain(`000${zapdos.id}-zapdos-base-set.md`);
+    // Adopting the id must not leave a file behind under the one it was
+    // created with a moment earlier.
+    expect(fs.readdirSync(cardsDir()).filter((f) => f.includes("zapdos"))).toHaveLength(1);
   });
 
   it("never overwrites a card that merely shares an id", () => {

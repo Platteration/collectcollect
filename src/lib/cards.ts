@@ -176,10 +176,10 @@ export function normalizeInput(input: CardInput): Required<
  */
 const deferredMirror = new Set<number>();
 
-function touch(card: CardRecord | null): void {
+function touch(card: CardRecord | null, opts: { mayHaveOldName?: boolean } = {}): void {
   if (!card) return;
   if (getDb().inTransaction) deferredMirror.add(card.id);
-  else mirrorCard(card);
+  else mirrorCard(card, opts);
 }
 
 /**
@@ -221,7 +221,7 @@ export function createCard(input: CardInput): CardRecord {
       now,
     });
   const card = getCard(Number(result.lastInsertRowid))!;
-  touch(card);
+  touch(card, { mayHaveOldName: false });
   return card;
 }
 

@@ -120,19 +120,25 @@ function readRows(sql: string, ...params: unknown[]): unknown[] {
   return getDb().prepare(sql).all(...(params as never[]));
 }
 
-/** Rewrite one card's file. Safe to call for any card, at any time. */
-export function mirrorCard(card: CardRecord): void {
+/**
+ * Rewrite one card's file. Safe to call for any card, at any time.
+ *
+ * `mayHaveOldName` says whether this card could already be filed under a
+ * different name, which is the only reason to scan the folder for leftovers.
+ * A card being created has no history to leave behind, and looking for one
+ * would turn adding a thousand cards into a thousand passes over the folder.
+ */
+export function mirrorCard(card: CardRecord, opts: { mayHaveOldName?: boolean } = {}): void {
   if (!mirrorEnabled()) return;
   try {
     ensureDirs();
     const contents = cardMarkdown({ card, sales: salesFor(card.id), snapshots: snapshotsFor(card.id) });
     const wanted = cardFileName(card);
     const file = path.join(cardsDir(), wanted);
-    // If the card already has this file, its name cannot have changed, so
-    // there is nothing left behind and no need to scan the folder for it.
-    const renamed = !fs.existsSync(file);
+    // If the card already has this file, its name cannot have changed.
+    const moved = opts.mayHaveOldName !== false && !fs.existsSync(file);
     writeAtomic(file, contents);
-    if (renamed) dropStaleFiles(card.id, wanted);
+    if (moved) dropStaleFiles(card.id, wanted);
     scheduleIndex();
   } catch (e) {
     note(e);

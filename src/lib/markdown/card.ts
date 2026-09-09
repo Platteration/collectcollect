@@ -51,6 +51,15 @@ export function idFromFileName(name: string): number | null {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
+/**
+ * Fields that belong on one line. Front matter is JSON so it escapes itself,
+ * but a name holding a newline would otherwise write a heading or a table row
+ * straight into the body and be read back as one.
+ */
+function oneLine(value: unknown): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
 function detail(card: CardRecord): string {
   return [
     GAMES[card.game] ?? card.game,
@@ -63,11 +72,14 @@ function detail(card: CardRecord): string {
     card.language && card.language.toLowerCase() !== "english" ? card.language : null,
   ]
     .filter(Boolean)
+    .map(oneLine)
     .join(" · ");
 }
 
 function condition(card: CardRecord): string {
-  if (card.grade) return `${card.gradingCompany ?? "Graded"} ${card.grade}${card.certNumber ? ` (cert ${card.certNumber})` : ""}`;
+  if (card.grade) {
+    return oneLine(`${card.gradingCompany ?? "Graded"} ${card.grade}${card.certNumber ? ` (cert ${card.certNumber})` : ""}`);
+  }
   return `Ungraded, ${CONDITIONS[card.condition] ?? card.condition}`;
 }
 
@@ -167,13 +179,13 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
   // squeezed afterwards: collapsing the finished document would also flatten
   // the blank lines inside somebody's notes.
   const blocks: string[] = [];
-  blocks.push(`# ${card.name}`);
+  blocks.push(`# ${oneLine(card.name)}`);
   blocks.push(detail(card));
   blocks.push(
     [
       `**${card.quantity}** cop${card.quantity === 1 ? "y" : "ies"}`,
       condition(card),
-      card.location ? `kept in ${card.location}` : null,
+      card.location ? `kept in ${oneLine(card.location)}` : null,
       card.gradingStatus !== "undecided" ? GRADING_STATUSES[card.gradingStatus] : null,
     ]
       .filter(Boolean)
@@ -193,7 +205,7 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
   }
 
   if (card.imagePath) {
-    blocks.push("## Photo", `![${card.name}](${photoHref(card.imagePath)})`);
+    blocks.push("## Photo", `![${oneLine(card.name)}](${photoHref(card.imagePath)})`);
   } else if (card.referenceImageUrl) {
     blocks.push("## Photo", `Reference image: <${card.referenceImageUrl}>`);
   }
