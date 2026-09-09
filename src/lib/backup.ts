@@ -2,15 +2,19 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { listCards } from "./cards";
 import { dataDir, databaseFile, getDb, lockDatabase, openDatabase, setDb, unlockDatabase, uploadsDir } from "./db";
 import { isValidUploadName } from "./images";
+import { collectionFiles, rebuildCollection } from "./markdown/mirror";
 import { isSafeEntryName, readZip, zipStream, type ZipEntry } from "./zip";
 
 /**
- * Everything needed to restore a collection: a consistent copy of the database
- * plus every uploaded photo. The database is copied through SQLite's own
- * backup, so an archive taken while the app is running is never a half-written
- * page or a database missing its write-ahead log.
+ * Everything needed to restore a collection: a consistent copy of the database,
+ * every uploaded photo, and the plain-text copy of the catalogue. The database
+ * is copied through SQLite's own backup, so an archive taken while the app is
+ * running is never a half-written page or a database missing its write-ahead
+ * log. The Markdown is included so that an archive is readable by a person
+ * even if nothing can open the database any more.
  */
 export async function buildBackup(): Promise<{ filename: string; stream: ReadableStream<Uint8Array> }> {
   const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "collectcollect-backup-"));
@@ -28,7 +32,7 @@ export async function buildBackup(): Promise<{ filename: string; stream: Readabl
         format: 1,
         createdAt: new Date().toISOString(),
         photos: photoNames.length,
-        note: "Restore by stopping the app and unpacking this archive into its data directory.",
+        note: "Restore by stopping the app and unpacking this archive into its data directory. The collection folder holds the same catalogue as Markdown, readable without the app.",
       },
       null,
       2,
@@ -43,6 +47,12 @@ export async function buildBackup(): Promise<{ filename: string; stream: Readabl
     const full = path.join(uploads, name);
     const size = (await fsp.stat(full)).size;
     entries.push({ name: `uploads/${name}`, size, chunks: () => fileChunks(full) });
+  }
+
+  const encoder = new TextEncoder();
+  for (const file of collectionFiles()) {
+    const bytes = encoder.encode(file.text);
+    entries.push({ name: `collection/${file.name}`, size: bytes.length, chunks: () => [bytes] });
   }
 
   const iterator = zipStream(entries);
@@ -142,6 +152,9 @@ export async function restoreBackup(archive: Uint8Array): Promise<RestoreResult>
     if (!isSafeEntryName(entry.name)) throw new Error(`The archive contains an unsafe path: ${entry.name}`);
     if (entry.name === "collectcollect.db") database = entry.data;
     else if (entry.name === "manifest.json") continue;
+    // The Markdown in an archive is a copy of what the database already holds,
+    // so it is rewritten from the restored database rather than unpacked.
+    else if (entry.name.startsWith("collection/")) continue;
     else if (entry.name.startsWith("uploads/")) {
       const photo = entry.name.slice("uploads/".length);
       if (!isValidUploadName(photo)) throw new Error(`The archive contains an unexpected photo name: ${photo}`);
@@ -217,5 +230,12 @@ export async function restoreBackup(archive: Uint8Array): Promise<RestoreResult>
 
   // Reopen through the normal path, which also applies any pending migrations.
   getDb();
+  // The plain-text copy belongs to the collection that was just replaced, so
+  // rewrite it; this also clears out files for cards that no longer exist.
+  try {
+    rebuildCollection(listCards());
+  } catch {
+    /* the collection is restored either way; the files can be rebuilt from Settings */
+  }
   return { photos: photos.length, cards, movedAsideTo: aside };
 }

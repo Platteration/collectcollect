@@ -2,6 +2,8 @@ import { SettingsForm } from "@/components/SettingsForm";
 import { getSettings } from "@/lib/settings";
 import { backupSummary } from "@/lib/backup";
 import { RestoreForm } from "@/components/RestoreForm";
+import { CollectionFiles } from "@/components/CollectionFiles";
+import { collectionStatus } from "@/lib/markdown/mirror";
 import Link from "next/link";
 import { providerStatuses } from "@/lib/status";
 import { GAMES } from "@/lib/types";
@@ -17,6 +19,7 @@ function mb(bytes: number): string {
 export default function SettingsPage() {
   const providers = providerStatuses();
   const backup = backupSummary();
+  const collection = collectionStatus();
   return (
     <div className="space-y-6">
       <h1 className="font-display text-2xl font-semibold uppercase tracking-wide">Settings</h1>
@@ -78,6 +81,32 @@ export default function SettingsPage() {
           Download backup
         </a>
         <RestoreForm />
+      </section>
+
+      <section className="card-surface p-4">
+        <h2 className="font-semibold">Your collection in plain text</h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          Every card is also written as a Markdown file in <code>{collection.dir}</code>, kept up to date as you go.
+          They are meant to outlive this app: a folder of readable files that any editor, spreadsheet or notes tool can
+          open, and that this app can read back.
+        </p>
+        <p className="mt-2 text-sm">
+          {collection.enabled ? (
+            <>
+              {collection.files} file{collection.files === 1 ? "" : "s"} ({mb(collection.bytes)})
+              {collection.updatedAt ? `, last written ${new Date(collection.updatedAt).toLocaleString()}` : ""}.
+            </>
+          ) : (
+            <>Switched off by <code>MARKDOWN_MIRROR=off</code>.</>
+          )}
+        </p>
+        {collection.lastError && (
+          <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">
+            {collection.failures} write{collection.failures === 1 ? "" : "s"} did not land. Last problem:{" "}
+            {collection.lastError}. Your cards are safe in the database; rewrite the files below once the cause is fixed.
+          </p>
+        )}
+        <CollectionFiles enabled={collection.enabled} />
       </section>
 
       <SettingsForm initial={getSettings()} />

@@ -1,0 +1,246 @@
+import fs from "node:fs";
+import path from "node:path";
+import { beforeEach, describe, expect, it } from "vitest";
+import { getDb, openDatabase, setDb } from "@/lib/db";
+import { addSnapshot, createCard, deleteCard, listCards, updateCard } from "@/lib/cards";
+import { deleteSale, recordSale } from "@/lib/sales";
+import { cardsDir, collectionDir, collectionStatus, flushCollection, readCardFiles, rebuildCollection } from "@/lib/markdown/mirror";
+import { importCardFiles } from "@/lib/markdown/restore";
+import { parseCardMarkdown } from "@/lib/markdown/card";
+import { parseDocument, readSection, readTable, writeFrontMatter } from "@/lib/markdown/format";
+import type { PriceSummary } from "@/lib/types";
+
+const summary = (value: number, at: string): PriceSummary => ({
+  currency: "USD",
+  fetchedAt: at,
+  ungraded: value,
+  ungradedSource: "PriceCharting",
+  graded: { "PSA 10": value * 10, "PSA 9": value * 3 },
+  gradedSource: "PriceCharting",
+  estimatedGraded: {},
+  yourCopyValue: value,
+  yourCopyBasis: "Ungraded price, Near Mint.",
+  quotes: [],
+  errors: [],
+});
+
+function fileFor(id: number): string {
+  const name = fs.readdirSync(cardsDir()).find((f) => f.startsWith(String(id).padStart(4, "0")));
+  if (!name) throw new Error(`no file for card ${id}`);
+  return fs.readFileSync(path.join(cardsDir(), name), "utf8");
+}
+
+describe("markdown encoding", () => {
+  it("round-trips front matter through JSON values", () => {
+    const text = writeFrontMatter({ name: "Chari|zard", year: 1999, external_ids: { pokemontcg: "base1-4" }, blank: null, empty: {} });
+    const { data } = parseDocument(text);
+    expect(data).toEqual({ name: "Chari|zard", year: 1999, external_ids: { pokemontcg: "base1-4" } });
+  });
+
+  it("reads front matter a person typed by hand", () => {
+    const { data } = parseDocument(`---\nname: Charizard\nquantity: 3\nlocation: 'Binder 2'\nnotes:\n---\n\n# Charizard\n`);
+    expect(data).toEqual({ name: "Charizard", quantity: 3, location: "Binder 2", notes: null });
+  });
+
+  it("keeps pipes and headings out of the structure", () => {
+    const text = ["## Sales", "", "| A | B |", "| --- | --- |", "| one \\| two | 3 |", "", "## After", "", "later"].join("\n");
+    expect(readTable(text, "Sales")).toEqual([["one | two", "3"]]);
+    expect(readSection(text, "After")).toBe("later");
+  });
+});
+
+describe("a card as a document", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("writes a file a person can read and the app can read back", () => {
+    const card = createCard({
+      game: "pokemon",
+      name: "Charizard",
+      setName: "Base Set",
+      cardNumber: "4/102",
+      year: 1999,
+      quantity: 2,
+      gradingCompany: "PSA",
+      grade: "9",
+      purchasePrice: 250,
+      location: "Binder 2, page 4",
+      notes: "Corner ding.\n\n# not a heading",
+      externalIds: { pokemontcg: "base1-4" },
+      manualGraded: { "PSA 10": 5000 },
+    });
+    addSnapshot(card.id, summary(300, "2026-01-02T10:00:00.000Z"));
+    addSnapshot(card.id, summary(420, "2026-02-02T10:00:00.000Z"));
+    recordSale(card.id, { quantity: 1, unitPrice: 500, fees: 40, venue: "eBay", soldAt: "2026-03-01T00:00:00.000Z" });
+
+    const text = fileFor(card.id);
+    expect(text).toContain("# Charizard");
+    expect(text).toContain("Base Set");
+    expect(text).toContain("Binder 2, page 4");
+    expect(text).toContain("$500.00");
+
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.id).toBe(card.id);
+    expect(parsed.input).toMatchObject({
+      name: "Charizard",
+      setName: "Base Set",
+      cardNumber: "4/102",
+      year: 1999,
+      quantity: 1,
+      grade: "9",
+      gradingCompany: "PSA",
+      purchasePrice: 250,
+      location: "Binder 2, page 4",
+      externalIds: { pokemontcg: "base1-4" },
+      manualGraded: { "PSA 10": 5000 },
+    });
+    expect(parsed.input.notes).toBe("Corner ding.\n\n# not a heading");
+    expect(parsed.sales).toHaveLength(1);
+    expect(parsed.sales[0]).toMatchObject({ quantity: 1, unitPrice: 500, fees: 40, venue: "eBay" });
+    expect(parsed.snapshots).toHaveLength(2);
+    expect(parsed.snapshots[0].summary).toMatchObject({ yourCopyValue: 420, ungraded: 420, graded: { "PSA 10": 4200, "PSA 9": 1260 } });
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("mirrors every column the cards table has", () => {
+    const card = createCard({
+      game: "sports",
+      sport: "Baseball",
+      name: "Ken Griffey Jr.",
+      setName: "Upper Deck",
+      setCode: "ud89",
+      cardNumber: "1",
+      year: 1989,
+      rarity: "Rookie",
+      variant: "Star",
+      language: "English",
+      manufacturer: "Upper Deck",
+      quantity: 2,
+      condition: "LP",
+      gradingCompany: "PSA",
+      grade: "8",
+      certNumber: "1234",
+      purchasePrice: 40,
+      notes: "Off-centre.",
+      imagePath: "11111111-1111-4111-8111-111111111111.jpg",
+      referenceImageUrl: "https://example.com/a.jpg",
+      accentColor: "#123456",
+      location: "Box A",
+      externalIds: { pricecharting: "42" },
+      manualUngraded: 30,
+      manualGraded: { "PSA 10": 900 },
+      gradingStatus: "planned",
+      identification: { name: "Ken Griffey Jr.", confidence: 0.9 } as never,
+    });
+    const text = fileFor(card.id);
+    const front = parseDocument(text).data;
+    // Written as prose rather than as a front matter field.
+    const inBody: Record<string, boolean> = {
+      notes: text.includes("Off-centre."),
+      identification: text.includes("```json"),
+    };
+    const alias: Record<string, string> = { image_path: "photo" };
+    const columns = (getDb().prepare("PRAGMA table_info(cards)").all() as Array<{ name: string }>).map((c) => c.name);
+    const missing = columns.filter((column) => {
+      if (column in inBody) return !inBody[column];
+      const key = alias[column] ?? column;
+      return !(key in front);
+    });
+    expect(missing).toEqual([]);
+  });
+
+  it("follows a rename and forgets a deleted card", () => {
+    const card = createCard({ game: "pokemon", name: "Pikachu", setName: "Base Set" });
+    expect(fs.readdirSync(cardsDir())).toEqual(["0001-pikachu-base-set.md"]);
+    updateCard(card.id, { name: "Surfing Pikachu" });
+    expect(fs.readdirSync(cardsDir())).toEqual(["0001-surfing-pikachu-base-set.md"]);
+    deleteCard(card.id);
+    expect(fs.readdirSync(cardsDir())).toEqual([]);
+  });
+
+  it("takes an undone sale back out of the file", () => {
+    const card = createCard({ game: "pokemon", name: "Mewtwo", quantity: 2 });
+    const sale = recordSale(card.id, { quantity: 1, unitPrice: 90 });
+    expect(fileFor(card.id)).toContain("## Sales");
+    deleteSale(sale.id);
+    expect(fileFor(card.id)).not.toContain("## Sales");
+  });
+
+  it("lists the whole collection in an index", () => {
+    createCard({ game: "pokemon", name: "Alakazam", setName: "Base Set", quantity: 2 });
+    const b = createCard({ game: "yugioh", name: "Dark Magician" });
+    addSnapshot(b.id, summary(50, "2026-01-01T00:00:00.000Z"));
+    flushCollection();
+    const index = fs.readFileSync(path.join(collectionDir(), "index.md"), "utf8");
+    expect(index).toContain("[Alakazam](cards/0001-alakazam-base-set.md)");
+    expect(index).toContain("[Dark Magician](cards/0002-dark-magician.md)");
+    expect(index).toContain("$50.00");
+    expect(fs.existsSync(path.join(collectionDir(), "README.md"))).toBe(true);
+  });
+});
+
+describe("recovering a collection from its files", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("rebuilds a collection into an empty database", () => {
+    const a = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", quantity: 2, purchasePrice: 100 });
+    addSnapshot(a.id, summary(300, "2026-01-02T10:00:00.000Z"));
+    recordSale(a.id, { quantity: 1, unitPrice: 500, fees: 20 });
+    createCard({ game: "sports", name: "Ken Griffey Jr.", year: 1989, location: "Box A" });
+    flushCollection();
+    const files = readCardFiles();
+    expect(files).toHaveLength(2);
+
+    setDb(openDatabase(":memory:"));
+    expect(listCards()).toHaveLength(0);
+    const result = importCardFiles(files);
+    expect(result).toMatchObject({ created: 2, replaced: 0, sales: 1, prices: 1 });
+    expect(result.skipped).toEqual([]);
+
+    const cards = listCards();
+    expect(cards).toHaveLength(2);
+    const charizard = cards.find((c) => c.name === "Charizard")!;
+    expect(charizard.id).toBe(a.id);
+    expect(charizard).toMatchObject({ quantity: 1, purchasePrice: 100, setName: "Base Set" });
+    expect(listCards({ location: "Box A" })).toHaveLength(1);
+  });
+
+  it("is safe to run twice", () => {
+    createCard({ game: "pokemon", name: "Snorlax", quantity: 3 });
+    flushCollection();
+    const files = readCardFiles();
+    setDb(openDatabase(":memory:"));
+    importCardFiles(files);
+    const second = importCardFiles(readCardFiles());
+    expect(second).toMatchObject({ created: 0, replaced: 1 });
+    expect(listCards()).toHaveLength(1);
+  });
+
+  it("keeps handing out fresh ids after adopting the ones in the files", () => {
+    createCard({ game: "pokemon", name: "First" });
+    createCard({ game: "pokemon", name: "Second" });
+    createCard({ game: "pokemon", name: "Third" });
+    flushCollection();
+    const files = readCardFiles();
+    setDb(openDatabase(":memory:"));
+    importCardFiles([files[2]]);
+    const next = createCard({ game: "pokemon", name: "Fourth" });
+    expect(next.id).toBeGreaterThan(3);
+  });
+
+  it("loses a mangled row, not the card", () => {
+    const card = createCard({ game: "pokemon", name: "Gyarados", quantity: 2 });
+    recordSale(card.id, { quantity: 1, unitPrice: 30 });
+    const broken = fileFor(card.id).replace(/^\| 2026.*$/m, "| what | even | is | this |");
+    const parsed = parseCardMarkdown(broken)!;
+    expect(parsed.input.name).toBe("Gyarados");
+    expect(parsed.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("rebuilds the folder from the database and clears strays", () => {
+    createCard({ game: "pokemon", name: "Eevee" });
+    fs.writeFileSync(path.join(cardsDir(), "9999-not-a-card.md"), "leftover\n");
+    const result = rebuildCollection(listCards());
+    expect(result).toMatchObject({ written: 1, removed: 1 });
+    expect(collectionStatus().files).toBe(1);
+  });
+});

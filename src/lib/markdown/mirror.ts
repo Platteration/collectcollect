@@ -1,0 +1,387 @@
+import fs from "node:fs";
+import path from "node:path";
+import { dataDir, getDb } from "../db";
+import type { CardRecord, PriceSnapshot, Sale } from "../types";
+import { INDEX_HEADERS, cardFileName, cardFilePrefix, cardMarkdown, idFromFileName } from "./card";
+import { money, parseDocument, readMoney, readTable, table } from "./format";
+
+/**
+ * A live plain-text copy of the collection.
+ *
+ * Every card is also a Markdown file on disk, rewritten whenever that card
+ * changes. The database stays the thing the app reads, but it is no longer the
+ * only place the collection exists: if this app is never updated again, the
+ * folder is still a complete, readable catalogue that any text editor, git
+ * repository or note-taking tool can open, and that this app can read back.
+ *
+ * Mirroring must never be the reason a card fails to save, so every write is
+ * wrapped: a full disk or a read-only volume degrades the mirror, not the app.
+ */
+
+export function collectionDir(): string {
+  return path.join(dataDir(), "collection");
+}
+
+export function cardsDir(): string {
+  return path.join(collectionDir(), "cards");
+}
+
+/** Set MARKDOWN_MIRROR=off for a read-only data volume. */
+export function mirrorEnabled(): boolean {
+  return (process.env.MARKDOWN_MIRROR ?? "on").toLowerCase() !== "off";
+}
+
+interface MirrorState {
+  lastError: string | null;
+  failures: number;
+  indexTimer: NodeJS.Timeout | null;
+  indexDirty: boolean;
+}
+
+const globalForMirror = globalThis as unknown as { __collectcollectMirror?: MirrorState };
+const state: MirrorState = (globalForMirror.__collectcollectMirror ??= {
+  lastError: null,
+  failures: 0,
+  indexTimer: null,
+  indexDirty: false,
+});
+
+function note(e: unknown): void {
+  state.failures += 1;
+  state.lastError = e instanceof Error ? e.message : String(e);
+}
+
+/** Write via a temporary file so a crash mid-write cannot leave half a card. */
+function writeAtomic(file: string, contents: string): void {
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, contents, "utf8");
+  fs.renameSync(tmp, file);
+}
+
+function ensureDirs(): void {
+  fs.mkdirSync(cardsDir(), { recursive: true });
+}
+
+// ---------------------------------------------------------------------------
+// Per-card files
+// ---------------------------------------------------------------------------
+
+function salesFor(cardId: number): Sale[] {
+  const rows = readRows("SELECT * FROM sales WHERE card_id = ? ORDER BY sold_at DESC, id DESC", cardId) as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    id: Number(r.id),
+    cardId: Number(r.card_id),
+    quantity: Number(r.quantity),
+    unitPrice: Number(r.unit_price),
+    fees: Number(r.fees),
+    unitCost: r.unit_cost === null ? null : Number(r.unit_cost),
+    soldAt: String(r.sold_at),
+    venue: r.venue === null ? null : String(r.venue),
+    notes: r.notes === null ? null : String(r.notes),
+    createdAt: String(r.created_at),
+  }));
+}
+
+function snapshotsFor(cardId: number): PriceSnapshot[] {
+  const rows = readRows(
+    "SELECT * FROM price_snapshots WHERE card_id = ? ORDER BY fetched_at DESC, id DESC",
+    cardId,
+  ) as Array<Record<string, unknown>>;
+  const out: PriceSnapshot[] = [];
+  for (const r of rows) {
+    try {
+      out.push({ id: Number(r.id), cardId: Number(r.card_id), fetchedAt: String(r.fetched_at), summary: JSON.parse(String(r.summary)) });
+    } catch {
+      /* a snapshot that will not parse is not worth failing the mirror over */
+    }
+  }
+  return out;
+}
+
+/**
+ * The mirror reads what it needs straight from the database rather than from
+ * the repository that calls it. Keeping it a leaf module is what stops a
+ * mirroring problem from ever being able to break a card write.
+ */
+function readRows(sql: string, ...params: unknown[]): unknown[] {
+  return getDb().prepare(sql).all(...(params as never[]));
+}
+
+/** Rewrite one card's file. Safe to call for any card, at any time. */
+export function mirrorCard(card: CardRecord): void {
+  if (!mirrorEnabled()) return;
+  try {
+    ensureDirs();
+    const contents = cardMarkdown({ card, sales: salesFor(card.id), snapshots: snapshotsFor(card.id) });
+    const wanted = cardFileName(card);
+    writeAtomic(path.join(cardsDir(), wanted), contents);
+    dropStaleFiles(card.id, wanted);
+    scheduleIndex();
+  } catch (e) {
+    note(e);
+  }
+}
+
+/** A renamed card leaves a file behind under its old slug; take it with us. */
+function dropStaleFiles(id: number, keep: string): void {
+  const prefix = cardFilePrefix(id);
+  for (const name of fs.readdirSync(cardsDir())) {
+    if (name !== keep && name.startsWith(prefix) && name.endsWith(".md")) {
+      fs.rmSync(path.join(cardsDir(), name), { force: true });
+    }
+  }
+}
+
+export function unmirrorCard(id: number): void {
+  if (!mirrorEnabled()) return;
+  try {
+    if (!fs.existsSync(cardsDir())) return;
+    const prefix = cardFilePrefix(id);
+    for (const name of fs.readdirSync(cardsDir())) {
+      if (name.endsWith(".md") && (name.startsWith(prefix) || idFromFileName(name) === id)) {
+        fs.rmSync(path.join(cardsDir(), name), { force: true });
+      }
+    }
+    scheduleIndex();
+  } catch (e) {
+    note(e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The index and the explainer
+// ---------------------------------------------------------------------------
+
+/**
+ * The index is built from the card files themselves rather than the database,
+ * so what it lists is exactly what is on disk. It is rebuilt shortly after a
+ * change instead of on every one, which keeps a thousand-card price refresh
+ * from rewriting it a thousand times.
+ */
+function scheduleIndex(): void {
+  state.indexDirty = true;
+  if (state.indexTimer) return;
+  state.indexTimer = setTimeout(() => {
+    state.indexTimer = null;
+    if (state.indexDirty) writeIndex();
+  }, 750);
+  state.indexTimer.unref?.();
+}
+
+/** Write the index now. Used by tests, by rebuilds, and before a backup. */
+export function flushCollection(): void {
+  if (state.indexTimer) {
+    clearTimeout(state.indexTimer);
+    state.indexTimer = null;
+  }
+  if (state.indexDirty) writeIndex();
+}
+
+interface IndexEntry {
+  file: string;
+  data: Record<string, unknown>;
+  value: number | null;
+}
+
+function readIndexEntries(): IndexEntry[] {
+  const dir = cardsDir();
+  if (!fs.existsSync(dir)) return [];
+  const entries: IndexEntry[] = [];
+  for (const file of fs.readdirSync(dir).sort()) {
+    if (!file.endsWith(".md")) continue;
+    try {
+      const text = fs.readFileSync(path.join(dir, file), "utf8");
+      const { data, body } = parseDocument(text);
+      if (!data.name) continue;
+      entries.push({ file, data, value: latestValue(body) });
+    } catch {
+      /* skip a file we cannot read rather than lose the whole index */
+    }
+  }
+  return entries;
+}
+
+/** The first data row of the value history table holds the newest price. */
+function latestValue(body: string): number | null {
+  const first = readTable(body, "Value history")[0];
+  return first ? readMoney(first[1] ?? "") : null;
+}
+
+function writeIndex(): void {
+  if (!mirrorEnabled()) return;
+  try {
+    ensureDirs();
+    const entries = readIndexEntries();
+    let total = 0;
+    let copies = 0;
+    const rows = entries.map((e) => {
+      const quantity = Number(e.data.quantity ?? 1) || 0;
+      const worth = e.value === null ? null : e.value * quantity;
+      if (worth !== null) total += worth;
+      copies += quantity;
+      const grade = e.data.grade ? `${String(e.data.grading_company ?? "").trim()} ${e.data.grade}`.trim() : String(e.data.condition ?? "");
+      return [
+        `[${String(e.data.name ?? "")}](cards/${e.file})`,
+        String(e.data.game ?? ""),
+        String(e.data.set_name ?? ""),
+        String(e.data.card_number ?? ""),
+        quantity,
+        grade,
+        String(e.data.location ?? ""),
+        worth === null ? "" : money(worth),
+      ];
+    });
+
+    const doc = [
+      "# Collection",
+      "",
+      `${entries.length} card${entries.length === 1 ? "" : "s"}, ${copies} cop${copies === 1 ? "y" : "ies"}` +
+        (total > 0 ? `, last valued at ${money(total)}.` : "."),
+      "",
+      "Every row links to that card's own file. See [README.md](README.md) for what these files are.",
+      "",
+      rows.length ? table(INDEX_HEADERS, rows) : "_No cards yet._",
+      "",
+    ].join("\n");
+    writeAtomic(path.join(collectionDir(), "index.md"), doc);
+    writeReadme();
+    state.indexDirty = false;
+  } catch (e) {
+    note(e);
+  }
+}
+
+const README = `# Your collection, in plain text
+
+This folder is a complete copy of a CollectCollect catalogue, written as
+Markdown. It exists so the collection outlives the app: if CollectCollect is
+never updated again, or you simply want your data somewhere else, everything
+you need is here in files any computer can open.
+
+## What is here
+
+- \`index.md\` — every card in one table, with a link to each card's file.
+- \`cards/\` — one file per card, named \`<id>-<card name>.md\`.
+- \`../uploads/\` — the photos. Each card file links to its own photo.
+
+## How to read a card file
+
+The block between the \`---\` lines at the top is the card's record: name, set,
+number, grade, how many copies, what you paid, where it is kept. It is written
+as YAML with JSON values, which means both people and programs can read it.
+
+Underneath is the same card written for a person: what it is, its photo, your
+notes, every price the app ever recorded for it, and any sales.
+
+## Getting it back into an app
+
+CollectCollect can read this folder back: Settings → "Rebuild from these
+files". It matches on the \`id\` in each file, so importing the same folder
+twice is safe.
+
+Nothing here needs CollectCollect, though. The front matter is ordinary YAML
+and the tables are ordinary Markdown, so a spreadsheet, a script, or a
+different cataloguing tool can take it from here.
+
+## What these files do not hold
+
+The per-provider quotes behind each price are left out — the recorded prices
+themselves are all here. Photos live in the \`uploads\` folder next to this one,
+so keep the two together.
+`;
+
+function writeReadme(): void {
+  writeAtomic(path.join(collectionDir(), "README.md"), README);
+}
+
+// ---------------------------------------------------------------------------
+// Rebuild and status
+// ---------------------------------------------------------------------------
+
+/** Rewrite the whole folder from the database. */
+export function rebuildCollection(cards: CardRecord[]): { written: number; removed: number } {
+  ensureDirs();
+  const keep = new Set<string>();
+  let written = 0;
+  for (const card of cards) {
+    const name = cardFileName(card);
+    writeAtomic(path.join(cardsDir(), name), cardMarkdown({ card, sales: salesFor(card.id), snapshots: snapshotsFor(card.id) }));
+    keep.add(name);
+    written++;
+  }
+  let removed = 0;
+  for (const name of fs.readdirSync(cardsDir())) {
+    if (!name.endsWith(".md") || keep.has(name)) continue;
+    fs.rmSync(path.join(cardsDir(), name), { force: true });
+    removed++;
+  }
+  state.indexDirty = true;
+  flushCollection();
+  state.lastError = null;
+  state.failures = 0;
+  return { written, removed };
+}
+
+export interface CollectionStatus {
+  enabled: boolean;
+  dir: string;
+  files: number;
+  bytes: number;
+  updatedAt: string | null;
+  failures: number;
+  lastError: string | null;
+}
+
+export function collectionStatus(): CollectionStatus {
+  const dir = cardsDir();
+  let files = 0;
+  let bytes = 0;
+  let newest = 0;
+  try {
+    for (const name of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+      if (!name.endsWith(".md")) continue;
+      const stat = fs.statSync(path.join(dir, name));
+      files++;
+      bytes += stat.size;
+      newest = Math.max(newest, stat.mtimeMs);
+    }
+  } catch {
+    /* reported through lastError below */
+  }
+  return {
+    enabled: mirrorEnabled(),
+    dir: collectionDir(),
+    files,
+    bytes,
+    updatedAt: newest ? new Date(newest).toISOString() : null,
+    failures: state.failures,
+    lastError: state.lastError,
+  };
+}
+
+/**
+ * Every file in the folder, relative to it: the index, the explainer and each
+ * card. This is what a "take my collection elsewhere" download contains.
+ */
+export function collectionFiles(): Array<{ name: string; text: string }> {
+  flushCollection();
+  const out: Array<{ name: string; text: string }> = [];
+  for (const name of ["README.md", "index.md"]) {
+    const file = path.join(collectionDir(), name);
+    if (fs.existsSync(file)) out.push({ name, text: fs.readFileSync(file, "utf8") });
+  }
+  for (const card of readCardFiles()) out.push({ name: `cards/${card.name}`, text: card.text });
+  return out;
+}
+
+/** Every card file on disk, as text. Used by the reader and by backups. */
+export function readCardFiles(): Array<{ name: string; text: string }> {
+  const dir = cardsDir();
+  if (!fs.existsSync(dir)) return [];
+  const out: Array<{ name: string; text: string }> = [];
+  for (const name of fs.readdirSync(dir).sort()) {
+    if (!name.endsWith(".md")) continue;
+    out.push({ name, text: fs.readFileSync(path.join(dir, name), "utf8") });
+  }
+  return out;
+}

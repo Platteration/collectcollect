@@ -18,7 +18,7 @@ cp .env.example .env      # add ANTHROPIC_API_KEY (and optional price-source key
 npm run dev               # http://localhost:3000
 ```
 
-Production: `npm run build && npm start`. Everything is stored locally in `./data` (SQLite database plus uploaded photos); set `DATA_DIR` to move it.
+Production: `npm run build && npm start`. Everything is stored locally in `./data` (SQLite database, uploaded photos, and a Markdown copy of the collection); set `DATA_DIR` to move it.
 
 Docker: `docker compose up --build` (reads `.env`, keeps data in a named volume at `/data`).
 
@@ -78,6 +78,12 @@ Sports cards have no free price API; without a PriceCharting token you can still
 
 **Backup and restore.** Settings offers a single zip holding a consistent copy of the database (taken through SQLite's own backup, so it is safe while the app is running) and every photo, and takes one back to restore it. A restore validates the whole archive and opens its database before touching anything, refuses names that would escape the data directory or files the app did not write, and moves the collection being replaced into a dated folder rather than deleting it, so restoring the wrong file can be undone by hand. It holds the archive in memory, so it is capped at 512 MB; a larger collection is restored by unpacking the zip into the data directory with the app stopped.
 
+**Your collection is also plain text.** Every card is written to a Markdown file under `data/collection/cards/`, rewritten whenever that card changes: front matter holding the record (name, set, number, grade, copies, what you paid, where it is kept) and, below it, the same card written for a person — its photo, your notes, every price the app has recorded, and any sales. `index.md` lists the whole collection in one table, `README.md` in that folder explains the format to whoever finds it.
+
+This exists so the collection outlives the app. If CollectCollect is never updated again, or you would rather keep your catalogue somewhere else, the folder is already a complete, readable record that any text editor, spreadsheet, git repository or notes tool can open — no database, no export step, nothing to run. Settings has *Download the Markdown* for a zip of it, *Rewrite the files* to rebuild them from the database, and *Rebuild from these files* to read a collection back in. Reading files back matches on the id inside each one, so importing the same folder twice changes nothing the second time. Writing is best-effort by design: a full or read-only disk degrades the plain-text copy and is reported in Settings, but never stops a card being saved. Set `MARKDOWN_MIRROR=off` to switch it off.
+
+The files hold every recorded price, but not the individual provider quotes behind each one; photos stay in `data/uploads/`, which the card files link to, so keep the two together.
+
 The archive is written and read by a small built-in zip writer and reader rather than a dependency. Tests check the writer against the system `unzip` and Python's `zipfile`, read back archives made by the system `zip` in both stored and deflated form, and confirm that a corrupted payload, a doctored entry name, a path that escapes, an oversized expansion and a database that will not open are each refused with the collection left untouched.
 
 **Export.** The Collection page has an *Export CSV* button (also `GET /api/export`) with every card, its grade or condition, purchase price, and latest ungraded / PSA 10 / your-copy prices.
@@ -121,6 +127,7 @@ src/app/                 Next.js App Router pages and API routes
   api/alerts[/id]        GET the feed, POST marks all read, DELETE dismisses one
   api/cards/intake       POST — atomic add-or-merge used by scan mode
   api/backup             GET — the database and photos as one zip; /restore puts one back
+  api/collection         GET — the collection as Markdown; /rebuild rewrites it, /import reads it back
   api/import             POST — preview a CSV, or apply it with `apply: true`
   api/locations          GET — storage locations in use, for autocomplete
   api/sets/refresh       POST — fetch and store a set's published checklist
@@ -131,6 +138,8 @@ src/lib/pricing/         Providers, matching heuristics, summary/valuation, refr
 src/lib/analytics.ts     Portfolio value series, grading outlook (min/max/upside) and timing verdict
 src/lib/scheduler.ts     Hourly auto-refresh of stale prices (started from src/instrumentation.ts)
 src/components/charts/   Inline-SVG portfolio line and min/max outlook band charts
+src/lib/markdown/        The plain-text copy: format, one card as a document, the
+                         on-disk mirror, and reading a collection back out of it
 src/lib/zip.ts           Dependency-free streaming zip writer used by the backup
 src/lib/csv.ts           RFC 4180 reader; src/lib/import.ts maps columns to cards
 src/lib/sets/            Set checklist providers, caching and completion matching

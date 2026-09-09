@@ -103,7 +103,10 @@ export function listSales(): SaleWithCard[] {
 export function deleteSale(id: number): boolean {
   const sale = getDb().prepare("SELECT * FROM sales WHERE id = ?").get(id) as SaleRow | undefined;
   if (!sale) return false;
+  // Remove the sale first: putting the copies back rewrites the card's
+  // plain-text file, which must not still list the sale being undone.
+  const removed = getDb().prepare("DELETE FROM sales WHERE id = ?").run(id).changes > 0;
   const card = getCard(sale.card_id);
   if (card) updateCard(card.id, { quantity: card.quantity + sale.quantity });
-  return getDb().prepare("DELETE FROM sales WHERE id = ?").run(id).changes > 0;
+  return removed;
 }

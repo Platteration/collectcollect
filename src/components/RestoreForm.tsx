@@ -42,7 +42,7 @@ export function RestoreForm() {
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <label className="block">
           <span className="sr-only">Backup archive</span>
-          <input type="file" accept=".zip,application/zip" className="text-sm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          <input id="restore-archive" type="file" accept=".zip,application/zip" className="text-sm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         </label>
         <button type="button" className="btn-danger" onClick={restore} disabled={!file || busy}>
           {busy ? "Restoring…" : "Restore from backup"}

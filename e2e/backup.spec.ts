@@ -17,7 +17,7 @@ test("a collection survives a backup and restore", async ({ page }) => {
 
   // Put the backup back.
   await page.goto("/settings");
-  await page.setInputFiles("input[type=file][accept*=zip]", archive!);
+  await page.setInputFiles("#restore-archive", archive!);
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Restore from backup" }).click();
   await expect(page.getByText(/Restored \d+ cards? and \d+ photos?/)).toBeVisible({ timeout: 20_000 });
@@ -31,7 +31,7 @@ test("a collection survives a backup and restore", async ({ page }) => {
 
 test("restoring something that is not a backup is refused", async ({ page }) => {
   await page.goto("/settings");
-  await page.setInputFiles("input[type=file][accept*=zip]", { name: "notes.zip", mimeType: "application/zip", buffer: Buffer.from("this is not a zip file") });
+  await page.setInputFiles("#restore-archive", { name: "notes.zip", mimeType: "application/zip", buffer: Buffer.from("this is not a zip file") });
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Restore from backup" }).click();
   await expect(page.getByText(/not a zip archive/)).toBeVisible();

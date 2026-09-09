@@ -40,7 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# app data (SQLite database + uploaded photos)
+# app data (SQLite database, uploaded photos, Markdown copy of the collection)
 /data/
 !.env.example
 

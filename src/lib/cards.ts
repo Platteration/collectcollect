@@ -10,6 +10,7 @@ import type {
 } from "./types";
 import { CONDITIONS, GAMES, GRADING_STATUSES, type GradingStatus } from "./types";
 import { isValidUploadName } from "./images";
+import { mirrorCard, unmirrorCard } from "./markdown/mirror";
 import { normalizeNumber } from "./pricing/match";
 
 interface CardRow {
@@ -167,6 +168,35 @@ export function normalizeInput(input: CardInput): Required<
   };
 }
 
+/**
+ * Cards written inside a transaction are mirrored once it commits: a rolled
+ * back intake must not leave a Markdown file for a card that does not exist.
+ */
+const deferredMirror = new Set<number>();
+
+function touch(card: CardRecord | null): void {
+  if (!card) return;
+  if (getDb().inTransaction) deferredMirror.add(card.id);
+  else mirrorCard(card);
+}
+
+/**
+ * Write the Markdown files for everything a transaction touched. Callers that
+ * open their own transaction must call this after it commits, and
+ * `discardDeferredMirror` if it rolls back.
+ */
+export function flushDeferredMirror(): void {
+  for (const id of deferredMirror) {
+    const card = getCard(id);
+    if (card) mirrorCard(card);
+  }
+  deferredMirror.clear();
+}
+
+export function discardDeferredMirror(): void {
+  deferredMirror.clear();
+}
+
 export function createCard(input: CardInput): CardRecord {
   const c = normalizeInput(input);
   const now = new Date().toISOString();
@@ -188,7 +218,9 @@ export function createCard(input: CardInput): CardRecord {
       manualGraded: JSON.stringify(c.manualGraded),
       now,
     });
-  return getCard(Number(result.lastInsertRowid))!;
+  const card = getCard(Number(result.lastInsertRowid))!;
+  touch(card);
+  return card;
 }
 
 export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | null {
@@ -213,7 +245,9 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
       manualGraded: JSON.stringify(merged.manualGraded),
       now: new Date().toISOString(),
     });
-  return getCard(id);
+  const card = getCard(id);
+  touch(card);
+  return card;
 }
 
 /**
@@ -282,7 +316,14 @@ export function intakeCard(input: CardInput): IntakeOutcome {
     }
     return { result: "created", card: createCard(input) };
   });
-  return run();
+  try {
+    const outcome = run();
+    flushDeferredMirror();
+    return outcome;
+  } catch (e) {
+    discardDeferredMirror();
+    throw e;
+  }
 }
 
 export function getCard(id: number): CardRecord | null {
@@ -291,7 +332,9 @@ export function getCard(id: number): CardRecord | null {
 }
 
 export function deleteCard(id: number): boolean {
-  return getDb().prepare("DELETE FROM cards WHERE id = ?").run(id).changes > 0;
+  const gone = getDb().prepare("DELETE FROM cards WHERE id = ?").run(id).changes > 0;
+  if (gone) unmirrorCard(id);
+  return gone;
 }
 
 export interface ListOptions {
@@ -337,6 +380,7 @@ export function addSnapshot(cardId: number, summary: PriceSummary): PriceSnapsho
   const result = getDb()
     .prepare("INSERT INTO price_snapshots (card_id, fetched_at, summary) VALUES (?, ?, ?)")
     .run(cardId, summary.fetchedAt, JSON.stringify(summary));
+  touch(getCard(cardId));
   return { id: Number(result.lastInsertRowid), cardId, fetchedAt: summary.fetchedAt, summary };
 }
 
