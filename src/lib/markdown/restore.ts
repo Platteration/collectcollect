@@ -86,7 +86,11 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
       }
 
       db.prepare("DELETE FROM price_snapshots WHERE card_id = ?").run(card.id);
-      for (const snapshot of parsed.snapshots) {
+      // The file lists prices newest first, for reading. They go back in the
+      // other way round: the newest snapshot has to end up with the highest
+      // id, which is how the app finds a card's current value.
+      const oldestFirst = [...parsed.snapshots].sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt));
+      for (const snapshot of oldestFirst) {
         db.prepare("INSERT INTO price_snapshots (card_id, fetched_at, summary) VALUES (?, ?, ?)").run(
           card.id,
           snapshot.fetchedAt,

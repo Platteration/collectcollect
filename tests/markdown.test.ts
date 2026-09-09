@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb, openDatabase, setDb } from "@/lib/db";
-import { addSnapshot, createCard, deleteCard, listCards, updateCard } from "@/lib/cards";
+import { addSnapshot, createCard, deleteCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
 import { deleteSale, recordSale } from "@/lib/sales";
 import { cardsDir, collectionDir, collectionStatus, flushCollection, readCardFiles, rebuildCollection } from "@/lib/markdown/mirror";
 import { importCardFiles } from "@/lib/markdown/restore";
@@ -225,11 +225,43 @@ describe("files written by something other than this app", () => {
     expect(parsed.warnings.join(" ")).toMatch(/outside the usable range/);
   });
 
+  it("keeps a source label that has brackets of its own", () => {
+    const text = [
+      "---",
+      'name: "Bolt"',
+      'game: "mtg"',
+      "---",
+      "",
+      "# Bolt",
+      "",
+      "## Value history",
+      "",
+      "| Date | Your copy | Ungraded | Graded | Basis |",
+      "| --- | --- | --- | --- | --- |",
+      "| 2026-02-02T10:00:00.000Z | $8.00 | $8.00 (Scryfall (TCGplayer-derived USD)) | PSA 10 $200.00 (PriceCharting) | Ungraded. |",
+      "",
+    ].join("\n");
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.snapshots[0].summary).toMatchObject({
+      ungraded: 8,
+      ungradedSource: "Scryfall (TCGplayer-derived USD)",
+      graded: { "PSA 10": 200 },
+      gradedSource: "PriceCharting",
+    });
+  });
+
+  it("is not confused by a card named after one of its own sections", () => {
+    const card = createCard({ game: "pokemon", name: "Notes", notes: "The real note." });
+    const parsed = parseCardMarkdown(fileFor(card.id))!;
+    expect(parsed.input.name).toBe("Notes");
+    expect(parsed.input.notes).toBe("The real note.");
+  });
+
   it("keeps a note that looks like the rest of the file", () => {
     const card = createCard({
       game: "pokemon",
       name: "Meta",
-      notes: "## Sales\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n---\n\n# The end",
+      notes: "## Sales\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n\n---\n\n\n# The end\n\n\\# already escaped",
     });
     const parsed = parseCardMarkdown(fileFor(card.id))!;
     expect(parsed.input.notes).toBe(card.notes);
@@ -338,7 +370,11 @@ describe("recovering a collection from its files", () => {
     // collection still values the same.
     const a = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", quantity: 2, purchasePrice: 100 });
     const b = createCard({ game: "mtg", name: "Black Lotus", quantity: 1, purchasePrice: 400 });
+    // Several prices each, so the rebuilt history has to keep its direction:
+    // the newest price is the one the portfolio is valued at.
+    addSnapshot(a.id, summary(120, "2025-06-02T10:00:00.000Z"));
     addSnapshot(a.id, summary(300, "2026-01-02T10:00:00.000Z"));
+    addSnapshot(b.id, summary(7000, "2025-06-02T10:00:00.000Z"));
     addSnapshot(b.id, summary(9000, "2026-01-02T10:00:00.000Z"));
     flushCollection();
     const before = totalValue();
@@ -348,6 +384,8 @@ describe("recovering a collection from its files", () => {
     importCardFiles(files);
     expect(totalValue()).toBe(before);
     expect(before).toBe(300 * 2 + 9000);
+    const restored = listCards().find((c) => c.name === "Charizard")!;
+    expect(listSnapshots(restored.id).map((s) => s.summary.yourCopyValue)).toEqual([300, 120]);
   });
 });
 

@@ -85,12 +85,14 @@ function moneyCell(value: number | null, source: string | null): string {
   return `${money(value)}${source ? ` (${source})` : ""}`;
 }
 
-const SOURCE_RE = /\(([^()]*)\)\s*$/;
+// Source labels carry their own brackets ("Scryfall (TCGplayer-derived USD)"),
+// so the split has to run to the last bracket, not the first balanced pair.
+const SOURCE_RE = /^(.*?)\s*\((.*)\)\s*$/;
 
 function splitSource(text: string): { rest: string; source: string | null } {
-  const match = SOURCE_RE.exec(text);
+  const match = SOURCE_RE.exec(text.trim());
   if (!match) return { rest: text.trim(), source: null };
-  return { rest: text.slice(0, match.index).trim(), source: match[1].trim() || null };
+  return { rest: match[1].trim(), source: match[2].trim() || null };
 }
 
 /** Turn `PSA 10 $5,000 · PSA 9 $1,400` back into a map. */
@@ -108,11 +110,16 @@ function parseGraded(text: string): Record<string, number> {
 
 function escapeProse(text: string): string {
   // A note that starts a line with `#` would otherwise read as a new section.
-  return text.replace(/^(#{1,6}\s)/gm, "\\$1").replace(/^(---\s*)$/gm, "\\$1");
+  // The backslash itself is escaped first, so a note that already contains one
+  // comes back as it went in.
+  return text
+    .replace(/^\\(?=\\*(?:#{1,6}\s|---\s*$))/gm, "\\\\")
+    .replace(/^(#{1,6}\s)/gm, "\\$1")
+    .replace(/^(---\s*)$/gm, "\\$1");
 }
 
 function unescapeProse(text: string): string {
-  return text.replace(/^\\(#{1,6}\s)/gm, "$1").replace(/^\\(---\s*)$/gm, "$1");
+  return text.replace(/^\\(\\*(?:#{1,6}\s|---\s*$))/gm, "$1");
 }
 
 /**
@@ -156,10 +163,13 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
     updated_at: card.updatedAt,
   });
 
-  const lines: string[] = [front];
-  lines.push(`# ${card.name}`, "");
-  lines.push(detail(card), "");
-  lines.push(
+  // Blocks are joined with exactly one blank line between them, rather than
+  // squeezed afterwards: collapsing the finished document would also flatten
+  // the blank lines inside somebody's notes.
+  const blocks: string[] = [];
+  blocks.push(`# ${card.name}`);
+  blocks.push(detail(card));
+  blocks.push(
     [
       `**${card.quantity}** cop${card.quantity === 1 ? "y" : "ies"}`,
       condition(card),
@@ -168,7 +178,6 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
     ]
       .filter(Boolean)
       .join(" · "),
-    "",
   );
 
   const value = latest?.yourCopyValue ?? null;
@@ -180,22 +189,22 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
       bits.push(`Priced ${snapshots[0].fetchedAt.slice(0, 10)}.`);
     }
     if (card.purchasePrice !== null) bits.push(`Paid ${money(card.purchasePrice)} per copy.`);
-    lines.push(bits.join(" "), "");
+    blocks.push(bits.join(" "));
   }
 
   if (card.imagePath) {
-    lines.push("## Photo", "", `![${card.name}](${photoHref(card.imagePath)})`, "");
+    blocks.push("## Photo", `![${card.name}](${photoHref(card.imagePath)})`);
   } else if (card.referenceImageUrl) {
-    lines.push("## Photo", "", `Reference image: <${card.referenceImageUrl}>`, "");
+    blocks.push("## Photo", `Reference image: <${card.referenceImageUrl}>`);
   }
 
   if (card.notes?.trim()) {
-    lines.push("## Notes", "", escapeProse(card.notes.trim()), "");
+    blocks.push("## Notes", escapeProse(card.notes.trim()));
   }
 
   if (snapshots.length) {
-    lines.push("## Value history", "");
-    lines.push(
+    blocks.push(
+      "## Value history",
       table(
         VALUE_HEADERS,
         snapshots.map((s) => [
@@ -206,35 +215,29 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
           s.summary.yourCopyBasis ?? "",
         ]),
       ),
-      "",
     );
   }
 
   if (sales.length) {
-    lines.push("## Sales", "");
-    lines.push(
+    blocks.push(
+      "## Sales",
       table(
         SALE_HEADERS,
         sales.map((s) => [s.soldAt, s.quantity, money(s.unitPrice), money(s.fees), s.unitCost === null ? "" : money(s.unitCost), s.venue ?? "", s.notes ?? ""]),
       ),
-      "",
     );
   }
 
   if (card.identification) {
-    lines.push(
+    blocks.push(
       "## Identification",
-      "",
       `Read from the photo by the app, confidence ${Math.round((card.identification.confidence ?? 0) * 100)}%.`,
-      "",
-      "```json",
-      JSON.stringify(card.identification, null, 2),
-      "```",
-      "",
+      ["```json", JSON.stringify(card.identification, null, 2), "```"].join("\n"),
     );
   }
 
-  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+  return `${front}\n${blocks.filter((b) => b.trim()).join("\n\n")}\n`;
+
 }
 
 // ---------------------------------------------------------------------------

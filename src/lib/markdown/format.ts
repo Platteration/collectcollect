@@ -135,8 +135,12 @@ function splitRow(line: string): string[] {
   return cells;
 }
 
-/** The text under a `## Heading`, up to the next heading of the same level. */
-export function readSection(body: string, heading: string): string | null {
+/**
+ * The text under a `## Heading`, up to the next heading of the same level or
+ * higher. The document's own title is an H1, so sections start at H2: a card
+ * called "Notes" is a title, not the notes section.
+ */
+export function readSection(body: string, heading: string, minLevel = 2): string | null {
   const lines = body.split("\n");
   const wanted = heading.trim().toLowerCase();
   let start = -1;
@@ -145,7 +149,7 @@ export function readSection(body: string, heading: string): string | null {
     const match = /^(#{1,6})\s+(.*)$/.exec(lines[i]);
     if (!match) continue;
     if (start === -1) {
-      if (match[2].trim().toLowerCase() === wanted) {
+      if (match[1].length >= minLevel && match[2].trim().toLowerCase() === wanted) {
         start = i + 1;
         level = match[1].length;
       }
