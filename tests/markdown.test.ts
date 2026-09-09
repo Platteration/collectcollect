@@ -225,6 +225,52 @@ describe("files written by something other than this app", () => {
     expect(parsed.warnings.join(" ")).toMatch(/outside the usable range/);
   });
 
+  it("carries a real identification back and refuses one that is not a card", () => {
+    const identification = {
+      game: "pokemon",
+      sport: null,
+      name: "Charizard",
+      set_name: "Base Set",
+      set_code: "base1",
+      card_number: "4/102",
+      year: 1999,
+      rarity: "Holo Rare",
+      variant: "1st edition",
+      language: "English",
+      manufacturer: null,
+      subject: "Charizard",
+      grading: { company: null, grade: null, cert_number: null },
+      condition_notes: "Slight whitening.",
+      condition_assessment: {
+        centering: "60/40",
+        corners: "sharp",
+        edges: "clean",
+        surface: "clean",
+        estimated_grade_low: "8",
+        estimated_grade_high: "9",
+        caveat: null,
+      },
+      confidence: 0.94,
+      alternatives: [],
+      search_query: "Charizard 4/102 Base Set",
+    };
+    const card = createCard({ game: "pokemon", name: "Charizard", identification: identification as never });
+    const parsed = parseCardMarkdown(fileFor(card.id))!;
+    expect(parsed.input.identification).toEqual(identification);
+
+    // A record from before the condition assessment existed still comes back.
+    const older = { ...identification, condition_assessment: undefined };
+    const olderCard = createCard({ game: "pokemon", name: "Venusaur", identification: older as never });
+    expect(parseCardMarkdown(fileFor(olderCard.id))!.input.identification).toMatchObject({ name: "Charizard" });
+
+    // Something that is only shaped like JSON is dropped, with a warning,
+    // rather than reaching pages that do arithmetic on its fields.
+    const broken = fileFor(card.id).replace('"confidence": 0.94', '"confidence": "very"');
+    const brokenParsed = parseCardMarkdown(broken)!;
+    expect(brokenParsed.input.identification).toBeNull();
+    expect(brokenParsed.warnings.join(" ")).toMatch(/did not describe a card/);
+  });
+
   it("keeps a source label that has brackets of its own", () => {
     const text = [
       "---",
@@ -354,6 +400,27 @@ describe("recovering a collection from its files", () => {
     // Adopting the id must not leave a file behind under the one it was
     // created with a moment earlier.
     expect(fs.readdirSync(cardsDir()).filter((f) => f.includes("zapdos"))).toHaveLength(1);
+  });
+
+  it("will not let a raw copy overwrite a slab and its history", () => {
+    // A file describing an ungraded Charizard...
+    createCard({ game: "pokemon", name: "Charizard", setName: "Base Set" });
+    flushCollection();
+    const [raw] = readCardFiles();
+
+    // ...meets a collection where that card came back from the grader, with a
+    // sale and a price history behind it.
+    setDb(openDatabase(":memory:"));
+    const slab = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", gradingCompany: "PSA", grade: "10", quantity: 2 });
+    addSnapshot(slab.id, summary(5000, "2026-01-02T10:00:00.000Z"));
+    recordSale(slab.id, { quantity: 1, unitPrice: 5200 });
+
+    const result = importCardFiles([raw]);
+    expect(result).toMatchObject({ created: 1, replaced: 0 });
+    const kept = listCards().find((c) => c.grade === "10")!;
+    expect(kept.id).toBe(slab.id);
+    expect(listSnapshots(kept.id)).toHaveLength(1);
+    expect(listCards()).toHaveLength(2);
   });
 
   it("never overwrites a card that merely shares an id", () => {

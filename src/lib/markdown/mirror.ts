@@ -196,13 +196,22 @@ function scheduleIndex(): void {
   state.indexTimer.unref?.();
 }
 
-/** Write the index now. Used by tests, by rebuilds, and before a backup. */
+/**
+ * Write the index now. Used by tests, by rebuilds, and before a backup or a
+ * download.
+ *
+ * It writes whether or not this process knows the index to be out of date.
+ * The dirty flag lives in memory, so a restart forgets a pending rebuild —
+ * and the index is derived entirely from the files already on disk, so
+ * rebuilding one that happened to be current costs a folder read and is
+ * always right.
+ */
 export function flushCollection(): void {
   if (state.indexTimer) {
     clearTimeout(state.indexTimer);
     state.indexTimer = null;
   }
-  if (state.indexDirty) writeIndex();
+  writeIndex();
 }
 
 interface IndexEntry {
@@ -250,11 +259,13 @@ function writeIndex(): void {
       const condition = String(e.data.condition ?? "") as Condition;
       const grade = e.data.grade
         ? `${String(e.data.grading_company ?? "").trim()} ${e.data.grade}`.trim()
-        : (CONDITIONS[condition] ?? condition);
+        : Object.hasOwn(CONDITIONS, condition)
+          ? CONDITIONS[condition]
+          : condition;
       const game = String(e.data.game ?? "") as Game;
       return [
         `[${String(e.data.name ?? "")}](cards/${e.file})`,
-        GAMES[game] ?? game,
+        Object.hasOwn(GAMES, game) ? GAMES[game] : game,
         String(e.data.set_name ?? ""),
         String(e.data.card_number ?? ""),
         quantity,

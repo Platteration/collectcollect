@@ -174,12 +174,19 @@ export function normalizeInput(input: CardInput): Required<
  * Cards written inside a transaction are mirrored once it commits: a rolled
  * back intake must not leave a Markdown file for a card that does not exist.
  */
-const deferredMirror = new Set<number>();
+/** Card id -> whether it might already be filed under a different name. */
+const deferredMirror = new Map<number, boolean>();
 
 function touch(card: CardRecord | null, opts: { mayHaveOldName?: boolean } = {}): void {
   if (!card) return;
-  if (getDb().inTransaction) deferredMirror.add(card.id);
-  else mirrorCard(card, opts);
+  const mayHaveOldName = opts.mayHaveOldName !== false;
+  if (getDb().inTransaction) {
+    // Keep the hint: importing a thousand new cards must not make a thousand
+    // passes over the folder looking for files that cannot exist.
+    deferredMirror.set(card.id, (deferredMirror.get(card.id) ?? false) || mayHaveOldName);
+  } else {
+    mirrorCard(card, opts);
+  }
 }
 
 /**
@@ -188,9 +195,9 @@ function touch(card: CardRecord | null, opts: { mayHaveOldName?: boolean } = {})
  * `discardDeferredMirror` if it rolls back.
  */
 export function flushDeferredMirror(): void {
-  for (const id of deferredMirror) {
+  for (const [id, mayHaveOldName] of deferredMirror) {
     const card = getCard(id);
-    if (card) mirrorCard(card);
+    if (card) mirrorCard(card, { mayHaveOldName });
   }
   deferredMirror.clear();
 }

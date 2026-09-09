@@ -10,6 +10,7 @@ import type {
   Sale,
 } from "../types";
 import { CONDITIONS, GAMES, GAME_IDS, GRADING_STATUSES } from "../types";
+import { IdentificationSchema } from "../identify/schema";
 import { money, parseDocument, readFenced, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "./format";
 
 /** Everything about one card that the plain-text copy preserves. */
@@ -29,6 +30,16 @@ export interface ParsedCard {
   snapshots: Array<{ fetchedAt: string; summary: PriceSummary }>;
   warnings: string[];
 }
+
+/**
+ * What a card file's identification block has to look like. It is the schema
+ * the model answers to, with the condition assessment allowed to be absent:
+ * cards identified before that existed have records without it, and dropping
+ * their identification on the way back in would lose real data.
+ */
+const STORED_IDENTIFICATION = IdentificationSchema.extend({
+  condition_assessment: IdentificationSchema.shape.condition_assessment.nullish(),
+});
 
 const VALUE_HEADERS = ["Date", "Your copy", "Ungraded", "Graded", "Basis"];
 const SALE_HEADERS = ["Sold", "Copies", "Each", "Fees", "Cost each", "Venue", "Notes"];
@@ -321,13 +332,12 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
   let identification: Identification | null = null;
   if (identificationJson) {
     try {
-      const parsed = JSON.parse(identificationJson) as Identification;
-      // It is stored and shown as a record of what the model read; a number is
-      // the only field anything computes with, so that is the one to insist on.
-      identification = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? { ...parsed, confidence: Number.isFinite(Number(parsed.confidence)) ? Number(parsed.confidence) : 0 }
-        : null;
-      if (!identification) warnings.push("The identification block was not a record and was dropped");
+      // Held to the same shape the model's own answers are held to. It is read
+      // back out by pages that do arithmetic and string work on its fields, so
+      // a block that merely looks like JSON is not good enough.
+      const checked = STORED_IDENTIFICATION.safeParse(JSON.parse(identificationJson));
+      if (checked.success) identification = checked.data as Identification;
+      else warnings.push("The identification block did not describe a card and was dropped");
     } catch {
       warnings.push("The identification block was not readable JSON and was dropped");
     }
@@ -412,7 +422,9 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
   }
 
   const rawId = num(data.id);
-  const id = rawId !== null && rawId >= 1 && rawId <= Number.MAX_SAFE_INTEGER ? Math.round(rawId) : null;
+  // SQLite hands rowids back through a double, so stay well inside what one
+  // represents exactly; a 32-bit id is more than any collection needs.
+  const id = rawId !== null && rawId >= 1 && rawId <= 2 ** 31 - 1 ? Math.round(rawId) : null;
   if (rawId !== null && id === null) warnings.push(`Ignored an id outside the usable range: ${rawId}`);
 
   return {

@@ -1,6 +1,6 @@
 import { createCard, discardDeferredMirror, findSimilar, getCard, updateCard } from "../cards";
 import { getDb } from "../db";
-import type { CardRecord } from "../types";
+import type { CardInput, CardRecord } from "../types";
 import { isSafeEntryName, readZip } from "../zip";
 import { parseCardMarkdown } from "./card";
 import { mirrorCard, readCardFiles } from "./mirror";
@@ -30,7 +30,8 @@ export const IMPORT_MAX_BYTES = 128 * 1024 * 1024;
 export function importCardFiles(files: Array<{ name: string; text: string }>): CollectionImport {
   const result: CollectionImport = { created: 0, replaced: 0, sales: 0, prices: 0, skipped: [], warnings: [] };
   const db = getDb();
-  const touched: number[] = [];
+  /** Card id -> whether it could already be filed under another name. */
+  const touched = new Map<number, boolean>();
 
   const run = db.transaction(() => {
     for (const file of files) {
@@ -44,7 +45,7 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
       let card: CardRecord | null = null;
       const wanted = parsed.id;
       const holder = wanted === null ? null : getCard(wanted);
-      const match = holder && isSameCard(holder, parsed.input.name, parsed.input.setName ?? null) ? holder : elsewhere(parsed);
+      const match = holder && isSameCard(holder, parsed.input) ? holder : elsewhere(parsed);
       if (match) {
         if (holder && match !== holder) {
           result.warnings.push({
@@ -54,11 +55,12 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
         }
         card = updateCard(match.id, parsed.input);
         if (card) result.replaced++;
+        if (card) touched.set(card.id, true);
       } else {
         if (holder) {
           result.warnings.push({
             file: file.name,
-            message: `Card ${wanted} here is "${holder.name}", not "${parsed.input.name}", so this was added as a new card instead of replacing it`,
+            message: `Card ${wanted} here is a different card ("${holder.name}"${holder.grade ? `, ${holder.gradingCompany ?? "graded"} ${holder.grade}` : ""}), so this file was added as a new card rather than replacing it`,
           });
         }
         card = createCard(parsed.input);
@@ -66,12 +68,14 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
         if (!holder && wanted !== null && wanted !== card.id) {
           card = adoptId(card, wanted) ?? card;
         }
+        // Brand new, so nothing of its own can be left behind under another name.
+        touched.set(card.id, false);
       }
       if (!card) {
         result.skipped.push({ file: file.name, reason: "Could not be written to the collection" });
         continue;
       }
-      touched.push(card.id);
+      if (!touched.has(card.id)) touched.set(card.id, true);
 
       if (parsed.createdAt || parsed.updatedAt) {
         db.prepare("UPDATE cards SET created_at = COALESCE(?, created_at), updated_at = COALESCE(?, updated_at) WHERE id = ?").run(
@@ -119,9 +123,9 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
   // claims. Rewriting also normalises a hand-edited folder, giving every card
   // the file name and layout it should have.
   discardDeferredMirror();
-  for (const id of touched) {
+  for (const [id, mayHaveOldName] of touched) {
     const card = getCard(id);
-    if (card) mirrorCard(card);
+    if (card) mirrorCard(card, { mayHaveOldName });
   }
   return result;
 }
@@ -132,13 +136,13 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
  * fresh copy every time it was run, which is the opposite of what someone
  * recovering data needs.
  */
-function elsewhere(parsed: { input: { game: CardRecord["game"]; name: string; setName?: string | null; cardNumber?: string | null } }): CardRecord | null {
+function elsewhere(parsed: { input: CardInput }): CardRecord | null {
   const candidates = findSimilar({
     game: parsed.input.game,
     name: parsed.input.name,
     cardNumber: parsed.input.cardNumber ?? null,
     setName: parsed.input.setName ?? null,
-  }).filter((c) => isSameCard(c, parsed.input.name, parsed.input.setName ?? null));
+  }).filter((c) => isSameCard(c, parsed.input));
   return candidates.length === 1 ? candidates[0] : null;
 }
 
@@ -147,16 +151,19 @@ function norm(value: string | null | undefined): string {
 }
 
 /**
- * Is the card sitting at this id the one the file describes? Names have to
- * agree, and so do sets when both sides name one. Anything less and the file
- * is treated as a different card, because silently overwriting somebody's
- * Charizard with a stranger's is the one outcome a recovery tool must not have.
+ * Is this card the one the file describes? Names have to agree, sets have to
+ * agree when both sides name one, and the copies have to be interchangeable:
+ * a raw card and a slab of the same card are different objects, worth
+ * different money, with different histories. Scanning already refuses to fold
+ * one into the other; a recovery tool, where being wrong costs the history
+ * rather than a quantity, has no business being more permissive.
  */
-function isSameCard(existing: CardRecord, name: string, setName: string | null): boolean {
-  if (norm(existing.name) !== norm(name)) return false;
+function isSameCard(existing: CardRecord, input: CardInput): boolean {
+  if (norm(existing.name) !== norm(input.name)) return false;
   const a = norm(existing.setName);
-  const b = norm(setName);
-  return !a || !b || a === b;
+  const b = norm(input.setName ?? null);
+  if (a && b && a !== b) return false;
+  return norm(existing.grade) === norm(input.grade ?? null) && norm(existing.gradingCompany) === norm(input.gradingCompany ?? null);
 }
 
 /**
