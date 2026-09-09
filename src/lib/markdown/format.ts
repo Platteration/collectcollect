@@ -51,7 +51,9 @@ export function parseDocument(text: string): Document {
     const colon = line.indexOf(":");
     if (colon === -1) continue;
     const key = line.slice(0, colon).trim();
-    if (!key) continue;
+    // Assigning "__proto__" would set this object's prototype rather than a
+    // field on it, so a hand-written file could reshape what it parses into.
+    if (!key || key === "__proto__") continue;
     data[key] = readValue(line.slice(colon + 1).trim());
   }
   return { data, body: rest.replace(/^\n+/, "") };

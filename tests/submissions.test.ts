@@ -168,6 +168,18 @@ describe("editing a batch and moving cards between batches", () => {
     expect(() => updateSubmission(sub.id, { company: "PSA", shipping: -1 })).toThrow(/at least zero/);
   });
 
+  it("does not call a card back when the deleted batch was not the one it is away with", () => {
+    const card = pricedCard("Blastoise", 80, 500);
+    const away = addCard(createSubmission({ company: "PSA" }).id, card.id);
+    markSent(away.id);
+    const draft = addCard(createSubmission({ company: "CGC" }).id, card.id);
+    expect(deleteSubmission(draft.id)).toBe(true);
+    expect(getCard(card.id)?.gradingStatus).toBe("submitted");
+    // Deleting the batch it really is away with does bring it back.
+    expect(deleteSubmission(away.id)).toBe(true);
+    expect(getCard(card.id)?.gradingStatus).toBe("planned");
+  });
+
   it("does not call a card back from a batch it is still away with", () => {
     const card = pricedCard("Charizard", 100, 900);
     const away = addCard(createSubmission({ company: "PSA" }).id, card.id);

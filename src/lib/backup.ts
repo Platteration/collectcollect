@@ -50,9 +50,15 @@ export async function buildBackup(): Promise<{ filename: string; stream: Readabl
   }
 
   const encoder = new TextEncoder();
-  for (const file of collectionFiles()) {
-    const bytes = encoder.encode(file.text);
-    entries.push({ name: `collection/${file.name}`, size: bytes.length, chunks: () => [bytes] });
+  // The Markdown is a bonus inside the archive; the database and the photos are
+  // the backup. An unreadable collection folder must not cost someone theirs.
+  try {
+    for (const file of collectionFiles()) {
+      const bytes = encoder.encode(file.text);
+      entries.push({ name: `collection/${file.name}`, size: bytes.length, chunks: () => [bytes] });
+    }
+  } catch {
+    /* the archive still holds everything needed to restore */
   }
 
   const iterator = zipStream(entries);

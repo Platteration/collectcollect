@@ -36,6 +36,8 @@ interface MirrorState {
   failures: number;
   indexTimer: NodeJS.Timeout | null;
   indexDirty: boolean;
+  /** When the index first went out of date, so a long run of changes still writes it. */
+  dirtySince: number;
 }
 
 const globalForMirror = globalThis as unknown as { __collectcollectMirror?: MirrorState };
@@ -44,7 +46,13 @@ const state: MirrorState = (globalForMirror.__collectcollectMirror ??= {
   failures: 0,
   indexTimer: null,
   indexDirty: false,
+  dirtySince: 0,
 });
+
+/** Wait this long after the last change before rebuilding the index... */
+const INDEX_QUIET_MS = 750;
+/** ...but never leave it out of date for longer than this while changes keep coming. */
+const INDEX_MAX_WAIT_MS = 15_000;
 
 function note(e: unknown): void {
   state.failures += 1;
@@ -163,12 +171,19 @@ export function unmirrorCard(id: number): void {
  * from rewriting it a thousand times.
  */
 function scheduleIndex(): void {
+  const now = Date.now();
+  if (!state.indexDirty) state.dirtySince = now;
   state.indexDirty = true;
-  if (state.indexTimer) return;
+  if (state.indexTimer) {
+    // A refresh of a large collection changes every card in turn; rebuilding
+    // the index after each one would read the whole folder over and over.
+    if (now - state.dirtySince >= INDEX_MAX_WAIT_MS) return;
+    clearTimeout(state.indexTimer);
+  }
   state.indexTimer = setTimeout(() => {
     state.indexTimer = null;
     if (state.indexDirty) writeIndex();
-  }, 750);
+  }, INDEX_QUIET_MS);
   state.indexTimer.unref?.();
 }
 

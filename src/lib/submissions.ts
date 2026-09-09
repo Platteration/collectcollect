@@ -129,12 +129,17 @@ export function listSubmissions(): Submission[] {
 export function deleteSubmission(id: number): boolean {
   const sub = getSubmission(id);
   if (!sub) return false;
+  // Delete first, so that a card still listed on another batch that has been
+  // sent is seen as away with that one rather than with this one.
+  const gone = getDb().prepare("DELETE FROM submissions WHERE id = ?").run(id).changes > 0;
   // Cards go back to being planned rather than staying stranded "at the grader".
   for (const c of sub.cards) {
     const card = getCard(c.cardId);
-    if (card && card.gradingStatus === "submitted") updateCard(card.id, { gradingStatus: "planned" });
+    if (card && card.gradingStatus === "submitted" && !isAwayWithAnotherBatch(card.id)) {
+      updateCard(card.id, { gradingStatus: "planned" });
+    }
   }
-  return getDb().prepare("DELETE FROM submissions WHERE id = ?").run(id).changes > 0;
+  return gone;
 }
 
 /** Add a card, capturing what it is worth raw and what gem mint would be worth today. */

@@ -257,6 +257,7 @@ function record(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (k === "__proto__") continue;
     const text = str(v);
     if (text) out[k] = text;
   }
@@ -267,6 +268,7 @@ function numberRecord(value: unknown): Record<string, number> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const out: Record<string, number> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (k === "__proto__") continue;
     const n = num(v);
     if (n !== null) out[k] = n;
   }
@@ -300,7 +302,13 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
   let identification: Identification | null = null;
   if (identificationJson) {
     try {
-      identification = JSON.parse(identificationJson) as Identification;
+      const parsed = JSON.parse(identificationJson) as Identification;
+      // It is stored and shown as a record of what the model read; a number is
+      // the only field anything computes with, so that is the one to insist on.
+      identification = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? { ...parsed, confidence: Number.isFinite(Number(parsed.confidence)) ? Number(parsed.confidence) : 0 }
+        : null;
+      if (!identification) warnings.push("The identification block was not a record and was dropped");
     } catch {
       warnings.push("The identification block was not readable JSON and was dropped");
     }
@@ -384,8 +392,12 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
     });
   }
 
+  const rawId = num(data.id);
+  const id = rawId !== null && rawId >= 1 && rawId <= Number.MAX_SAFE_INTEGER ? Math.round(rawId) : null;
+  if (rawId !== null && id === null) warnings.push(`Ignored an id outside the usable range: ${rawId}`);
+
   return {
-    id: num(data.id) === null ? null : Math.round(num(data.id)!),
+    id,
     input,
     createdAt: str(data.created_at),
     updatedAt: str(data.updated_at),

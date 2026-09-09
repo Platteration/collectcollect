@@ -179,6 +179,46 @@ describe("a card as a document", () => {
   });
 });
 
+describe("files written by something other than this app", () => {
+  it("does not let a file reshape what it is read into", () => {
+    const text = [
+      "---",
+      'name: "Sneaky"',
+      'game: "pokemon"',
+      '__proto__: {"quantity": 999}',
+      'external_ids: {"__proto__": "x", "pricecharting": "42"}',
+      'manual_graded: {"__proto__": 1, "PSA 10": 500}',
+      "---",
+      "",
+      "# Sneaky",
+      "",
+    ].join("\n");
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.input.quantity).toBe(1);
+    expect(parsed.input.externalIds).toEqual({ pricecharting: "42" });
+    expect(parsed.input.manualGraded).toEqual({ "PSA 10": 500 });
+    expect(Object.getPrototypeOf(parsed.input.externalIds!)).toBe(Object.prototype);
+  });
+
+  it("ignores an id no database could hold", () => {
+    const text = ["---", 'name: "Huge"', 'game: "pokemon"', "id: 1e30", "---", "", "# Huge", ""].join("\n");
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.id).toBeNull();
+    expect(parsed.warnings.join(" ")).toMatch(/outside the usable range/);
+  });
+
+  it("keeps a note that looks like the rest of the file", () => {
+    const card = createCard({
+      game: "pokemon",
+      name: "Meta",
+      notes: "## Sales\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n---\n\n# The end",
+    });
+    const parsed = parseCardMarkdown(fileFor(card.id))!;
+    expect(parsed.input.notes).toBe(card.notes);
+    expect(parsed.sales).toEqual([]);
+  });
+});
+
 describe("recovering a collection from its files", () => {
   beforeEach(() => setDb(openDatabase(":memory:")));
 
