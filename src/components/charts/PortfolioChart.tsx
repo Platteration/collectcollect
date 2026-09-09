@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import type { PortfolioPoint } from "@/lib/analytics";
 import { money } from "@/lib/format";
-import { INK, areaPath, compactMoney, linePath, niceTicks, shortDate, timeTicks, useContainerWidth, useCrosshair, xScale, yScale, type Layout } from "./chart-utils";
+import { INK, areaPath, compactMoney, linePath, niceScale, shortDate, timeTicks, useContainerWidth, useCrosshair, xScale, yScale, type Layout } from "./chart-utils";
 
 interface Props {
   points: PortfolioPoint[];
@@ -13,25 +13,41 @@ interface Props {
   /** Tooltip footer; defaults to the collection-level "raw NM … · n priced" line. */
   detail?: (point: PortfolioPoint) => string;
   label?: string;
+  /** Draw the cost-basis line: what the copies held at each point were paid for. */
+  showCost?: boolean;
+  /** What the cost line is called in the tooltip ("cost basis", "paid"). */
+  costLabel?: string;
 }
 
 const LAYOUT: Layout = { width: 800, height: 260, left: 8, right: 56, top: 12, bottom: 24 };
 
-export function PortfolioChart({ points, up, onHover, height = 260, detail, label = "Collection value over time" }: Props) {
+export function PortfolioChart({ points, up, onHover, height = 260, detail, label = "Collection value over time", showCost = false, costLabel = "cost basis" }: Props) {
   const { ref, width } = useContainerWidth<HTMLDivElement>(LAYOUT.width);
   const narrow = width < 480;
   const layout: Layout = { ...LAYOUT, width, height: narrow ? Math.round(height * 0.8) : height, right: narrow ? 48 : LAYOUT.right };
   const times = points.map((p) => new Date(p.t).getTime());
   const values = points.map((p) => p.value);
-  const { lo, hi, ticks } = niceTicks(Math.min(...values, 0), Math.max(...values, 1));
+  // The cost line only earns its place once something has a purchase price on it.
+  const costs = points.map((p) => p.cost ?? 0);
+  const withCost = showCost && costs.some((c) => c > 0);
+  // Scaled to the data rather than anchored at zero, so a 2% week is a 2% week
+  // and not a flat line pinned to the top of the frame.
+  const plotted = points.length ? (withCost ? [...values, ...costs] : values) : [0];
+  const min = Math.min(...plotted);
+  const max = Math.max(...plotted, 1);
+  const pad = (max - min) * 0.08 || Math.max(1, Math.abs(max) * 0.02);
+  const { lo, hi, ticks } = niceScale(Math.max(0, min - pad), max + pad);
   const sx = xScale(times, layout);
   const sy = yScale(lo, hi, layout);
   const xs = times.map((t) => sx(t));
   const isEnd = (i: number) => i === times.length - 1 || xs[i] > layout.width - layout.right - 40;
   const coords: Array<[number, number]> = points.map((p, i) => [xs[i], sy(p.value)]);
+  const costCoords: Array<[number, number]> = points.map((p, i) => [xs[i], sy(p.cost ?? 0)]);
   const { index, onMove, onLeave, onKey, setIndex } = useCrosshair(xs);
   const color = up ? INK.good : INK.bad;
   const baseline = sy(lo);
+  // Where the window opened, so the line reads against its own starting value.
+  const open = points.length > 1 ? sy(points[0].value) : null;
 
   // Pointer, keyboard and hit-rect updates all land on `index`; report every change upward.
   useEffect(() => {
@@ -47,6 +63,7 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
   }
 
   const active = index !== null ? points[index] : null;
+  const activeGain = active && withCost && active.cost > 0 ? active.value - active.cost : null;
 
   return (
     <div ref={ref} className="relative">
@@ -70,7 +87,9 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
             </text>
           </g>
         ))}
+        {open !== null && <line x1={layout.left} x2={layout.width - layout.right} y1={open} y2={open} stroke={INK.axis} strokeWidth={1} strokeDasharray="2 3" opacity={0.6} />}
         <path d={areaPath(coords, baseline)} fill={color} opacity={0.1} />
+        {withCost && <path d={linePath(costCoords)} fill="none" stroke={INK.raw} strokeWidth={1.5} strokeDasharray="5 4" strokeLinejoin="round" />}
         <path d={linePath(coords)} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
         {points.length === 1 && <circle cx={coords[0][0]} cy={coords[0][1]} r={4} fill={color} stroke={INK.surface} strokeWidth={2} />}
         {timeTicks(times, xs, points.map((p) => shortDate(p.t)), narrow ? 3 : 4).map((i) => (
@@ -96,6 +115,15 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
         >
           <div className="font-semibold">{money(active.value)}</div>
           <div className="text-neutral-500">{shortDate(active.t, true)}</div>
+          {activeGain !== null && (
+            <div className="text-neutral-500">
+              {costLabel} {money(active.cost)} ·{" "}
+              <span className={activeGain >= 0 ? "delta-up" : "delta-down"}>
+                {activeGain >= 0 ? "+" : "−"}
+                {money(Math.abs(activeGain))}
+              </span>
+            </div>
+          )}
           <div className="text-neutral-500">{detail ? detail(active) : `raw NM ${money(active.ungraded)} · ${active.priced} priced`}</div>
         </div>
       )}

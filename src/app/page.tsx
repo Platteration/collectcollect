@@ -11,12 +11,16 @@ export const dynamic = "force-dynamic";
 const VERDICT_ORDER = { prime: 0, insufficient: 1, wait: 2, skip: 3 } as const;
 
 export default function HomePage() {
+  const everyCard = listCards();
   // Cards with no copies left were sold; they keep their history but are not holdings.
-  const cards = listCards().filter((c) => c.quantity > 0);
+  const cards = everyCard.filter((c) => c.quantity > 0);
   const snapshots = allSnapshots();
   const settings = getSettings();
   const latest = latestSnapshotsByCard();
-  const points = portfolioSeries(cards, snapshots);
+  const sales = listSales();
+  // The timeline covers sold cards too: their copies leave it on the day they
+  // sold rather than vanishing from the whole history.
+  const points = portfolioSeries(everyCard, snapshots, sales);
 
   const byCard = new Map<number, PriceSnapshot[]>();
   for (const s of snapshots) {
@@ -73,7 +77,6 @@ export default function HomePage() {
 
   const valueOf = (c: (typeof cards)[number]) => latest.get(c.id)?.summary.yourCopyValue ?? null;
   const returns = totalReturn(cards, valueOf);
-  const sales = listSales();
   const realized = realizedReturn(sales);
   const allocation = allocationByGame(cards, valueOf);
 

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { RANGES, change, sliceRange, type Allocation, type OutlookPoint, type PortfolioPoint, type Range, type Realized, type Returns, type Verdict } from "@/lib/analytics";
+import { RANGES, performance, rangeSeries, type Allocation, type OutlookPoint, type PortfolioPoint, type Range, type Realized, type Returns, type Verdict } from "@/lib/analytics";
 import { money, when } from "@/lib/format";
 import { GAMES, GRADING_STATUSES, type Game, type GradingStatus, type Settings } from "@/lib/types";
 import { PortfolioChart } from "./charts/PortfolioChart";
@@ -74,18 +74,21 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
   const [range, setRange] = useState<Range>("1M");
   const [filter, setFilter] = useState<OutlookFilter>("active");
   const [hover, setHover] = useState<PortfolioPoint | null>(null);
+  const [costLine, setCostLine] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const visible = useMemo(() => sliceRange(points, range), [points, range]);
+  const visible = useMemo(() => rangeSeries(points, range), [points, range]);
   const latest = points[points.length - 1] ?? null;
   const shown = hover ?? latest;
-  const delta = useMemo(() => {
-    if (!hover) return change(visible);
-    const first = visible[0];
-    return first ? change([first, hover]) : change([]);
-  }, [visible, hover]);
+  // Hovering measures from the start of the window to the point under the cursor.
+  const delta = useMemo(() => performance(visible[0], hover ?? visible[visible.length - 1]), [visible, hover]);
   const up = delta.amount >= 0;
+  const moveUp = delta.move >= 0;
+  // The cost line is only meaningful once some card has a purchase price on it.
+  const hasCost = useMemo(() => points.some((p) => p.cost > 0), [points]);
+  const showCost = hasCost && costLine;
+  const copiesShown = shown?.copies ?? copyCount;
 
   const refreshAll = async () => {
     setRefreshing(true);
@@ -144,12 +147,24 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
             <div className={`mt-1 flex flex-wrap items-center gap-x-3 text-sm ${up ? "delta-up" : "delta-down"}`}>
               <span className="font-medium">
                 {up ? "▲" : "▼"} {money(Math.abs(delta.amount))}
-                {delta.percent !== null ? ` (${Math.abs(delta.percent).toFixed(2)}%)` : ""}
+                {delta.flows === 0 && delta.percent !== null ? ` (${Math.abs(delta.percent).toFixed(2)}%)` : ""}
               </span>
               <span className="text-neutral-500">
                 {hover ? `on ${when(hover.t)}` : delta.from ? `since ${when(delta.from)}` : "no earlier snapshot to compare"}
               </span>
             </div>
+            {delta.flows !== 0 && (
+              // Buying a card lifts the line without the collection having earned
+              // anything; say how much of the move was the market and how much was you.
+              <div className="mt-1 text-sm text-neutral-500">
+                {delta.flows > 0 ? `${money(delta.flows)} of that is cards added` : `${money(Math.abs(delta.flows))} left with cards sold`} ·{" "}
+                <span className={`font-medium ${moveUp ? "delta-up" : "delta-down"}`}>
+                  {moveUp ? "▲" : "▼"} {money(Math.abs(delta.move))}
+                  {delta.movePercent !== null ? ` (${Math.abs(delta.movePercent).toFixed(2)}%)` : ""}
+                </span>{" "}
+                from prices moving
+              </div>
+            )}
             {realized.sales > 0 && (
               <div className="mt-1 text-sm">
                 <span className="text-neutral-500">Realized </span>
@@ -191,19 +206,43 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
         </div>
 
         <div className="mt-4">
-          <PortfolioChart points={visible} up={up} onHover={setHover} />
+          <PortfolioChart points={visible} up={up} onHover={setHover} showCost={showCost} />
         </div>
-        <div className="mt-3 flex gap-1">
-          {RANGES.map((r) => (
-            <button
-              key={r}
-              type="button"
-              onClick={() => setRange(r)}
-              className={`rounded-md px-3 py-1 text-xs font-medium ${range === r ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900" : "text-neutral-600 hover:bg-black/5 dark:text-neutral-300 dark:hover:bg-white/10"}`}
-            >
-              {r}
-            </button>
-          ))}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex gap-1" role="group" aria-label="Chart range">
+            {RANGES.map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setRange(r)}
+                aria-pressed={range === r}
+                className={`rounded-md px-3 py-1 text-xs font-medium ${range === r ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900" : "text-neutral-600 hover:bg-black/5 dark:text-neutral-300 dark:hover:bg-white/10"}`}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-500">
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-0.5 w-4 rounded-full" style={{ background: up ? "var(--chart-good)" : "var(--chart-bad)" }} />
+              Value {money(shown?.value ?? 0)}
+            </span>
+            {hasCost && (
+              <button
+                type="button"
+                onClick={() => setCostLine((on) => !on)}
+                aria-pressed={costLine}
+                title={costLine ? "Hide the cost-basis line" : "Show what the copies held cost"}
+                className={`flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-black/5 dark:hover:bg-white/10 ${costLine ? "" : "opacity-50"}`}
+              >
+                <svg width="16" height="4" aria-hidden="true">
+                  <line x1="0" y1="2" x2="16" y2="2" stroke="var(--chart-series-1)" strokeWidth="1.5" strokeDasharray="5 4" />
+                </svg>
+                Cost basis {money(shown?.cost ?? 0)}
+              </button>
+            )}
+            <span>{copiesShown} copies held</span>
+          </div>
         </div>
       </section>
 

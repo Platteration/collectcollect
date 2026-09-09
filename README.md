@@ -7,7 +7,7 @@ Snap a photo of a card and CollectCollect:
 1. **Identifies it** with Claude's vision model: game, name, set, collector number, year, rarity, printing variant (holo, 1st edition, refractor, autograph…) and, if it's in a slab, the grading company, grade and cert number.
 2. **Looks up the going rate** for an **ungraded (raw)** copy and for **graded** copies (PSA / BGS / CGC / SGC) from live price sources.
 3. **Keeps it in your collection** with quantity, condition or grade, purchase price, notes and a price history, and totals up what your collection is worth.
-4. **Shows your portfolio** the way a brokerage app would: one headline number for the whole collection (valued at the grade or condition you recorded for each copy), the change over 1W / 1M / 3M / 1Y / all time, a value-over-time chart you can scrub, your total return against what you paid, the split by game, and your top holdings. Each card page has its own value chart and return.
+4. **Shows your portfolio** the way a brokerage app would: one headline number for the whole collection (valued at the grade or condition you recorded for each copy), the change over 1W / 1M / 3M / 1Y / all time, a value-over-time chart you can scrub, the cost of what you hold drawn beside it, your total return against what you paid, the split by game, and your top holdings. Each card page has its own value chart, the price you paid, and its return.
 5. **Tells you when to grade.** Every ungraded card gets a min/max outlook: the band between a mid-grade outcome and a gem-mint outcome, plotted against what the raw copy is worth. When the gap above the raw line is at its widest and clears your grading fee, the card is flagged as a good time to grade; when it has narrowed, it says wait; when even a PSA 10 would not cover the fee, it says skip.
 
 ## Quick start
@@ -82,6 +82,18 @@ The archive is written and read by a small built-in zip writer and reader rather
 
 **Export.** The Collection page has an *Export CSV* button (also `GET /api/export`) with every card, its grade or condition, purchase price, and latest ungraded / PSA 10 / your-copy prices.
 
+## The value chart
+
+The line on the portfolio page is what the collection has been worth over time, built the way a brokerage builds an account chart rather than by totalling today's cards against every old price.
+
+- **Only what you held.** A card counts from the day it was catalogued, and copies leave the line on the day they sold. Buying a card today does not rewrite what the collection was worth last year, and selling one does not erase it from the history it lived through.
+- **Cards added are not gains.** Above the chart the window's change is split into how much came from cards joining or leaving and how much from prices actually moving, and the percentage is taken on the move alone — over the value held plus half the flows, the simple Dietz return a fund reports for a period with money going in and out.
+- **What you paid.** A dashed line follows the cost of the copies held, over the cards with a purchase price recorded; the gap to the value line is the unrealized gain, and the tooltip names both. Click it in the legend to hide it, which is worth doing on 1W where a low cost basis flattens the scale.
+- **One close per bucket.** Refreshing every card writes a snapshot per card seconds apart. The chart reads one value per hour (1W), day (1M, 3M) or week (1Y), so it plots the day's move instead of the staircase of a refresh in progress.
+- **Scaled to the data.** The axis fits the range on screen rather than starting at zero, with a dotted line at the window's opening value, so a 2% week reads as a 2% week.
+
+Each card page carries the same chart for a single copy, with what you paid drawn across it.
+
 ## Card identification
 
 Identification runs on Claude (`claude-opus-5` by default; override with `CLAUDE_MODEL`). Photos are downscaled server-side before being sent. The model returns a structured identification with a confidence score and alternative matches when the card is ambiguous; you can add a back or slab-label photo, give it a hint ("it's Japanese"), and re-identify. Without an Anthropic key the app still works for manual entry and pricing.
@@ -116,7 +128,7 @@ src/app/                 Next.js App Router pages and API routes
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema
 src/lib/pricing/         Providers, matching heuristics, summary/valuation, refresh pipeline
-src/lib/analytics.ts     Portfolio value series, grading outlook (min/max/upside) and timing verdict
+src/lib/analytics.ts     Portfolio value over time (holdings, flows, cost basis), grading outlook and timing verdict
 src/lib/scheduler.ts     Hourly auto-refresh of stale prices (started from src/instrumentation.ts)
 src/components/charts/   Inline-SVG portfolio line and min/max outlook band charts
 src/lib/zip.ts           Dependency-free streaming zip writer used by the backup

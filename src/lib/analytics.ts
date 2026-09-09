@@ -8,44 +8,145 @@ import { round2 } from "./pricing/match";
 export interface PortfolioPoint {
   /** ISO timestamp */
   t: string;
-  /** Sum of yourCopyValue × quantity using the latest snapshot per card at this time. */
+  /** Sum of yourCopyValue × copies held at this time. */
   value: number;
-  /** Sum of ungraded × quantity (what the collection would be worth raw NM). */
+  /** Sum of ungraded × copies held (what those copies would be worth raw NM). */
   ungraded: number;
-  /** Cards that had a price at this point. */
+  /** Cards that were held and had a price at this point. */
   priced: number;
+  /** What the copies held here cost, over the cards with a purchase price recorded. */
+  cost: number;
+  /** Copies held at this point. */
+  copies: number;
+  /**
+   * Running total of value that joined (or left) the collection rather than
+   * being earned: a card catalogued and first priced counts in, copies sold
+   * count out. The part of a move that is not flow is the market moving.
+   */
+  flows: number;
 }
 
+/** A sale as the timeline sees it: copies that left the collection on a date. */
+export interface SaleEvent {
+  cardId: number;
+  quantity: number;
+  soldAt: string;
+}
+
+interface Holding {
+  qty: number;
+  /** Purchase price per copy, or null when none was recorded. */
+  cost: number | null;
+  /** Latest known value of one copy, at the point being computed. */
+  value: number;
+  ungraded: number;
+}
+
+const time = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : NaN);
+
+/** Kill the floating-point dust left by adding and subtracting card values. */
+const clean = (n: number): number => (Math.abs(n) < 0.005 ? 0 : round2(n));
+
 /**
- * Build a step series of total collection value. Each snapshot changes one
- * card's contribution; totals are recomputed at every snapshot time using the
- * most recent snapshot of every card. Quantities are taken from the cards as
- * they are now (there is no quantity history).
+ * Build the value of the collection over time, the way a brokerage plots an
+ * account: at any instant the total covers the copies actually held then,
+ * priced at the most recent snapshot of each card at that instant.
+ *
+ * Three kinds of event move the line: a price snapshot (a card is worth more or
+ * less), a card being added (its copies join the total from the date it was
+ * catalogued) and a sale (its copies leave on the day they sold, instead of
+ * being erased from the whole history). Cards with no `createdAt` — and there
+ * is no quantity history, so a card's copies are treated as held from the day
+ * it was added — count from the start of the series.
  */
-export function portfolioSeries(cards: CardRecord[], snapshots: PriceSnapshot[]): PortfolioPoint[] {
-  const qty = new Map(cards.map((c) => [c.id, c.quantity]));
-  const current = new Map<number, { value: number; ungraded: number }>();
-  const points: PortfolioPoint[] = [];
-  const sorted = [...snapshots].sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt) || a.id - b.id);
-  for (const s of sorted) {
-    if (!qty.has(s.cardId)) continue; // card has been deleted
-    const q = qty.get(s.cardId)!;
-    current.set(s.cardId, {
-      value: (s.summary.yourCopyValue ?? 0) * q,
-      ungraded: (s.summary.ungraded ?? 0) * q,
-    });
-    let value = 0;
-    let ungraded = 0;
-    let priced = 0;
-    for (const v of current.values()) {
-      value += v.value;
-      ungraded += v.ungraded;
-      if (v.value > 0) priced++;
+export function portfolioSeries(cards: CardRecord[], snapshots: PriceSnapshot[], sales: SaleEvent[] = []): PortfolioPoint[] {
+  const held = new Map<number, Holding>();
+  const total = { value: 0, ungraded: 0, cost: 0, copies: 0, priced: 0, flows: 0 };
+  const events: Array<{ at: number; seq: number; t: string; run: () => void }> = [];
+  const on = (t: string, run: () => void) => events.push({ at: time(t), seq: events.length, t, run });
+
+  /** Change one card's holding and keep the running totals in step with it. */
+  const edit = (id: number, mutate: (h: Holding) => void) => {
+    const h = held.get(id);
+    if (!h) return;
+    const was = { qty: h.qty, value: h.value };
+    total.value -= h.qty * h.value;
+    total.ungraded -= h.qty * h.ungraded;
+    total.cost -= h.qty * (h.cost ?? 0);
+    total.copies -= h.qty;
+    if (h.qty > 0 && h.value > 0) total.priced--;
+    mutate(h);
+    total.value += h.qty * h.value;
+    total.ungraded += h.qty * h.ungraded;
+    total.cost += h.qty * (h.cost ?? 0);
+    total.copies += h.qty;
+    if (h.qty > 0 && h.value > 0) total.priced++;
+    // Value that arrives without any price having moved: a card priced for the
+    // first time (it was in no total before, at any price), or copies joining
+    // or leaving the collection at the price they were carried at.
+    if (was.value === 0 && h.value > 0) total.flows += h.qty * h.value;
+    else if (h.qty !== was.qty) total.flows += (h.qty - was.qty) * h.value;
+  };
+
+  const byCard = new Map<number, SaleEvent[]>();
+  for (const s of sales) {
+    if (s.quantity <= 0 || Number.isNaN(time(s.soldAt))) continue;
+    const list = byCard.get(s.cardId);
+    if (list) list.push(s);
+    else byCard.set(s.cardId, [s]);
+  }
+
+  for (const c of cards) {
+    const acquired = time(c.createdAt);
+    const sold = byCard.get(c.id) ?? [];
+    // Copies that have been sold were still owned before the sale, so the
+    // collection starts out holding them. A sale dated at or before the card
+    // was added never shows on the line; take those copies off up front.
+    let owned = c.quantity + sold.reduce((n, s) => n + s.quantity, 0);
+    for (const s of sold) if (!Number.isNaN(acquired) && time(s.soldAt) <= acquired) owned -= s.quantity;
+    owned = Math.max(0, owned);
+    held.set(c.id, { qty: Number.isNaN(acquired) ? owned : 0, cost: c.purchasePrice ?? null, value: 0, ungraded: 0 });
+    if (!Number.isNaN(acquired)) {
+      on(c.createdAt, () => edit(c.id, (h) => void (h.qty = owned)));
+    } else {
+      // No catalogue date to start from: count the copies for the whole series.
+      total.cost += owned * (c.purchasePrice ?? 0);
+      total.copies += owned;
     }
-    const point = { t: s.fetchedAt, value: round2(value), ungraded: round2(ungraded), priced };
-    // Snapshots taken in the same second (e.g. "refresh all") collapse into one point.
-    if (points.length && points[points.length - 1].t === point.t) points[points.length - 1] = point;
-    else points.push(point);
+    for (const s of sold) {
+      if (!Number.isNaN(acquired) && time(s.soldAt) <= acquired) continue;
+      on(s.soldAt, () => edit(c.id, (h) => void (h.qty = Math.max(0, h.qty - s.quantity))));
+    }
+  }
+
+  for (const s of [...snapshots].sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt) || a.id - b.id)) {
+    if (!held.has(s.cardId)) continue; // card has been deleted
+    on(s.fetchedAt, () =>
+      edit(s.cardId, (h) => {
+        h.value = s.summary.yourCopyValue ?? 0;
+        h.ungraded = s.summary.ungraded ?? 0;
+      }),
+    );
+  }
+
+  events.sort((a, b) => a.at - b.at || a.seq - b.seq);
+  const points: PortfolioPoint[] = [];
+  for (let i = 0; i < events.length; i++) {
+    events[i].run();
+    // Everything at the same instant — a "refresh all" run, a sale on the day a
+    // card was added — is one point on the line.
+    if (i + 1 < events.length && events[i + 1].at === events[i].at) continue;
+    // Nothing has a price yet: the line has no useful zero to start from.
+    if (points.length === 0 && total.priced === 0) continue;
+    points.push({
+      t: events[i].t,
+      value: clean(total.value),
+      ungraded: clean(total.ungraded),
+      priced: total.priced,
+      cost: clean(total.cost),
+      copies: total.copies,
+      flows: clean(total.flows),
+    });
   }
   return points;
 }
@@ -69,18 +170,90 @@ export function sliceRange<T extends { t: string }>(points: T[], range: Range, n
   return points.slice(Math.max(0, idx - 1));
 }
 
-export interface Change {
-  amount: number;
-  percent: number | null;
-  from: string | null;
+/** How finely a range is plotted: one reading per hour, day or week. */
+export type Bucket = "hour" | "day" | "week";
+
+const BUCKET_MS: Record<Bucket, number> = { hour: 36e5, day: 864e5, week: 7 * 864e5 };
+
+/**
+ * Keep one reading per bucket — the last one in it, like a daily close.
+ * Refreshing a whole collection writes a snapshot per card seconds apart, and
+ * plotting each of them draws a staircase climbing through the refresh rather
+ * than the day's move; a close per bucket is the shape a stock chart has.
+ */
+export function bucketSeries<T extends { t: string }>(points: T[], bucket: Bucket): T[] {
+  const out: T[] = [];
+  let current: number | null = null;
+  for (const p of points) {
+    const key = Math.floor(new Date(p.t).getTime() / BUCKET_MS[bucket]);
+    if (key === current && out.length) out[out.length - 1] = p;
+    else {
+      out.push(p);
+      current = key;
+    }
+  }
+  return out;
 }
 
-export function change(points: Array<{ t: string; value: number }>): Change {
-  if (points.length < 2) return { amount: 0, percent: null, from: null };
+/** The bucket a range is read at; ALL follows how much history there is. */
+export function bucketFor(range: Range, points: Array<{ t: string }> = []): Bucket {
+  if (range === "1W") return "hour";
+  if (range === "1M" || range === "3M") return "day";
+  if (range === "1Y") return "week";
   const first = points[0];
   const last = points[points.length - 1];
+  const span = first && last ? new Date(last.t).getTime() - new Date(first.t).getTime() : 0;
+  if (span <= 14 * 864e5) return "hour";
+  if (span <= 183 * 864e5) return "day";
+  return "week";
+}
+
+/** The points a range button shows: the window, read at that range's bucket. */
+export function rangeSeries<T extends { t: string }>(points: T[], range: Range, now = Date.now()): T[] {
+  const window = sliceRange(points, range, now);
+  return bucketSeries(window, bucketFor(range, window));
+}
+
+export interface Performance {
+  /** Change in value from the start of the window to its end. */
+  amount: number;
+  /** amount as a percentage of the value at the start, where there was one. */
+  percent: number | null;
+  /** When the window starts. */
+  from: string | null;
+  /** Value of copies that joined (+) or left (−) the collection over the window. */
+  flows: number;
+  /** amount − flows: what the collection made or lost because prices moved. */
+  move: number;
+  /** Return on the move, ignoring the flows, or null when there is nothing to divide by. */
+  movePercent: number | null;
+}
+
+/** The fields a window is measured over: two points on the value line. */
+type Measurable = Pick<PortfolioPoint, "t" | "value" | "flows">;
+
+/**
+ * A window's change, split the way a brokerage splits an account: money (here,
+ * cards) coming in and going out on one side, the market on the other. Buying a
+ * card lifts the line without the collection having earned anything, so the
+ * percentage is taken on the move alone, over the value held through the window
+ * plus half the flows — the simple Dietz return, which is what a fund reports
+ * when money moves in and out mid-period.
+ */
+export function performance(first: Measurable | undefined, last: Measurable | undefined): Performance {
+  if (!first || !last || first === last) return { amount: 0, percent: null, from: null, flows: 0, move: 0, movePercent: null };
   const amount = round2(last.value - first.value);
-  return { amount, percent: first.value > 0 ? round2((amount / first.value) * 100) : null, from: first.t };
+  const flows = round2(last.flows - first.flows);
+  const move = round2(amount - flows);
+  const base = first.value + flows / 2;
+  return {
+    amount,
+    percent: first.value > 0 ? round2((amount / first.value) * 100) : null,
+    from: first.t,
+    flows,
+    move,
+    movePercent: base > 0 ? round2((move / base) * 100) : null,
+  };
 }
 
 // ---------------------------------------------------------------------------
