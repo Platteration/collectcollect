@@ -2,6 +2,19 @@
 
 Two independent reviewers read every first-party file in this repository; a third then re-read each security or bug claim against the code and tried to refute it. Only claims that survived that check are listed as findings; the ones that did not are recorded at the end so they are not re-raised.
 
+## Status — what has been fixed
+
+These findings are now fixed on `claude/repo-review-security-baiyud`, each with a regression test:
+
+- **SEC-1**
+- **SEC-2**
+- **SEC-5**
+- **MISS-1**
+
+The rest of this document is the review as written, and the fixed items are left in place so the reasoning behind each change stays with it.
+
+Repository hardening applied here as well: every GitHub Action is pinned to a commit rather than a floating tag, each workflow declares a least-privilege `permissions` block, and a Dependabot config, a licence and a security policy are in place.
+
 ## Summary
 
 CollectCollect is a single-user, self-hosted Next.js 16 / React 19 app that identifies trading cards from photos with Claude vision, prices them raw and graded from four providers, and presents the collection as a brokerage-style portfolio with a min/max "when to grade" outlook, sales ledger, grading submissions, alerts, CSV import/export, set-completion tracking and a dependency-free zip backup/restore. It is unusually mature for a personal project: 21 focused commits, ~12k lines, 13 vitest suites plus 11 Playwright specs driving a real production build, CI running lint/typecheck/test/build/e2e, zero npm audit findings, and no TODO/FIXME anywhere. The Anthropic integration is already current and correct (claude-opus-5, adaptive thinking, structured outputs via zodOutputFormat, server-side refusal fallbacks, a specific-first error chain) — the gaps there are cost controls, not correctness. The headline problems are elsewhere: the Dockerfile copies a `public/` directory that does not exist so `docker compose up --build` cannot work and CI never builds the image to notice; there is no same-origin/CSRF guard or security headers, which matters because the app runs unauthenticated by default and compose binds 0.0.0.0; and the portfolio page loads and JSON-parses every price snapshot ever taken then recomputes totals over every card per snapshot, so it degrades quadratically as history accumulates. Everything else is tooling hygiene (Node 22 is in maintenance, ESLint 9 is on the maintenance tag, TypeScript is a major version behind, actions unpinned, no Dependabot/LICENSE/SECURITY.md) plus a batch of contained refactors and named missing tests.
