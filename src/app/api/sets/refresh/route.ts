@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { errorMessage, jsonError } from "@/lib/http";
+import { errorMessage, jsonError, tooManyRequests } from "@/lib/http";
+import { HOUR_MS, SET_REFRESH_PER_HOUR, rateLimit } from "@/lib/rate-limit";
 import { refreshChecklist } from "@/lib/sets";
 import { GAMES, type Game } from "@/lib/types";
 
@@ -13,6 +14,11 @@ export async function POST(request: Request) {
   }
   if (typeof body.game !== "string" || !(body.game in GAMES)) return jsonError("Unknown game");
   if (typeof body.setName !== "string" || !body.setName.trim()) return jsonError("Which set?");
+
+  const limit = rateLimit("sets-refresh", SET_REFRESH_PER_HOUR, HOUR_MS);
+  if (!limit.ok) {
+    return tooManyRequests(`Too many checklist fetches in the last hour (limit ${SET_REFRESH_PER_HOUR}).`, limit.retryAfter);
+  }
 
   try {
     const checklist = await refreshChecklist(body.game as Game, body.setName);

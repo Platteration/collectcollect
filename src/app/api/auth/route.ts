@@ -1,24 +1,16 @@
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE, SESSION_DAYS, authEnabled, createToken, passwordMatches } from "@/lib/auth";
 import { jsonError } from "@/lib/http";
+import { LOGIN_FAILURE_DELAY_MS, clearLoginFailures, clientKey, loginBlocked, recordLoginFailure } from "@/lib/rate-limit";
 
-/** Failed attempts per client, to slow down guessing. Resets when the process restarts. */
-const attempts = new Map<string, { count: number; until: number }>();
-const MAX_ATTEMPTS = 8;
-const LOCKOUT_MS = 60_000;
-
-function clientKey(request: Request): string {
-  const fwd = request.headers.get("x-forwarded-for");
-  return (fwd ? fwd.split(",")[0] : null)?.trim() || "local";
-}
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function POST(request: Request) {
   if (!authEnabled()) return jsonError("This app has no password set", 400);
 
   const key = clientKey(request);
-  const record = attempts.get(key);
-  if (record && record.count >= MAX_ATTEMPTS && Date.now() < record.until) {
-    return jsonError("Too many attempts. Wait a minute and try again.", 429);
+  if (loginBlocked(key)) {
+    return jsonError("Too many failed attempts. Try again later.", 429);
   }
 
   let body: { password?: unknown };
@@ -29,12 +21,14 @@ export async function POST(request: Request) {
   }
 
   if (typeof body.password !== "string" || !(await passwordMatches(body.password))) {
-    const next = record && Date.now() < record.until ? record.count + 1 : 1;
-    attempts.set(key, { count: next, until: Date.now() + LOCKOUT_MS });
+    recordLoginFailure(key);
+    // Every wrong guess costs wall clock, which is the only cost an attacker
+    // rotating request headers cannot shed.
+    await sleep(LOGIN_FAILURE_DELAY_MS);
     return jsonError("Wrong password", 401);
   }
 
-  attempts.delete(key);
+  clearLoginFailures(key);
   const response = NextResponse.json({ ok: true });
   response.cookies.set(SESSION_COOKIE, await createToken(), {
     httpOnly: true,

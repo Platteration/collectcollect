@@ -51,11 +51,30 @@ export interface RefreshResult {
 /** When each card was last attempted, so cards that yield no price are retried on the normal cadence, not every tick. */
 const lastAttempt = new Map<number, number>();
 
+/** The pass currently walking the collection, if any. */
+let inFlight: Promise<RefreshResult> | null = null;
+
 /**
  * Refresh every card (or only those neither refreshed nor attempted within
  * `staleHours`). Runs a couple at a time to stay polite to the free APIs.
+ *
+ * A caller arriving while a pass is already running joins that pass instead of
+ * starting its own: N concurrent requests would otherwise mean N independent
+ * sweeps over the whole collection against the same rate-limited third-party
+ * APIs, which is both a cost multiplier and a good way to get banned.
  */
-export async function refreshAll(opts: { staleHours?: number; concurrency?: number } = {}): Promise<RefreshResult> {
+export function refreshAll(opts: { staleHours?: number; concurrency?: number } = {}): Promise<RefreshResult> {
+  if (inFlight) return inFlight;
+  const run = runRefresh(opts);
+  inFlight = run;
+  const release = () => {
+    if (inFlight === run) inFlight = null;
+  };
+  run.then(release, release);
+  return run;
+}
+
+async function runRefresh(opts: { staleHours?: number; concurrency?: number }): Promise<RefreshResult> {
   const { staleHours, concurrency = 2 } = opts;
   const latest = latestSnapshotsByCard();
   const cutoff = staleHours === undefined ? null : Date.now() - staleHours * 3600e3;

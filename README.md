@@ -24,6 +24,8 @@ Docker: `docker compose up --build` (reads `.env`, keeps data in a named volume 
 
 **Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach. Failed attempts are rate limited, and changing the password invalidates existing sessions.
 
+**Host names and other sites.** Whether or not a password is set, the app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`. Requests that a browser sends from another site are refused for anything but `GET`, so a page you happen to visit cannot restore a backup over your collection or spend your API budget; `curl` and scripts, which send no browser origin headers, are unaffected.
+
 > Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
 
 ## How pricing works
@@ -123,7 +125,7 @@ src/lib/zip.ts           Dependency-free streaming zip writer used by the backup
 src/lib/csv.ts           RFC 4180 reader; src/lib/import.ts maps columns to cards
 src/lib/sets/            Set checklist providers, caching and completion matching
 src/lib/auth.ts          Optional password gate (Web Crypto, shared by proxy and routes)
-src/proxy.ts             Guards every route when APP_PASSWORD is set
+src/proxy.ts             Host allowlist, cross-site write guard, and the password gate
 e2e/                     Playwright suite driving a real build
 src/lib/cards.ts, db.ts  SQLite (better-sqlite3) repository and schema
 src/components/          UI (add flow, card detail, price panel, settings)

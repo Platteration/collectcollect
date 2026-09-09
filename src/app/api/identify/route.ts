@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { identifyCard, IdentifyError } from "@/lib/identify/claude";
 import { isValidUploadName, readUpload } from "@/lib/images";
-import { errorMessage, jsonError } from "@/lib/http";
+import { errorMessage, jsonError, tooManyRequests } from "@/lib/http";
+import { HOUR_MS, IDENTIFY_PER_HOUR, rateLimit } from "@/lib/rate-limit";
+
+/** A hint is a nudge, not a document: anything longer is the prompt being used as free tokens. */
+const HINT_MAX = 400;
 
 /**
  * POST { uploads: string[], hint?: string } — identify a single card from one
@@ -24,8 +28,13 @@ export async function POST(request: Request) {
     if (!buffer) return jsonError(`Upload not found: ${name}`, 404);
     images.push({ buffer });
   }
+  const limit = rateLimit("identify", IDENTIFY_PER_HOUR, HOUR_MS);
+  if (!limit.ok) {
+    return tooManyRequests(`Too many identifications in the last hour (limit ${IDENTIFY_PER_HOUR}).`, limit.retryAfter);
+  }
+
   try {
-    const identification = await identifyCard(images, typeof body.hint === "string" ? body.hint : undefined);
+    const identification = await identifyCard(images, typeof body.hint === "string" ? body.hint.slice(0, HINT_MAX) : undefined);
     return NextResponse.json({ identification });
   } catch (e) {
     if (e instanceof IdentifyError) return jsonError(e.message, e.status);
