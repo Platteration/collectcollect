@@ -106,6 +106,13 @@ test.describe("installable app", () => {
     await tabs.getByRole("link", { name: "Collection" }).click();
     await expect(page).toHaveURL(/\/collection/);
     await expect(tabs.getByRole("link", { name: "Collection" })).toHaveAttribute("aria-current", "page");
+
+    // Settings carries the longest unbreakable strings in the app: the paths
+    // to the data directory and the plain-text collection.
+    for (const path of ["/settings", "/report", "/submissions"]) {
+      await page.goto(path);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
+    }
     await context.close();
   });
 

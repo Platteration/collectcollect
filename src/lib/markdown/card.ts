@@ -10,7 +10,7 @@ import type {
   Sale,
 } from "../types";
 import { CONDITIONS, GAMES, GAME_IDS, GRADING_STATUSES } from "../types";
-import { cell, money, parseDocument, readFenced, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "./format";
+import { money, parseDocument, readFenced, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "./format";
 
 /** Everything about one card that the plain-text copy preserves. */
 export interface CardBundle {
@@ -407,19 +407,4 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
   };
 }
 
-/** Used by the folder's index so a person can see the whole collection at once. */
-export function indexRow(card: CardRecord, value: number | null): Array<string | number> {
-  return [
-    `[${card.name}](cards/${cardFileName(card)})`,
-    GAMES[card.game] ?? card.game,
-    card.setName ?? "",
-    card.cardNumber ?? "",
-    card.quantity,
-    card.grade ? `${card.gradingCompany ?? ""} ${card.grade}`.trim() : CONDITIONS[card.condition] ?? card.condition,
-    card.location ?? "",
-    value === null ? "" : money(value * card.quantity),
-  ];
-}
-
-export const INDEX_HEADERS = ["Card", "Game", "Set", "Number", "Copies", "Grade", "Kept in", "Value"];
-export { cell };
+export const INDEX_HEADERS = ["Card", "Game", "Set", "Number", "Copies", "Grade or condition", "Kept in", "Value"];

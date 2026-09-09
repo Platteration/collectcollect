@@ -5,7 +5,7 @@ import path from "node:path";
 import { listCards } from "./cards";
 import { dataDir, databaseFile, getDb, lockDatabase, openDatabase, setDb, unlockDatabase, uploadsDir } from "./db";
 import { isValidUploadName } from "./images";
-import { collectionFiles, rebuildCollection } from "./markdown/mirror";
+import { collectionDir, collectionFiles, rebuildCollection } from "./markdown/mirror";
 import { isSafeEntryName, readZip, zipStream, type ZipEntry } from "./zip";
 
 /**
@@ -220,6 +220,11 @@ export async function restoreBackup(archive: Uint8Array): Promise<RestoreResult>
     for (const name of await fsp.readdir(uploads)) {
       await fsp.rename(path.join(uploads, name), path.join(oldUploads, name));
     }
+    // The plain-text copy belongs to the collection being replaced, and the
+    // promise here is that nothing is deleted, so it moves aside with the rest
+    // rather than being overwritten by the rebuild below.
+    const collection = collectionDir();
+    if (fs.existsSync(collection)) await fsp.rename(collection, path.join(aside, "collection"));
 
     await fsp.copyFile(stagedDb, live);
     for (const photo of photos) await fsp.writeFile(path.join(uploads, photo.name), photo.data);

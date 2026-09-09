@@ -86,10 +86,12 @@ export default function SettingsPage() {
       <section className="card-surface p-4">
         <h2 className="font-semibold">Your collection in plain text</h2>
         <p className="mt-1 text-sm text-neutral-500">
-          Every card is also written as a Markdown file in <code>{collection.dir}</code>, kept up to date as you go.
-          They are meant to outlive this app: a folder of readable files that any editor, spreadsheet or notes tool can
-          open, and that this app can read back.
+          Every card is also written as a Markdown file, kept up to date as you go. They are meant to outlive this app:
+          a folder of readable files that any editor, spreadsheet or notes tool can open, and that this app can read
+          back.
         </p>
+        {/* A path has no spaces to wrap at, so it has to be allowed to break anywhere. */}
+        <p className="mt-2 break-all font-mono text-xs text-neutral-500">{collection.dir}</p>
         <p className="mt-2 text-sm">
           {collection.enabled ? (
             <>
@@ -100,6 +102,12 @@ export default function SettingsPage() {
             <>Switched off by <code>MARKDOWN_MIRROR=off</code>.</>
           )}
         </p>
+        {collection.enabled && collection.files < collection.cards && (
+          <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">
+            {collection.cards - collection.files} card{collection.cards - collection.files === 1 ? " is" : "s are"} not
+            written yet. Rewrite the files to catch up.
+          </p>
+        )}
         {collection.lastError && (
           <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">
             {collection.failures} write{collection.failures === 1 ? "" : "s"} did not land. Last problem:{" "}

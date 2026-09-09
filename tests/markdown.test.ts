@@ -149,6 +149,24 @@ describe("a card as a document", () => {
     expect(missing).toEqual([]);
   });
 
+  it("leaves one file behind even for a card whose name has nothing to slug", () => {
+    // A name with no latin letters gives an empty slug, so the file is just
+    // the id; renaming it must still take the old file with it.
+    const card = createCard({ game: "pokemon", name: "リザードン" });
+    expect(fs.readdirSync(cardsDir())).toEqual(["0001.md"]);
+    updateCard(card.id, { name: "Charizard" });
+    expect(fs.readdirSync(cardsDir())).toEqual(["0001-charizard.md"]);
+    updateCard(card.id, { name: "リザードン" });
+    expect(fs.readdirSync(cardsDir())).toEqual(["0001.md"]);
+    deleteCard(card.id);
+    expect(fs.readdirSync(cardsDir())).toEqual([]);
+  });
+
+  it("writes the explainer with the very first card, not on a delay", () => {
+    createCard({ game: "pokemon", name: "First ever" });
+    expect(fs.existsSync(path.join(collectionDir(), "README.md"))).toBe(true);
+  });
+
   it("follows a rename and forgets a deleted card", () => {
     const card = createCard({ game: "pokemon", name: "Pikachu", setName: "Base Set" });
     expect(fs.readdirSync(cardsDir())).toEqual(["0001-pikachu-base-set.md"]);

@@ -329,6 +329,12 @@ describe("what a restore takes with it", () => {
     for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) parts.push(chunk);
     const archive = new Uint8Array(Buffer.concat(parts));
 
+    // A card added after the backup, so the folder moved aside is provably the
+    // one being replaced rather than the one being restored.
+    createCard({ game: "mtg", name: "Added after the backup" });
+    const { flushCollection } = await import("@/lib/markdown/mirror");
+    flushCollection();
+
     // A photo added after the backup: the restore has to take it away with the
     // rest of the collection it is replacing, not leave it orphaned.
     const later = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff.jpg";
@@ -349,6 +355,13 @@ describe("what a restore takes with it", () => {
     const aside = fsm.readdirSync(result.movedAsideTo);
     expect(aside).toContain("collectcollect.db");
     expect(aside).toContain("collectcollect.db-journal");
+    // The plain-text copy of the replaced collection is kept too, and the one
+    // in place now describes the collection that was just restored.
+    expect(fsm.readdirSync(pathm.join(result.movedAsideTo, "collection", "cards")).sort()).toEqual([
+      "0001-in-the-backup.md",
+      "0002-added-after-the-backup.md",
+    ]);
+    expect(fsm.readdirSync(pathm.join(dir, "collection", "cards"))).toEqual(["0001-in-the-backup.md"]);
     expect(fsm.existsSync(pathm.join(dir, "collectcollect.db-journal"))).toBe(false);
     expect(fsm.readdirSync(pathm.join(result.movedAsideTo, "uploads")).sort()).toEqual([kept, later].sort());
 

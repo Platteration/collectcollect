@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { dataDir, getDb } from "../db";
-import type { CardRecord, PriceSnapshot, Sale } from "../types";
-import { INDEX_HEADERS, cardFileName, cardFilePrefix, cardMarkdown, idFromFileName } from "./card";
+import type { CardRecord, Condition, Game, PriceSnapshot, Sale } from "../types";
+import { CONDITIONS, GAMES } from "../types";
+import { INDEX_HEADERS, cardFileName, cardMarkdown, idFromFileName } from "./card";
 import { money, parseDocument, readMoney, readTable, table } from "./format";
 
 /**
@@ -68,6 +69,10 @@ function writeAtomic(file: string, contents: string): void {
 
 function ensureDirs(): void {
   fs.mkdirSync(cardsDir(), { recursive: true });
+  // The index is rebuilt on a delay, but whoever opens this folder should
+  // always find the note explaining what it is, from the very first card.
+  const readme = path.join(collectionDir(), "README.md");
+  if (!fs.existsSync(readme)) writeAtomic(readme, README);
 }
 
 // ---------------------------------------------------------------------------
@@ -136,9 +141,8 @@ export function mirrorCard(card: CardRecord): void {
 
 /** A renamed card leaves a file behind under its old slug; take it with us. */
 function dropStaleFiles(id: number, keep: string): void {
-  const prefix = cardFilePrefix(id);
   for (const name of fs.readdirSync(cardsDir())) {
-    if (name !== keep && name.startsWith(prefix) && name.endsWith(".md")) {
+    if (name !== keep && name.endsWith(".md") && idFromFileName(name) === id) {
       fs.rmSync(path.join(cardsDir(), name), { force: true });
     }
   }
@@ -148,9 +152,8 @@ export function unmirrorCard(id: number): void {
   if (!mirrorEnabled()) return;
   try {
     if (!fs.existsSync(cardsDir())) return;
-    const prefix = cardFilePrefix(id);
     for (const name of fs.readdirSync(cardsDir())) {
-      if (name.endsWith(".md") && (name.startsWith(prefix) || idFromFileName(name) === id)) {
+      if (name.endsWith(".md") && idFromFileName(name) === id) {
         fs.rmSync(path.join(cardsDir(), name), { force: true });
       }
     }
@@ -238,10 +241,14 @@ function writeIndex(): void {
       const worth = e.value === null ? null : e.value * quantity;
       if (worth !== null) total += worth;
       copies += quantity;
-      const grade = e.data.grade ? `${String(e.data.grading_company ?? "").trim()} ${e.data.grade}`.trim() : String(e.data.condition ?? "");
+      const condition = String(e.data.condition ?? "") as Condition;
+      const grade = e.data.grade
+        ? `${String(e.data.grading_company ?? "").trim()} ${e.data.grade}`.trim()
+        : (CONDITIONS[condition] ?? condition);
+      const game = String(e.data.game ?? "") as Game;
       return [
         `[${String(e.data.name ?? "")}](cards/${e.file})`,
-        String(e.data.game ?? ""),
+        GAMES[game] ?? game,
         String(e.data.set_name ?? ""),
         String(e.data.card_number ?? ""),
         quantity,
@@ -279,7 +286,9 @@ you need is here in files any computer can open.
 
 ## What is here
 
-- \`index.md\` — every card in one table, with a link to each card's file.
+- \`index.md\` — every card in one table, with a link to each card's file. It is
+  rebuilt shortly after a change rather than instantly, so the card files are
+  the ones to trust if the two ever disagree.
 - \`cards/\` — one file per card, named \`<id>-<card name>.md\`.
 - \`../uploads/\` — the photos. Each card file links to its own photo.
 
@@ -319,6 +328,7 @@ function writeReadme(): void {
 
 /** Rewrite the whole folder from the database. */
 export function rebuildCollection(cards: CardRecord[]): { written: number; removed: number } {
+  if (!mirrorEnabled()) return { written: 0, removed: 0 };
   ensureDirs();
   const keep = new Set<string>();
   let written = 0;
@@ -354,6 +364,8 @@ export interface CollectionStatus {
   updatedAt: string | null;
   failures: number;
   lastError: string | null;
+  /** Cards in the database, so the page can say when the folder has fallen behind. */
+  cards: number;
 }
 
 export function collectionStatus(): CollectionStatus {
@@ -372,6 +384,12 @@ export function collectionStatus(): CollectionStatus {
   } catch {
     /* reported through lastError below */
   }
+  let cards = 0;
+  try {
+    cards = (getDb().prepare("SELECT COUNT(*) AS n FROM cards").get() as { n: number }).n;
+  } catch {
+    /* the count is only used to report drift */
+  }
   return {
     enabled: mirrorEnabled(),
     dir: collectionDir(),
@@ -380,6 +398,7 @@ export function collectionStatus(): CollectionStatus {
     updatedAt: newest ? new Date(newest).toISOString() : null,
     failures: state.failures,
     lastError: state.lastError,
+    cards,
   };
 }
 
