@@ -2,14 +2,36 @@
   "name": "@collectcollect/core",
   "version": "0.1.0",
   "private": true,
-  "description": "Code with no opinion about what is being collected: archives, CSV, the Markdown codec, chart geometry.",
+  "description": "Code with no opinion about what is being collected: archives, CSV, the Markdown codec, chart geometry, and the domain engine every app is built on.",
   "type": "module",
   "exports": {
     "./components/*": "./src/components/*.tsx",
+    "./pages/*": "./src/pages/*.tsx",
     "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
+    "better-sqlite3": "^13.0.3",
+    "sharp": "^0.35.4",
+    "zod": "^4.5.4"
   },
   "peerDependencies": {
     "next": ">=16",
     "react": ">=19"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.4",
+    "typescript": "^5",
+    "vitest": "^5.0.0"
   }
 }

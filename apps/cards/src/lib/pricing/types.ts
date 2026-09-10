@@ -10,6 +10,8 @@ export interface CardQuery {
   cardNumber?: string | null;
   year?: number | null;
   variant?: string | null;
+  /** A named parallel or refractor on a sports card, e.g. "Gold Refractor". */
+  parallel?: string | null;
   manufacturer?: string | null;
   externalIds?: Record<string, string>;
 }
