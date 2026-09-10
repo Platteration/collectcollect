@@ -58,7 +58,10 @@ const STICKER_HEADERS = ["Slot", "Sticker", "Wear", "Market name"];
 
 /** `0007-ak-47-redline-field-tested.md` — sorts by intake order and still reads. */
 export function itemFileName(item: Pick<ItemRecord, "id" | "marketHashName">): string {
-  const stem = slug(item.marketHashName);
+  // ™ and ★ are in half the names in this game. Unicode folding turns ™ into a
+  // literal "tm", so "StatTrak™ AWP" would file as "stattraktm-awp"; dropping
+  // them first keeps the file name readable.
+  const stem = slug(item.marketHashName.replace(/[™★]/g, " "));
   return `${String(item.id).padStart(4, "0")}${stem ? `-${stem}` : ""}.md`;
 }
 
@@ -220,7 +223,9 @@ export function itemMarkdown(bundle: ItemBundle): string {
       bits.push(
         `Last valued at **${money(value)}**${item.quantity > 1 ? ` per copy (${money(value * item.quantity)} in total)` : ""}.`,
       );
-      if (latest?.yourCopyBasis) bits.push(latest.yourCopyBasis);
+      // The basis is a phrase, not a sentence, so it needs a stop of its own
+      // before the next one starts.
+      if (latest?.yourCopyBasis) bits.push(/[.!?]$/.test(latest.yourCopyBasis) ? latest.yourCopyBasis : `${latest.yourCopyBasis}.`);
       bits.push(`Priced ${snapshots[0].fetchedAt.slice(0, 10)}.`);
     }
     if (item.purchasePrice !== null) bits.push(`Paid ${money(item.purchasePrice)}${item.quantity > 1 ? " per copy" : ""}.`);

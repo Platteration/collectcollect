@@ -1,6 +1,14 @@
 @import "tailwindcss";
 
 /*
+ * Classes used by shared components live outside this app's own tree, and
+ * Tailwind only scans what it is pointed at. Without this they are tree-shaken
+ * out of this app's stylesheet and the components render unstyled — the tab
+ * bar, for one, stops being fixed to the bottom of the screen.
+ */
+@source "../../../../packages/core/src";
+
+/*
  * The theme is always resolved to an explicit data-theme by the inline script
  * in the layout, so "system" never has to be expressed in CSS: one attribute
  * decides everything, including Tailwind's dark: utilities.

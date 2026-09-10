@@ -3,7 +3,7 @@
 import type { OutlookPoint } from "@/lib/analytics";
 import { money } from "@/lib/format";
 import { useId } from "react";
-import { INK, bandPath, compactMoney, linePath, niceTicks, shortDate, timeTicks, useContainerWidth, useCrosshair, xScale, yScale, type Layout } from "./chart-utils";
+import { INK, bandPath, compactMoney, linePath, niceTicks, shortDate, timeTicks, useContainerWidth, useCrosshair, xScale, yScale, type Layout } from "@collectcollect/core/charts/chart-utils";
 
 interface Props {
   series: OutlookPoint[];

@@ -200,33 +200,50 @@ export interface Allocation<K> {
   share: number;
 }
 
+export interface Split<K> {
+  rows: Array<Allocation<K>>;
+  /** Value held by items this grouping has no answer for. */
+  unclassified: number;
+  unclassifiedShare: number;
+}
+
 /**
  * Value split by whatever you group on, largest first. A CS2 inventory is worth
  * slicing several ways — by kind of item, by rarity, by collection — so the
  * grouping is the caller's to choose rather than baked in.
  *
- * An item with no key at all (a case belongs to no collection) is left out
- * rather than filed under a made-up "Other", which would claim it was
- * categorised.
+ * An item the grouping has no answer for (a case belongs to no collection) gets
+ * no row, rather than being filed under a made-up "Other" that would claim it
+ * was classified. But its value still counts towards the total the shares are
+ * measured against, so the bars do not silently rescale to fill the chart: what
+ * they leave unaccounted for is reported instead, and the caller can say so.
  */
 export function allocationBy<K>(
   items: ItemRecord[],
   keyOf: (item: ItemRecord) => K | null,
   valueOf: (item: ItemRecord) => number | null,
-): Array<Allocation<K>> {
+): Split<K> {
   const groups = new Map<K, { value: number; items: number }>();
   let total = 0;
+  let unclassified = 0;
   for (const i of items) {
-    const key = keyOf(i);
-    if (key === null) continue;
     const v = (valueOf(i) ?? 0) * i.quantity;
     total += v;
+    const key = keyOf(i);
+    if (key === null) {
+      unclassified += v;
+      continue;
+    }
     const cur = groups.get(key) ?? { value: 0, items: 0 };
     cur.value += v;
     cur.items++;
     groups.set(key, cur);
   }
-  return [...groups.entries()]
-    .map(([key, g]) => ({ key, value: round2(g.value), items: g.items, share: total > 0 ? g.value / total : 0 }))
-    .sort((a, b) => b.value - a.value);
+  return {
+    rows: [...groups.entries()]
+      .map(([key, g]) => ({ key, value: round2(g.value), items: g.items, share: total > 0 ? g.value / total : 0 }))
+      .sort((a, b) => b.value - a.value),
+    unclassified: round2(unclassified),
+    unclassifiedShare: total > 0 ? unclassified / total : 0,
+  };
 }

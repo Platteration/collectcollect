@@ -5,6 +5,7 @@ WORKDIR /app
 # resolves against a lockfile describing a tree it cannot see.
 COPY package.json package-lock.json ./
 COPY apps/cards/package.json ./apps/cards/
+COPY apps/skins/package.json ./apps/skins/
 COPY packages/core/package.json ./packages/core/
 RUN npm ci
 COPY . .

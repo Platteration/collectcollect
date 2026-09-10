@@ -118,13 +118,16 @@ A small service worker makes that work and lets the shell open without a network
 
 ## Project layout
 
-The repository is an npm workspace. The card app is one workspace among
-several so that a second collectible can get its own app without either one
-inheriting the other's assumptions; root scripts fan out across all of them.
+The repository is an npm workspace, so a second collectible can get its own app
+without either one inheriting the other's assumptions. Root scripts fan out
+across all of them.
 
 ```
 apps/cards/              this app
-packages/core/           code with no opinion about what is being collected
+apps/skins/              the same idea for CS2 items — see its own section below
+packages/core/           code with no opinion about what is being collected:
+                         the Markdown codec, the zip writer, the CSV reader,
+                         chart geometry and the components both apps draw with
 ```
 
 Inside `apps/cards`:
@@ -203,3 +206,39 @@ the database, runs for real. It covers adding a card by hand, duplicate
 merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
 grading submission from draft to booked outcome, and the password gate. Both
 suites plus lint, typecheck and build run in CI on every push.
+
+## The skins app
+
+`apps/skins` is the same engine — value over time, purchase lots, sales, the
+plain-text mirror — pointed at CS2 items instead of cards. Run it with
+`npm run dev -w @collectcollect/skins`.
+
+The two apps share code but nothing else. The skins app keeps its own database
+in its own directory (`SKINS_DATA_DIR`, defaulting to `apps/skins/data`), so
+the two can run side by side from one shell without either seeing the other's
+collection.
+
+One thing about CS2 inverts a card-app assumption, and it shapes the schema:
+
+- **A weapon, knife or glove is a unique object.** Its float — the 0-to-1 wear
+  value — and its pattern seed are its identity. Two Field-Tested AK Redlines
+  are different things worth different money, so they never merge into a
+  quantity, and one row is one object.
+- **A case, capsule or sticker is fungible.** Forty-seven Clutch Cases bought
+  over two years at a dozen prices stack into one row, and the purchase lots
+  matter there more than anywhere in the card app.
+
+The float also decides the wear tier rather than sitting beside it: Factory New
+through Battle-Scarred are just bands on the float scale, so where an import
+claims a tier the float contradicts, the float wins.
+
+What is not there yet: prices come from a number you type in, because the
+market providers (Steam, Skinport, CSFloat), the Steam inventory import and the
+cross-market spread view are still to come. Nothing estimates a price from a
+similar item, so an item nobody has priced reads as "not priced" rather than as
+a number that looks measured and is not.
+
+Its plain-text mirror works exactly like the card app's, under
+`<data>/collection/items/`, and carries the float, the pattern seed, the
+applied stickers and their wear, every purchase lot and which lots each sale
+took.

@@ -2,7 +2,7 @@ import { consumeFifo, recordSaleLots, restoreForSale, syncQuantityFromLots } fro
 import { getDb } from "./db";
 import { discardDeferredMirror, flushDeferredMirror, getItem, refreshMirror } from "./items";
 import type { Category, Sale, SaleWithItem } from "./types";
-import { EXTERIORS } from "./types";
+import { CATEGORIES, EXTERIORS } from "./types";
 
 interface SaleRow {
   id: number;
@@ -113,7 +113,7 @@ export function listSalesForItem(itemId: number): Sale[] {
 export function listSales(): SaleWithItem[] {
   const rows = getDb()
     .prepare(
-      `SELECT s.*, i.market_hash_name, i.category, i.exterior, i.float_value, i.name_tag
+      `SELECT s.*, i.market_hash_name, i.category, i.exterior, i.float_value, i.name_tag, i.stattrak
        FROM sales s JOIN items i ON i.id = s.item_id
        ORDER BY s.sold_at DESC, s.id DESC`,
     )
@@ -124,20 +124,25 @@ export function listSales(): SaleWithItem[] {
       exterior: string | null;
       float_value: number | null;
       name_tag: string | null;
+      stattrak: number;
     }
   >;
   return rows.map((r) => ({
     ...rowToSale(r),
     itemName: r.market_hash_name,
     category: r.category as Category,
-    itemDetail:
-      [
-        r.exterior ? (EXTERIORS[r.exterior as keyof typeof EXTERIORS] ?? r.exterior) : null,
-        r.float_value === null ? null : `float ${Number(r.float_value.toFixed(10))}`,
-        r.name_tag ? `“${r.name_tag}”` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ") || "—",
+    // The kind of thing it was leads, so a case or a sticker — which has no
+    // wear, no float and no name tag — still says something rather than an
+    // em dash.
+    itemDetail: [
+      CATEGORIES[r.category as Category] ?? r.category,
+      r.exterior ? (EXTERIORS[r.exterior as keyof typeof EXTERIORS] ?? r.exterior) : null,
+      r.stattrak ? "StatTrak™" : null,
+      r.float_value === null ? null : `float ${Number(r.float_value.toFixed(10))}`,
+      r.name_tag ? `“${r.name_tag}”` : null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
   }));
 }
 

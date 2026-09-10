@@ -110,7 +110,7 @@ describe("gradingVerdict", () => {
 
 describe("chart utils", () => {
   it("ticks by time, not index, and never repeats a label", async () => {
-    const { timeTicks, compactMoney } = await import("@/components/charts/chart-utils");
+    const { timeTicks, compactMoney } = await import("@collectcollect/core/charts/chart-utils");
     const times = [0, 1, 2, 3, 30, 30.01].map((d) => d * 864e5);
     const xs = times.map((t) => (t / (30.01 * 864e5)) * 800);
     const labels = ["Jan 1", "Jan 2", "Jan 3", "Jan 4", "Jan 31", "Jan 31"];

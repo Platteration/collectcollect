@@ -5,6 +5,11 @@
   "description": "Code with no opinion about what is being collected: archives, CSV, the Markdown codec, chart geometry.",
   "type": "module",
   "exports": {
+    "./components/*": "./src/components/*.tsx",
     "./*": "./src/*.ts"
+  },
+  "peerDependencies": {
+    "next": ">=16",
+    "react": ">=19"
   }
 }
