@@ -285,7 +285,15 @@ item's last known value.
 Cookies are scoped to a host and not to a port, so two of these apps served from
 localhost would otherwise hand each other their sessions.
 
-Its plain-text mirror works exactly like the card app's, under
-`<data>/collection/items/`, and carries the float, the pattern seed, the
-applied stickers and their wear, every purchase lot and which lots each sale
-took.
+**Selling.** Purchases and sales share one panel on an item's page, because
+they are one ledger read from two ends: a sale takes copies out of the oldest
+purchase still holding any, and undoing it puts them back where they came from.
+A purchase that has been sold from cannot be removed — that would rewrite money
+that has already changed hands.
+
+**Taking it elsewhere.** The plain-text mirror works exactly like the card
+app's, under `<data>/collection/items/`, and carries the float, the pattern
+seed, the applied stickers and their wear, every purchase lot and which lots
+each sale took. There is also a CSV export in the columns the importer reads
+back, and a printable valuation at `/report` that lists an unpriced item as
+unpriced rather than counting it as worth nothing.

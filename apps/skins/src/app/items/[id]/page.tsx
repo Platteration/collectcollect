@@ -12,6 +12,7 @@ import { CATEGORIES, EXTERIORS, RARITIES } from "@/lib/types";
 import { FloatBar } from "@/components/FloatBar";
 import { PricePanel } from "@/components/PricePanel";
 import { Spread } from "@/components/Spread";
+import { Ledger } from "@/components/Ledger";
 
 export const dynamic = "force-dynamic";
 
@@ -134,40 +135,7 @@ export default async function ItemPage({ params }: PageProps<"/items/[id]">) {
         </section>
       )}
 
-      {lots.length > 0 && (
-        <section>
-          <h2 className="font-display mb-2 text-lg font-semibold uppercase tracking-wide">Purchases</h2>
-          <Table
-            headers={["Acquired", "Copies", "Left", "Cost each", "From"]}
-            rows={lots.map((lot) => [
-              lot.acquiredAt.slice(0, 10),
-              String(lot.quantity),
-              String(lot.remaining),
-              // Not knowing what a copy cost is a different thing from it being
-              // free, and the table has to keep them apart.
-              lot.unitCost === null ? "not recorded" : money(lot.unitCost),
-              lot.source ?? "—",
-            ])}
-          />
-        </section>
-      )}
-
-      {sales.length > 0 && (
-        <section>
-          <h2 className="font-display mb-2 text-lg font-semibold uppercase tracking-wide">Sales</h2>
-          <Table
-            headers={["Sold", "Copies", "Each", "Fees", "Cost each", "Where"]}
-            rows={sales.map((s) => [
-              s.soldAt.slice(0, 10),
-              String(s.quantity),
-              money(s.unitPrice),
-              money(s.fees),
-              s.unitCost === null ? "not recorded" : money(s.unitCost),
-              s.venue ?? "—",
-            ])}
-          />
-        </section>
-      )}
+      <Ledger item={item} acquisitions={lots} sales={sales} />
 
       {snapshots.length > 0 && (
         <section>

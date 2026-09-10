@@ -207,6 +207,42 @@ body {
   .reveal { animation: none; }
 }
 
+/* Printing the valuation: drop the app chrome, force ink on paper. */
+@media print {
+  /* Only the site chrome goes; the report's own header must print. */
+  body > header,
+  body > footer,
+  nav[aria-label="Sections"],
+  .print\:hidden {
+    display: none !important;
+  }
+  :root {
+    --background: #fff;
+    --foreground: #000;
+    --muted: #444;
+    --line: #ccc;
+    --line-strong: #888;
+    --surface: #fff;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+  main {
+    max-width: none;
+    padding: 0 0.25in;
+  }
+  .report table {
+    font-size: 11px;
+  }
+  .report tr {
+    break-inside: avoid;
+  }
+  .report thead {
+    display: table-header-group;
+  }
+}
+
 .tabbar {
   padding-bottom: env(safe-area-inset-bottom);
 }

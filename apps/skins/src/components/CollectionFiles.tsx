@@ -105,6 +105,12 @@ export function CollectionFiles({ status }: { status: CollectionStatus }) {
         <a href="/api/collection" className="btn-secondary" download>
           Download them
         </a>
+        <a href="/api/export" className="btn-secondary" download>
+          As a spreadsheet
+        </a>
+        <a href="/api/export?type=sales" className="btn-secondary" download>
+          Sales as a spreadsheet
+        </a>
         <button type="button" className="btn-secondary" onClick={rebuild} disabled={busy !== null || !status.enabled}>
           {busy === "rebuild" ? "Writing…" : "Rewrite the files"}
         </button>
@@ -126,6 +132,12 @@ export function CollectionFiles({ status }: { status: CollectionStatus }) {
           {error}
         </p>
       )}
+
+      <p className="text-xs" style={{ color: "var(--muted)" }}>
+        The spreadsheet uses the column names the importer recognises, so an
+        export is also a starting point for filling in what you paid — and
+        reads straight back in.
+      </p>
 
       {rebuilt && (
         <p className="card-surface p-3 text-sm">

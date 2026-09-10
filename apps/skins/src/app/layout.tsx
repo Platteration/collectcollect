@@ -44,6 +44,7 @@ const NAV = [
   { href: "/inventory", label: "Inventory", icon: "▦" },
   { href: "/spread", label: "Where to sell", icon: "⇄" },
   { href: "/alerts", label: "Alerts", icon: "◉" },
+  { href: "/report", label: "Report", icon: "▤" },
   { href: "/import", label: "Import", icon: "↧" },
   { href: "/settings", label: "Settings", icon: "⚙" },
 ] as const;

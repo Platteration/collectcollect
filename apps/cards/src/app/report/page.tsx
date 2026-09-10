@@ -3,7 +3,7 @@ import { latestSnapshotsByCard, listCards } from "@/lib/cards";
 import { imageSrc, money, when } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { GAMES } from "@/lib/types";
-import { PrintButton } from "@/components/PrintButton";
+import { PrintButton } from "@collectcollect/core/components/PrintButton";
 
 export const dynamic = "force-dynamic";
 
