@@ -17,6 +17,7 @@
     "cards": "npm run dev -w @collectcollect/cards",
     "skins": "npm run dev -w @collectcollect/skins",
     "retro-games": "npm run dev -w @collectcollect/retro-games",
-    "comics": "npm run dev -w @collectcollect/comics"
+    "comics": "npm run dev -w @collectcollect/comics",
+    "watches": "npm run dev -w @collectcollect/watches"
   }
 }
