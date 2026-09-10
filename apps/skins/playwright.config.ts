@@ -14,7 +14,7 @@ const WRITE_PORT = 3221;
 const LOCKED_PORT = 3222;
 
 /** Specs that write. Everything else reads the seeded inventory. */
-const WRITES = /(add|import|money)\.spec\.ts/;
+const WRITES = /(add|import|money|edit)\.spec\.ts/;
 const AUTH = /auth\.spec\.ts/;
 
 export default defineConfig({

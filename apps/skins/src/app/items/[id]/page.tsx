@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { money, when } from "@collectcollect/core/format";
-import { getItem, isTradeLocked, listSnapshots } from "@/lib/items";
+import { getItem, isTradeLocked, listSnapshots, listStorageUnits } from "@/lib/items";
 import { listLots } from "@/lib/acquisitions";
 import { listSalesForItem } from "@/lib/sales";
 import { valueOf } from "@/lib/valuation";
@@ -13,6 +13,7 @@ import { FloatBar } from "@/components/FloatBar";
 import { PricePanel } from "@/components/PricePanel";
 import { Spread } from "@/components/Spread";
 import { Ledger } from "@/components/Ledger";
+import { EditItem } from "@/components/EditItem";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +84,8 @@ export default async function ItemPage({ params }: PageProps<"/items/[id]">) {
       </header>
 
       <PricePanel item={item} summary={snapshots[0]?.summary ?? null} />
+
+      <EditItem item={item} storageUnits={listStorageUnits().map((u) => u.storageUnit)} />
 
       <Spread cash={cash} wallet={wallet} quantity={item.quantity} lockedUntil={locked ? item.tradableAfter : null} />
 

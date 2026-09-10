@@ -285,6 +285,12 @@ item's last known value.
 Cookies are scoped to a host and not to a port, so two of these apps served from
 localhost would otherwise hand each other their sessions.
 
+**Keeping history flowing.** The server re-prices anything whose latest price
+is older than `SKINS_AUTO_REFRESH_HOURS` (default 24, set 0 to disable) once an
+hour while it is running, and `/spread` has a button that does the whole
+inventory now. Only one pass runs at a time — a refresh still working through
+four hundred items must not have another started on top of it.
+
 **Selling.** Purchases and sales share one panel on an item's page, because
 they are one ledger read from two ends: a sale takes copies out of the oldest
 purchase still holding any, and undoing it puts them back where they came from.
