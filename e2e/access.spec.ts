@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { cardPhoto } from "./helpers";
 
 /**
  * The proxy's two guards, checked against the running server rather than the
@@ -40,10 +41,34 @@ test.describe("access guards", () => {
     expect(page.headers()["x-content-type-options"]).toBe("nosniff");
     expect(page.headers()["referrer-policy"]).toBe("no-referrer");
     expect(page.headers()["x-frame-options"]).toBe("DENY");
+  });
 
-    // Uploaded bytes are served from this origin, so they must not be sniffed.
-    const photo = await request.get("/api/uploads/00000000-0000-4000-8000-000000000000.jpg");
-    expect(photo.headers()["x-content-type-options"]).toBe("nosniff");
+  test("bytes that came from a client are served as the image they are", async ({ page, request }) => {
+    // The headers on a real 200: a missing name 404s before the route sets any
+    // of them, so only an upload that exists exercises this path at all.
+    await page.goto("/");
+    const photo = await cardPhoto(page, [90, 140, 210]);
+    const stored = await request.post("/api/uploads", {
+      headers: { "sec-fetch-site": "same-origin" },
+      multipart: { files: photo },
+    });
+    expect(stored.status()).toBe(200);
+    const { uploads } = (await stored.json()) as { uploads: Array<{ name: string }> };
+    expect(uploads).toHaveLength(1);
+
+    const served = await request.get(`/api/uploads/${uploads[0].name}`);
+    expect(served.status()).toBe(200);
+    // The route's own contribution: every upload is re-encoded to JPEG, and the
+    // name is a fresh UUID, so the bytes are immutable and private to this user.
+    expect(served.headers()["content-type"]).toBe("image/jpeg");
+    expect(served.headers()["cache-control"]).toBe("private, max-age=31536000, immutable");
+    // Client-supplied bytes served from this origin must not be sniffed. The
+    // header comes from the app-wide config, which has to keep covering this
+    // route and not only the pages.
+    expect(served.headers()["x-content-type-options"]).toBe("nosniff");
+    // A name that is well formed but has never been stored is still a 404.
+    const missing = await request.get("/api/uploads/00000000-0000-4000-8000-000000000000.jpg");
+    expect(missing.status()).toBe(404);
   });
 
   test("the app's own requests are unaffected", async ({ request }) => {
