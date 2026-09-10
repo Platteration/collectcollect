@@ -2,6 +2,7 @@
 #
 #   docker build -t collectcollect .                          # the card app
 #   docker build -t collectcollect-skins --build-arg APP=skins .
+#   docker build -t collectcollect-whisky --build-arg APP=whisky .   # or retro-games, comics, watches
 #
 # Data (SQLite, photos, and the Markdown copy) lives in the /data volume.
 ARG APP=cards
@@ -14,7 +15,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/cards/package.json ./apps/cards/
 COPY apps/skins/package.json ./apps/skins/
+COPY apps/retro-games/package.json ./apps/retro-games/
+COPY apps/comics/package.json ./apps/comics/
+COPY apps/watches/package.json ./apps/watches/
+COPY apps/whisky/package.json ./apps/whisky/
 COPY packages/core/package.json ./packages/core/
+COPY packages/create-domain/package.json ./packages/create-domain/
 RUN npm ci
 # .dockerignore keeps every `data` directory out of the context, which is
 # load-bearing rather than tidiness: the file tracer resolves the database path
@@ -30,9 +36,10 @@ RUN mkdir -p apps/${APP}/public
 FROM node:22-bookworm-slim AS runtime
 ARG APP
 WORKDIR /app
-# Each app reads its own data directory variable, so both are set to the volume
-# and each image uses the one that is its own.
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 DATA_DIR=/data SKINS_DATA_DIR=/data PORT=3000 HOSTNAME=0.0.0.0
+# Each app reads its own data directory variable, so all of them are set to the
+# volume and each image uses the one that is its own.
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
+ENV DATA_DIR=/data SKINS_DATA_DIR=/data RETRO_GAMES_DATA_DIR=/data COMICS_DATA_DIR=/data WATCHES_DATA_DIR=/data WHISKY_DATA_DIR=/data
 ENV APP_DIR=apps/${APP}
 RUN mkdir -p /data && chown node:node /data
 # Standalone output mirrors the workspace layout: shared node_modules at the

@@ -1,8 +1,9 @@
-# Two apps, two images, two volumes. They share code and nothing else: separate
+# Six apps, six images, six volumes. They share code and nothing else: separate
 # databases, separate directories, separate passwords.
 #
-#   docker compose up --build            # both
+#   docker compose up --build            # all of them
 #   docker compose up --build cards      # just the card app
+#   docker compose up --build whisky     # just the whisky app
 services:
   cards:
     build:
@@ -30,6 +31,62 @@ services:
       - collectcollect-skins-data:/data
     restart: unless-stopped
 
+  retro-games:
+    build:
+      context: .
+      args:
+        APP: retro-games
+    ports:
+      - "3002:3000"
+    env_file:
+      - .env
+    volumes:
+      - collectcollect-retro-games-data:/data
+    restart: unless-stopped
+
+  comics:
+    build:
+      context: .
+      args:
+        APP: comics
+    ports:
+      - "3003:3000"
+    env_file:
+      - .env
+    volumes:
+      - collectcollect-comics-data:/data
+    restart: unless-stopped
+
+  watches:
+    build:
+      context: .
+      args:
+        APP: watches
+    ports:
+      - "3004:3000"
+    env_file:
+      - .env
+    volumes:
+      - collectcollect-watches-data:/data
+    restart: unless-stopped
+
+  whisky:
+    build:
+      context: .
+      args:
+        APP: whisky
+    ports:
+      - "3005:3000"
+    env_file:
+      - .env
+    volumes:
+      - collectcollect-whisky-data:/data
+    restart: unless-stopped
+
 volumes:
   collectcollect-data:
   collectcollect-skins-data:
+  collectcollect-retro-games-data:
+  collectcollect-comics-data:
+  collectcollect-watches-data:
+  collectcollect-whisky-data:

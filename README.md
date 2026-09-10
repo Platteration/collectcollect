@@ -2,6 +2,8 @@
 
 A personal cataloging app for trading cards: Pokémon, Yu-Gi-Oh!, Magic: The Gathering, sports cards (baseball, basketball, football, hockey…) and anything else in a sleeve.
 
+It is also a family: the same repository holds apps for CS2 skins, retro games, comics, watches and whisky, each with its own database, its own price sources and its own rules about what counts as one object, sharing the engine underneath. See [The other apps](#the-other-apps).
+
 Snap a photo of a card and CollectCollect:
 
 1. **Identifies it** with Claude's vision model: game, name, set, collector number, year, rarity, printing variant (holo, 1st edition, refractor, autograph…) and, if it's in a slab, the grading company, grade and cert number.
@@ -153,9 +155,17 @@ across all of them.
 ```
 apps/cards/              this app
 apps/skins/              the same idea for CS2 items — see its own section below
+apps/retro-games/        four apps on the shared domain engine; each is a spec
+apps/comics/             (fields, rules, price sources, prompt, seed data) plus
+apps/watches/            the little that only it knows, and its own README
+apps/whisky/
 packages/core/           code with no opinion about what is being collected:
                          the Markdown codec, the zip writer, the CSV reader,
-                         chart geometry and the components both apps draw with
+                         chart geometry, the components every app draws with,
+                         and under src/domain the engine that runs an app
+                         from its spec (schema, ledger, pricing, mirror, CSV,
+                         identification, backup, routes and pages)
+packages/create-domain/  scaffolds a new app on the engine in one command
 ```
 
 Inside `apps/cards`:
@@ -220,6 +230,10 @@ To drive one app on its own, add `-w @collectcollect/cards` — which is how you
 reach the app-only scripts, such as `npm run e2e:ui -w @collectcollect/cards`
 for the Playwright suite in UI mode.
 
+Each app also has a root shortcut for its dev server: `npm run cards` (3000),
+`npm run skins` (3001), `npm run retro-games` (3002), `npm run comics` (3003),
+`npm run watches` (3004) and `npm run whisky` (3005).
+
 ## Testing
 
 Unit tests cover the pieces where a mistake is silent: price matching and the
@@ -234,6 +248,22 @@ the database, runs for real. It covers adding a card by hand, duplicate
 merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
 grading submission from draft to booked outcome, and the password gate. Both
 suites plus lint, typecheck and build run in CI on every push.
+
+## The other apps
+
+Four more collections run on a shared **domain engine** in `packages/core/src/domain`. An app on it is a description of what it collects, a `DomainSpec`: typed fields (searchable, filterable, private), a title and a detail line, the rule for whether a row is one specific object or a fungible stack, its price providers and how their answers become one value, an identification prompt, settings, alerts, the report layout and sample data. From that the engine provides everything the card and skins apps wrote by hand: the SQLite schema with column migrations, validation, search and filters, add-or-merge intake, purchase lots with oldest-first cost basis, sales and realised gains, price refresh with a manual-entry source and hand-entered history points, the portfolio and its chart, alerts with a webhook, storage locations, the printable report (private fields off unless asked), CSV import and export, uploads and Claude vision identification, the Markdown mirror and restore, backup, the password gate, every API route and every page. Each app's route files are one line each, and its pages render from the spec with a small hook for what only that domain knows.
+
+`node packages/create-domain/index.mjs <id> --name … --singular … --plural … --prefix … --port …` scaffolds a new one with a working starter spec, tests and README.
+
+| App | Port | What it tracks | One object, or a stack? | Price sources |
+| --- | --- | --- | --- | --- |
+| [Retro games](apps/retro-games/README.md) | 3002 | cartridges and discs, loose / CIB / sealed / graded (WATA, VGA, CGC), box, manual and cart condition, variants | graded copies are unique; identical loose, CIB or sealed copies stack | PriceCharting by completeness (paid), manual; grade-or-wait verdict on sealed and complete copies |
+| [Comics](apps/comics/README.md) | 3003 | single issues, key-issue flags, raw or slabbed (CGC, CBCS, PGX), page quality, signature series | slabs are unique; identical raw copies stack | PriceCharting by grade (paid, column mapping unverified), manual; cert-verification stub; grade-or-wait verdict on raw copies |
+| Sports cards | 3000 | part of the card app: team, rookie, parallel, serial numbering, autograph, relic, BGS subgrades | serial-numbered and graded cards are unique; raw copies stack within a parallel | PriceCharting (paid), manual; there is no free sports API |
+| [Watches](apps/watches/README.md) | 3004 | brand, model, reference, private serial, movement, case, dial, box and papers, service history | always unique | manual with dated history; insurance appraisal with serial and photo switches |
+| [Whisky](apps/whisky/README.md) | 3005 | distillery, expression, age, cask, strength, size, bottle or batch, sealed or open, fill level | sealed identical bottles stack, numbered and open bottles are unique | manual with dated history; an opened bottle's value is frozen and left out of the total |
+
+They keep the conventions of the two older apps: everything self-hosted and local-first, one SQLite file per app in its own data directory (`<PREFIX>_DATA_DIR`), an optional password (`<PREFIX>_APP_PASSWORD`), hourly auto-refresh (`<PREFIX>_AUTO_REFRESH_HOURS`), and every item mirrored to Markdown under `data/collection`. Photo identification and PriceCharting use the same keys as the card app. Each has unit tests for its schema, its merge rule and its price adapter against a fake `fetch`; none has an e2e suite yet.
 
 ## The skins app
 
