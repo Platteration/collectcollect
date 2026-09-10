@@ -9,6 +9,8 @@ import type {
   PriceSummary,
 } from "./types";
 import { CONDITIONS, GAMES, GRADING_STATUSES, type GradingStatus } from "./types";
+import { httpUrl } from "./format";
+import { IdentificationSchema } from "./identify/schema";
 import { isValidUploadName } from "./images";
 import { normalizeNumber } from "./pricing/match";
 
@@ -94,22 +96,29 @@ const str = (v: unknown): string | null => {
   const s = String(v).trim();
   return s.length ? s : null;
 };
-/** Only http(s) URLs may be stored for rendering as links/images. */
-const httpUrl = (v: unknown): string | null => {
-  const s = str(v);
-  if (!s) return null;
-  try {
-    const u = new URL(s);
-    return u.protocol === "http:" || u.protocol === "https:" ? u.toString() : null;
-  } catch {
-    return null;
-  }
-};
 /** Only a #rrggbb literal may be stored, since it goes straight into a style attribute. */
 const hexColor = (v: unknown): string | null => {
   const s = str(v);
   return s && /^#[0-9a-f]{6}$/i.test(s) ? s.toLowerCase() : null;
 };
+/**
+ * The identification blob as it may be stored. Every field is optional and
+ * unknown keys are dropped, so an identification written before a field existed
+ * still round-trips, but a client cannot use this column to persist an
+ * arbitrary document of arbitrary size — it is reachable from POST /api/cards,
+ * /api/cards/intake and PATCH /api/cards/[id], and alertsForRefresh reads back
+ * into it.
+ */
+const StoredIdentification = IdentificationSchema.partial().extend({
+  condition_assessment: IdentificationSchema.shape.condition_assessment.nullish(),
+});
+
+const identification = (v: unknown): Identification | null => {
+  if (!v || typeof v !== "object") return null;
+  const parsed = StoredIdentification.safeParse(v);
+  return parsed.success ? (parsed.data as Identification) : null;
+};
+
 const num = (v: unknown): number | null => {
   if (v === undefined || v === null || v === "") return null;
   const n = Number(v);
@@ -160,7 +169,7 @@ export function normalizeInput(input: CardInput): Required<
     externalIds: Object.fromEntries(
       Object.entries(input.externalIds ?? {}).filter(([, v]) => str(v)),
     ) as Record<string, string>,
-    identification: input.identification ?? null,
+    identification: identification(input.identification),
     manualUngraded: num(input.manualUngraded),
     manualGraded: gradedNums,
     gradingStatus,

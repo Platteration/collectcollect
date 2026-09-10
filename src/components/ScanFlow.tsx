@@ -12,7 +12,9 @@ type ScanStatus = "queued" | "uploading" | "identifying" | "saving" | "added" | 
 
 interface ScanItem {
   key: string;
-  file: File;
+  /** Dropped once the photo is on the server, so a long stack does not keep every capture. */
+  file: File | null;
+  /** A blob: URL until the upload lands, then the stored copy. */
   preview: string;
   status: ScanStatus;
   upload: string | null;
@@ -78,6 +80,26 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
   const queueRef = useRef<ScanItem[]>([]);
   const runningRef = useRef(0);
   const draining = useRef(false);
+  /**
+   * Blob URLs still owned by this component. A full-resolution capture stays in
+   * memory for as long as its URL exists, and scanning a binder makes one per
+   * shutter press, so each is released as soon as the server has the photo and
+   * any survivors are released on unmount.
+   */
+  const blobUrls = useRef(new Set<string>());
+
+  const revoke = useCallback((url: string) => {
+    if (!blobUrls.current.delete(url)) return;
+    URL.revokeObjectURL(url);
+  }, []);
+
+  useEffect(() => {
+    const urls = blobUrls.current;
+    return () => {
+      for (const url of urls) URL.revokeObjectURL(url);
+      urls.clear();
+    };
+  }, []);
 
   const patch = useCallback((key: string, p: Partial<ScanItem>) => {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...p } : it)));
@@ -86,12 +108,17 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
   const processOne = useCallback(
     async (item: ScanItem) => {
       try {
+        const file = item.file;
+        if (!file) return; // already uploaded; nothing left to do with this item
         patch(item.key, { status: "uploading" });
         const fd = new FormData();
-        fd.append("files", item.file);
+        fd.append("files", file);
         const { uploads } = await api<{ uploads: Array<{ name: string; color: string | null }> }>("/api/uploads", { method: "POST", body: fd });
         const upload = uploads[0];
-        patch(item.key, { upload: upload.name, accentColor: upload.color });
+        // The server has the photo now: show its copy and let go of both the
+        // capture and the blob URL that was holding it in memory.
+        patch(item.key, { upload: upload.name, accentColor: upload.color, preview: `/api/uploads/${upload.name}`, file: null });
+        revoke(item.preview);
 
         if (!claudeConfigured) {
           patch(item.key, { status: "review", message: "Claude is not configured, so this card needs details by hand." });
@@ -163,7 +190,7 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
         patch(item.key, { status: "failed", message: (e as Error).message });
       }
     },
-    [claudeConfigured, patch],
+    [claudeConfigured, patch, revoke],
   );
 
   /**
@@ -198,17 +225,21 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
     (files: File[]) => {
       const fresh = files
         .filter((f) => f.type.startsWith("image/"))
-        .map<ScanItem>((file) => ({
-          key: nextKey(),
-          file,
-          preview: URL.createObjectURL(file),
-          status: "queued",
-          upload: null,
-          accentColor: null,
-          identification: null,
-          cardId: null,
-          message: null,
-        }));
+        .map<ScanItem>((file) => {
+          const preview = URL.createObjectURL(file);
+          blobUrls.current.add(preview);
+          return {
+            key: nextKey(),
+            file,
+            preview,
+            status: "queued",
+            upload: null,
+            accentColor: null,
+            identification: null,
+            cardId: null,
+            message: null,
+          };
+        });
       if (fresh.length === 0) return;
       setItems((prev) => [...fresh, ...prev]);
       queueRef.current.push(...fresh);

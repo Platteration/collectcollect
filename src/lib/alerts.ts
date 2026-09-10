@@ -1,6 +1,7 @@
 import { getDb } from "./db";
 import { gradingVerdict, isReadyToGrade, outlookSeries } from "./analytics";
 import { money } from "./format";
+import { outboundRefusal } from "./net";
 import type { Alert, AlertKind, CardRecord, PriceSnapshot, PriceSummary, Settings } from "./types";
 
 interface AlertRow {
@@ -128,17 +129,30 @@ export function alertsForRefresh(
  * Best-effort webhook delivery so alerts can reach email or push through a
  * service the owner controls. Failures are logged, never thrown: a broken
  * webhook must not break a price refresh.
+ *
+ * The webhook is meant for an external forwarding service, so the address it
+ * resolves to is checked first and a redirect is refused rather than followed:
+ * otherwise the setting is a way to make this server POST an attacker-shaped
+ * body to anything it can reach, including whatever is listening on loopback.
  */
 export async function deliver(alert: Alert, settings: Settings): Promise<void> {
   if (!settings.alertWebhookUrl) return;
+  const refusal = await outboundRefusal(settings.alertWebhookUrl);
+  if (refusal) {
+    console.error(`[alerts] webhook not sent: ${refusal}`);
+    return;
+  }
   try {
     const res = await fetch(settings.alertWebhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind: alert.kind, title: alert.title, body: alert.body, cardId: alert.cardId, createdAt: alert.createdAt }),
       signal: AbortSignal.timeout(10_000),
+      // A 302 into a private address would undo the check above.
+      redirect: "manual",
     });
-    if (!res.ok) console.error(`[alerts] webhook returned HTTP ${res.status}`);
+    if (res.status >= 300 && res.status < 400) console.error("[alerts] webhook redirected; give the final URL instead");
+    else if (!res.ok) console.error(`[alerts] webhook returned HTTP ${res.status}`);
   } catch (e) {
     console.error("[alerts] webhook failed", e instanceof Error ? e.message : e);
   }

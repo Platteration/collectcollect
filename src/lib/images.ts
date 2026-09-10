@@ -12,6 +12,19 @@ export const ALLOWED_IMAGE_TYPES: Record<string, string> = {
   "image/heif": "heif",
 };
 
+/** What sharp calls those formats once it has looked at the bytes. */
+const ALLOWED_FORMATS = new Set(["jpeg", "png", "webp", "heif"]);
+
+/**
+ * Decoding budget for anything that came from a client. sharp's own ceiling is
+ * ~268 megapixels, so a small crafted file can still expand to roughly a
+ * gigabyte of raw pixels; 50 MP is an order of magnitude beyond any phone
+ * photo. `failOn: "none"` stays: a slightly truncated capture should still be
+ * saved rather than refused.
+ */
+const MAX_PIXELS = 50_000_000;
+const DECODE = { failOn: "none", limitInputPixels: MAX_PIXELS, sequentialRead: true } as const;
+
 const NAME_RE = /^[a-f0-9-]{36}\.(jpg|png|webp)$/;
 
 export function isValidUploadName(name: string): boolean {
@@ -30,7 +43,7 @@ export function isValidUploadName(name: string): boolean {
  */
 export async function dominantColor(buffer: Buffer): Promise<string | null> {
   try {
-    const img = sharp(buffer, { failOn: "none" }).rotate();
+    const img = sharp(buffer, DECODE).rotate();
     const { width = 0, height = 0 } = await img.metadata();
     if (!width || !height) return null;
     const inset = { left: Math.round(width * 0.2), top: Math.round(height * 0.2), width: Math.round(width * 0.6), height: Math.round(height * 0.6) };
@@ -47,13 +60,26 @@ export async function dominantColor(buffer: Buffer): Promise<string | null> {
 }
 
 export async function saveUpload(file: File): Promise<{ name: string; bytes: number; color: string | null }> {
-  if (!ALLOWED_IMAGE_TYPES[file.type] && !file.type.startsWith("image/")) {
+  // The allowlist decides, rather than merely being consulted: any `image/*`
+  // the client cares to declare would otherwise pass, and image/svg+xml is a
+  // vector document handed to a different parser than the raster formats this
+  // app believes it accepts.
+  if (!ALLOWED_IMAGE_TYPES[file.type]) {
     throw new Error(`Unsupported file type: ${file.type || "unknown"}`);
   }
   const input = Buffer.from(await file.arrayBuffer());
   if (input.length === 0) throw new Error("Empty file");
   const name = `${crypto.randomUUID()}.jpg`;
-  const output = await sharp(input, { failOn: "none" })
+  const pipeline = sharp(input, DECODE);
+  // The declared type is the client's; the decoded one is the file's.
+  const format = await pipeline
+    .metadata()
+    .then((m) => m.format)
+    .catch(() => undefined);
+  if (!format || !ALLOWED_FORMATS.has(format)) {
+    throw new Error("That file is not a JPEG, PNG, WebP or HEIC image");
+  }
+  const output = await pipeline
     .rotate()
     .resize({ width: 2000, height: 2000, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 88 })
@@ -77,7 +103,7 @@ export async function readUpload(name: string): Promise<Buffer | null> {
 
 /** Downscale for the vision request: ~1568px long edge is the sweet spot for Claude. */
 export async function prepareForVision(buffer: Buffer): Promise<{ data: string; mediaType: "image/jpeg" }> {
-  const out = await sharp(buffer, { failOn: "none" })
+  const out = await sharp(buffer, DECODE)
     .rotate()
     .resize({ width: 1568, height: 1568, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 85 })

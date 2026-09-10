@@ -12,6 +12,20 @@ export function tooManyRequests(message: string, retryAfter: number) {
   );
 }
 
+/**
+ * A cheap refusal before the body is read. Every real size check in this app
+ * runs after the whole request has been materialised in memory, which is fine
+ * for a body that is merely over the limit and useless against a multi-gigabyte
+ * one. Content-Length is absent on a chunked request, which must still be let
+ * through to the check that counts.
+ */
+export function declaredTooLarge(request: Request, maxBytes: number): boolean {
+  const declared = request.headers.get("content-length");
+  if (!declared) return false;
+  const length = Number(declared);
+  return Number.isFinite(length) && length > maxBytes;
+}
+
 export function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }

@@ -108,6 +108,10 @@ export function SettingsForm({ initial }: { initial: Settings }) {
           <label className="block sm:col-span-2">
             <span className="label">Webhook URL (optional)</span>
             <input className="input" value={alertWebhookUrl} onChange={(e) => setAlertWebhookUrl(e.target.value)} placeholder="https://…" />
+            <span className="mt-1 block text-xs text-neutral-500">
+              Each alert is POSTed here as JSON. It has to be an outside address: the server will not send to loopback or a
+              private network, and will not follow a redirect.
+            </span>
           </label>
         </div>
       </section>

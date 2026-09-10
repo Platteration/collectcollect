@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { saveUpload } from "@/lib/images";
-import { errorMessage, jsonError } from "@/lib/http";
+import { declaredTooLarge, errorMessage, jsonError } from "@/lib/http";
 
 const MAX_FILES = 20;
 const MAX_BYTES = 25 * 1024 * 1024;
+/** The most a legal request can weigh, used to refuse a huge body unread. */
+const MAX_TOTAL_BYTES = MAX_FILES * MAX_BYTES;
 
 /** POST multipart/form-data with one or more `files`; returns stored upload names. */
 export async function POST(request: Request) {
+  if (declaredTooLarge(request, MAX_TOTAL_BYTES)) return jsonError("That upload is too large", 413);
   let form: FormData;
   try {
     form = await request.formData();

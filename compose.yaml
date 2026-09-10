@@ -2,6 +2,9 @@ services:
   collectcollect:
     build: .
     ports:
+      # Published on every interface, which is what makes this reachable from a
+      # phone on the same network. With no APP_PASSWORD set that is the whole
+      # LAN; use "127.0.0.1:3000:3000" to keep it to this machine.
       - "3000:3000"
     env_file:
       - .env

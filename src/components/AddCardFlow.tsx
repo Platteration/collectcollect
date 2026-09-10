@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api-client";
 import type { CardRecord, Identification, PriceSummary } from "@/lib/types";
@@ -65,6 +65,22 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
   const [items, setItems] = useState<Item[]>([]);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  /** Blob URLs this component still owns; each holds its photo in memory until it is revoked. */
+  const blobUrls = useRef(new Set<string>());
+
+  const revoke = useCallback((urls: string[]) => {
+    for (const url of urls) {
+      if (blobUrls.current.delete(url)) URL.revokeObjectURL(url);
+    }
+  }, []);
+
+  useEffect(() => {
+    const urls = blobUrls.current;
+    return () => {
+      for (const url of urls) URL.revokeObjectURL(url);
+      urls.clear();
+    };
+  }, []);
 
   const patch = useCallback((key: string, p: Partial<Item> | ((it: Item) => Partial<Item>)) => {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...(typeof p === "function" ? p(it) : p) } : it)));
@@ -90,21 +106,25 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
     async (files: File[]) => {
       const images = files.filter((f) => f.type.startsWith("image/"));
       if (images.length === 0) return;
-      const fresh: Item[] = images.map((f) => ({
-        key: nextKey(),
-        uploads: [],
-        previews: [URL.createObjectURL(f)],
-        status: "uploading",
-        error: null,
-        identification: null,
-        form: emptyForm(),
-        price: null,
-        pricing: false,
-        savedId: null,
-        hint: "",
-        accentColor: null,
-        duplicates: null,
-      }));
+      const fresh: Item[] = images.map((f) => {
+        const preview = URL.createObjectURL(f);
+        blobUrls.current.add(preview);
+        return {
+          key: nextKey(),
+          uploads: [],
+          previews: [preview],
+          status: "uploading",
+          error: null,
+          identification: null,
+          form: emptyForm(),
+          price: null,
+          pricing: false,
+          savedId: null,
+          hint: "",
+          accentColor: null,
+          duplicates: null,
+        };
+      });
       setItems((prev) => [...fresh, ...prev]);
       await Promise.all(
         fresh.map(async (item, i) => {
@@ -113,7 +133,9 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
           try {
             const { uploads } = await api<{ uploads: Array<{ name: string; color: string | null }> }>("/api/uploads", { method: "POST", body: fd });
             const names = uploads.map((u) => u.name);
+            // The stored copies replace the local ones, so the originals can go.
             patch(item.key, { uploads: names, previews: names.map((n) => `/api/uploads/${n}`), accentColor: uploads[0]?.color ?? null });
+            revoke(item.previews);
             if (claudeConfigured) await identify(item.key, names, "");
             else patch(item.key, { status: "review", error: "Claude is not configured, so enter the details by hand." });
           } catch (e) {
@@ -122,7 +144,7 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
         }),
       );
     },
-    [claudeConfigured, identify, patch],
+    [claudeConfigured, identify, patch, revoke],
   );
 
   const addManual = () => {

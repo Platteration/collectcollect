@@ -22,9 +22,9 @@ Production: `npm run build && npm start`. Everything is stored locally in `./dat
 
 Docker: `docker compose up --build` (reads `.env`, keeps data in a named volume at `/data`).
 
-**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach. Failed attempts are rate limited, and changing the password invalidates existing sessions.
+**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach (the app says so at startup). Failed attempts are rate limited, and changing the password invalidates existing sessions. The cookie is signed with a random key kept in the data directory, so the cookie is no help to anyone guessing the password; `APP_SECRET` replaces that key if you would rather set one. Behind a reverse proxy that terminates TLS the app cannot see that the connection was secure — set `COOKIE_SECURE=1` so the session cookie is marked `Secure`.
 
-**Host names and other sites.** Whether or not a password is set, the app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`. Requests that a browser sends from another site are refused for anything but `GET`, so a page you happen to visit cannot restore a backup over your collection or spend your API budget; `curl` and scripts, which send no browser origin headers, are unaffected.
+**Host names and other sites.** Whether or not a password is set, the app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`. Requests that a browser sends from another site are refused for anything but `GET`, so a page you happen to visit cannot restore a backup over your collection or spend your API budget; `curl` and scripts, which send no browser origin headers, are unaffected. Every response carries a content security policy, `nosniff`, `no-referrer` and a refusal to be framed.
 
 > Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
 
@@ -66,7 +66,7 @@ Sports cards have no free price API; without a PriceCharting token you can still
 
 **Sales.** Log a sale from a card's page: copies leave the collection, the cost basis is captured at sale time so later edits don't rewrite history, and the portfolio shows realized gains (proceeds less fees less cost) beside unrealized ones. A sale can be undone, which puts the copies back. Fully sold cards stay in the collection greyed out with a "Sold" badge so their history survives.
 
-**Alerts.** Every price refresh checks whether anything is worth mentioning: a card crossing your ready-to-grade thresholds, a move bigger than the percentage set in Settings, or real graded sales appearing where the app previously had only a multiplier estimate. Alerts collect in `/alerts` with an unread count in the nav. Setting a webhook URL POSTs each alert as JSON so you can forward them to email, push or chat through a service you control; a failing webhook is logged and never breaks a refresh.
+**Alerts.** Every price refresh checks whether anything is worth mentioning: a card crossing your ready-to-grade thresholds, a move bigger than the percentage set in Settings, or real graded sales appearing where the app previously had only a multiplier estimate. Alerts collect in `/alerts` with an unread count in the nav. Setting a webhook URL POSTs each alert as JSON so you can forward them to email, push or chat through a service you control; a failing webhook is logged and never breaks a refresh. It has to be an outside address — the server refuses to POST to loopback or a private network, and will not follow a redirect into one — so the setting cannot be turned into a way to reach whatever else the machine can see.
 
 **Appraisal report.** `/report` is a printable valuation of everything you own, with photos, identifications, grades, per-copy and total values, and the source and date behind each price. Print to PDF from the browser. Set the owner name in Settings.
 
@@ -76,9 +76,11 @@ Sports cards have no free price API; without a PriceCharting token you can still
 
 **Where a card is.** Each card can record where it is physically kept ("Binder 2, page 4", "Slab box"). The Collection page filters by location, including a "no location recorded" option for what still needs putting away, locations already in use are offered as you type, and several cards can be filed at once. The location is searchable, exported, imported, and printed on the appraisal report, which is what makes the report useful for actually locating an insured card.
 
+**Photos you did not keep.** A card stores one photo, but working through a stack writes a file per shot: the back and slab-label photos, the scans that ended in review, the frames you re-took. Once a day the app deletes uploaded photos that no card points at and that are more than 24 hours old, so the data directory — and every backup taken from it — does not grow forever.
+
 **Bulk actions.** Tick several cards on the Collection page to refresh their prices, set a grading plan, add them to a draft submission, or delete them in one go.
 
-**Backup and restore.** Settings offers a single zip holding a consistent copy of the database (taken through SQLite's own backup, so it is safe while the app is running) and every photo, and takes one back to restore it. A restore validates the whole archive and opens its database before touching anything, refuses names that would escape the data directory or files the app did not write, and moves the collection being replaced into a dated folder rather than deleting it, so restoring the wrong file can be undone by hand. It holds the archive in memory, so it is capped at 512 MB; a larger collection is restored by unpacking the zip into the data directory with the app stopped.
+**Backup and restore.** Settings offers a single zip holding a consistent copy of the database (taken through SQLite's own backup, so it is safe while the app is running) and every photo, and takes one back to restore it. A restore validates the whole archive and opens its database before touching anything, refuses names that would escape the data directory or files the app did not write, and moves the collection being replaced into a dated folder rather than deleting it, so restoring the wrong file can be undone by hand. It holds the archive in memory, so it is capped at 512 MB; a larger collection is restored by unpacking the zip into the data directory with the app stopped. Those `replaced-…` folders are kept until you delete them; Settings says how many there are and how much they hold.
 
 The archive is written and read by a small built-in zip writer and reader rather than a dependency. Tests check the writer against the system `unzip` and Python's `zipfile`, read back archives made by the system `zip` in both stored and deflated form, and confirm that a corrupted payload, a doctored entry name, a path that escapes, an oversized expansion and a database that will not open are each refused with the collection left untouched.
 
@@ -119,7 +121,9 @@ src/app/                 Next.js App Router pages and API routes
 src/lib/identify/        Claude vision call and the identification schema
 src/lib/pricing/         Providers, matching heuristics, summary/valuation, refresh pipeline
 src/lib/analytics.ts     Portfolio value series, grading outlook (min/max/upside) and timing verdict
-src/lib/scheduler.ts     Hourly auto-refresh of stale prices (started from src/instrumentation.ts)
+src/lib/scheduler.ts     Hourly auto-refresh of stale prices and the daily photo sweep
+src/lib/uploads.ts       Deletes uploaded photos no card points at
+src/lib/net.ts           Which addresses the server may send an outgoing request to
 src/components/charts/   Inline-SVG portfolio line and min/max outlook band charts
 src/lib/zip.ts           Dependency-free streaming zip writer used by the backup
 src/lib/csv.ts           RFC 4180 reader; src/lib/import.ts maps columns to cards

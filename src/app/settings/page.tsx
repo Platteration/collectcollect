@@ -56,6 +56,14 @@ export default function SettingsPage() {
         <a href="/api/backup" className="btn-secondary mt-3 inline-flex" download>
           Download backup
         </a>
+        {backup.replaced.folders > 0 && (
+          <p className="mt-3 text-sm text-neutral-500">
+            A restore moves the collection it replaces aside rather than deleting it: {backup.replaced.folders}{" "}
+            <code>replaced-…</code> {backup.replaced.folders === 1 ? "folder is" : "folders are"} holding{" "}
+            {mb(backup.replaced.bytes)} in the data directory. Nothing removes them on its own — delete them by hand once you
+            are sure the restore was the right one.
+          </p>
+        )}
         <RestoreForm />
       </section>
 

@@ -37,6 +37,30 @@ describe("card repository", () => {
     expect(() => createCard({ game: "mtg", name: "x", condition: "MINT" as never })).toThrow(/condition/);
   });
 
+  it("stores only the identification fields it knows, whatever the client sent", () => {
+    const card = createCard({
+      game: "pokemon",
+      name: "Charizard",
+      identification: {
+        name: "Charizard",
+        confidence: 0.9,
+        grading: { company: "PSA", grade: "9", cert_number: null },
+        condition_assessment: null,
+        // Anything a caller cares to add is dropped rather than persisted.
+        payload: "x".repeat(1000),
+      } as never,
+    });
+    expect(card.identification).toMatchObject({ name: "Charizard", confidence: 0.9 });
+    expect(card.identification as unknown as Record<string, unknown>).not.toHaveProperty("payload");
+
+    // A blob that is not an identification at all is not stored either.
+    expect(createCard({ game: "pokemon", name: "Pikachu", identification: "🙂" as never }).identification).toBeNull();
+    expect(createCard({ game: "pokemon", name: "Squirtle", identification: { confidence: "high" } as never }).identification).toBeNull();
+
+    // Editing a card keeps the identification it already had.
+    expect(updateCard(card.id, { notes: "edited" })?.identification).toMatchObject({ name: "Charizard" });
+  });
+
   it("filters and searches", () => {
     createCard({ game: "pokemon", name: "Pikachu", setName: "Jungle" });
     createCard({ game: "yugioh", name: "Dark Magician" });

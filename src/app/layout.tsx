@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { Barlow_Condensed } from "next/font/google";
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { unreadCount } from "@/lib/alerts";
-import { authEnabled } from "@/lib/auth";
+import { SESSION_COOKIE, authEnabled, verifyToken } from "@/lib/auth";
 import { SignOut } from "@/components/SignOut";
 import "./globals.css";
 
@@ -18,8 +19,15 @@ export const metadata: Metadata = {
   description: "Photograph, identify, and price your trading cards.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
-  const unread = unreadCount();
+/**
+ * The nav is only for someone who is signed in. Rendering it on the login page
+ * would offer links that bounce straight back, a Sign out button, and the count
+ * of unread alerts — and would open the database on the one request that is
+ * meant to work without a session (a restore holds that lock).
+ */
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const signedIn = !authEnabled() || (await verifyToken((await cookies()).get(SESSION_COOKIE)?.value));
+  const unread = signedIn ? unreadCount() : 0;
   return (
     <html lang="en" className={`${display.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
@@ -29,39 +37,43 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <span aria-hidden className="inline-block h-6 w-4 rounded-sm bg-gradient-to-br from-amber-500 to-rose-500" />
               <span className="font-display text-xl font-semibold uppercase tracking-wide">CollectCollect</span>
             </Link>
-            <div className="ml-auto flex items-center gap-0.5 text-sm">
-              <Link href="/" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
-                Portfolio
-              </Link>
-              <Link href="/collection" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
-                Collection
-              </Link>
-              <Link href="/sets" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
-                Sets
-              </Link>
-              <Link href="/submissions" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
-                Grading
-              </Link>
-              <Link href="/alerts" className="relative rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
-                Alerts
-                {unread > 0 && (
-                  <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-amber-600 px-1.5 text-xs font-medium text-white">
-                    {unread > 99 ? "99+" : unread}
-                  </span>
-                )}
-              </Link>
-              <Link href="/report" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
-                Report
-              </Link>
-              <Link href="/settings" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
-                Settings
-              </Link>
-            </div>
-            {authEnabled() && <SignOut />}
-            <Link href="/add" className="btn-primary whitespace-nowrap">
-              {/* The button is a flex row with a gap, so the span needs no leading space. */}
-              + Add<span className="hidden sm:inline">cards</span>
-            </Link>
+            {signedIn && (
+              <>
+                <div className="ml-auto flex items-center gap-0.5 text-sm">
+                  <Link href="/" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
+                    Portfolio
+                  </Link>
+                  <Link href="/collection" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
+                    Collection
+                  </Link>
+                  <Link href="/sets" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
+                    Sets
+                  </Link>
+                  <Link href="/submissions" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
+                    Grading
+                  </Link>
+                  <Link href="/alerts" className="relative rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
+                    Alerts
+                    {unread > 0 && (
+                      <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-amber-600 px-1.5 text-xs font-medium text-white">
+                        {unread > 99 ? "99+" : unread}
+                      </span>
+                    )}
+                  </Link>
+                  <Link href="/report" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
+                    Report
+                  </Link>
+                  <Link href="/settings" className="rounded-md px-2 py-1.5 hover:bg-black/5 sm:px-3 dark:hover:bg-white/10">
+                    Settings
+                  </Link>
+                </div>
+                {authEnabled() && <SignOut />}
+                <Link href="/add" className="btn-primary whitespace-nowrap">
+                  {/* The button is a flex row with a gap, so the span needs no leading space. */}
+                  + Add<span className="hidden sm:inline">cards</span>
+                </Link>
+              </>
+            )}
           </nav>
         </header>
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">{children}</main>

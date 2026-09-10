@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { SESSION_COOKIE, SESSION_DAYS, authEnabled, createToken, passwordMatches } from "@/lib/auth";
+import { SESSION_COOKIE, SESSION_DAYS, authEnabled, cookieSecure, createToken, passwordMatches } from "@/lib/auth";
 import { jsonError } from "@/lib/http";
 import { LOGIN_FAILURE_DELAY_MS, clearLoginFailures, clientKey, loginBlocked, recordLoginFailure } from "@/lib/rate-limit";
 
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   response.cookies.set(SESSION_COOKIE, await createToken(), {
     httpOnly: true,
     sameSite: "lax",
-    secure: request.url.startsWith("https://"),
+    secure: cookieSecure(request),
     path: "/",
     maxAge: SESSION_DAYS * 86400,
   });

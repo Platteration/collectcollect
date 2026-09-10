@@ -1,6 +1,6 @@
 "use client";
 
-import { money, when } from "@/lib/format";
+import { httpUrl, money, when } from "@/lib/format";
 import type { PriceSummary } from "@/lib/types";
 
 interface Props {
@@ -80,8 +80,9 @@ export function PricePanel({ summary, loading, onRefresh, title = "Market prices
                   <li key={i} className="flex flex-wrap items-baseline justify-between gap-x-3 py-1.5">
                     <div className="min-w-0">
                       <div className="font-medium">
-                        {q.url ? (
-                          <a href={q.url} target="_blank" rel="noreferrer" className="underline decoration-dotted">
+                        {/* The quote came from a third-party API and was stored verbatim, so the link is checked here. */}
+                        {httpUrl(q.url) ? (
+                          <a href={httpUrl(q.url)!} target="_blank" rel="noreferrer" className="underline decoration-dotted">
                             {q.sourceLabel}
                           </a>
                         ) : (

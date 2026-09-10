@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { latestSnapshotsByCard } from "@/lib/cards";
-import { money } from "@/lib/format";
+import { httpUrl, money } from "@/lib/format";
 import { setDetail } from "@/lib/sets";
 import { GAMES, type Game } from "@/lib/types";
 
@@ -51,9 +51,10 @@ export default async function SetPage({ params }: PageProps<"/sets/[game]/[name]
               {missing.map((c) => (
                 <li key={`${c.number}-${c.name}`} className="flex items-center gap-3 px-3 py-2 text-sm">
                   <div className="h-12 w-9 shrink-0 overflow-hidden rounded bg-neutral-100 dark:bg-neutral-800">
-                    {c.imageUrl ? (
+                    {/* The checklist was fetched from a third-party API and stored verbatim. */}
+                    {httpUrl(c.imageUrl) ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={c.imageUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+                      <img src={httpUrl(c.imageUrl)!} alt="" className="h-full w-full object-cover" loading="lazy" />
                     ) : null}
                   </div>
                   <div className="min-w-0 flex-1">

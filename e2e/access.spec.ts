@@ -30,6 +30,22 @@ test.describe("access guards", () => {
     expect(res.status()).toBe(403);
   });
 
+  test("every response carries the security headers", async ({ request }) => {
+    const page = await request.get("/", { headers: { "sec-fetch-site": "same-origin" } });
+    const csp = page.headers()["content-security-policy"] ?? "";
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    // Card art and price-source links come from third-party https hosts.
+    expect(csp).toContain("img-src 'self' https: data: blob:");
+    expect(page.headers()["x-content-type-options"]).toBe("nosniff");
+    expect(page.headers()["referrer-policy"]).toBe("no-referrer");
+    expect(page.headers()["x-frame-options"]).toBe("DENY");
+
+    // Uploaded bytes are served from this origin, so they must not be sniffed.
+    const photo = await request.get("/api/uploads/00000000-0000-4000-8000-000000000000.jpg");
+    expect(photo.headers()["x-content-type-options"]).toBe("nosniff");
+  });
+
   test("the app's own requests are unaffected", async ({ request }) => {
     expect((await request.get("/api/cards", { headers: { "sec-fetch-site": "same-origin" } })).status()).toBe(200);
     // A write reaches the route: the 400 is the route's own validation, not the guard.

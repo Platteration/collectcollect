@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { imageSrc, money, when } from "@/lib/format";
+import { httpUrl, imageSrc, money, when } from "@/lib/format";
 import { GAMES, GRADING_STATUSES, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Sale, type Settings } from "@/lib/types";
 import { gradingVerdict, isReadyToGrade, outlookSeries } from "@/lib/analytics";
 import { OutlookChart } from "./charts/OutlookChart";
@@ -188,8 +188,8 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             <CardArt src={src} name={card.name} />
           )}
         </div>
-        {card.imagePath && card.referenceImageUrl && (
-          <a href={card.referenceImageUrl} target="_blank" rel="noreferrer" className="block text-xs text-neutral-500 underline">
+        {card.imagePath && httpUrl(card.referenceImageUrl) && (
+          <a href={httpUrl(card.referenceImageUrl)!} target="_blank" rel="noreferrer" className="block text-xs text-neutral-500 underline">
             Reference image from price source
           </a>
         )}

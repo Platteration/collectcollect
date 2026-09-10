@@ -16,6 +16,18 @@ test.describe("password gate", () => {
     await expect(page.getByRole("link", { name: "Portfolio" })).toBeVisible();
   });
 
+  test("the login page shows nothing but the login form", async ({ page }) => {
+    await page.goto("/login");
+    // The nav would offer links that bounce straight back here, a sign-out
+    // button, and the number of unread alerts in a collection nobody has
+    // opened yet.
+    for (const link of ["Portfolio", "Collection", "Sets", "Grading", "Alerts", "Report", "Settings"]) {
+      await expect(page.getByRole("link", { name: link })).toHaveCount(0);
+    }
+    await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);
+    await expect(page.getByLabel("Password")).toBeVisible();
+  });
+
   test("an API call without a session is refused", async ({ request }) => {
     expect((await request.get("/api/cards")).status()).toBe(401);
   });

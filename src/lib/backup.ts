@@ -89,8 +89,36 @@ async function* fileChunks(file: string): AsyncGenerator<Uint8Array> {
   }
 }
 
+/** Every `replaced-<timestamp>` folder a restore left behind, and what they cost. */
+export function replacedCollections(): { folders: string[]; bytes: number } {
+  const root = dataDir();
+  const folders = (fs.existsSync(root) ? fs.readdirSync(root, { withFileTypes: true }) : [])
+    .filter((e) => e.isDirectory() && e.name.startsWith("replaced-"))
+    .map((e) => e.name)
+    .sort();
+  let bytes = 0;
+  for (const name of folders) bytes += directoryBytes(path.join(root, name));
+  return { folders, bytes };
+}
+
+function directoryBytes(dir: string): number {
+  let total = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) total += directoryBytes(full);
+    else if (entry.isFile()) total += fs.statSync(full).size;
+  }
+  return total;
+}
+
 /** A quick description of what a backup would contain, for the Settings page. */
-export function backupSummary(): { photos: number; databaseBytes: number; photoBytes: number } {
+export function backupSummary(): {
+  photos: number;
+  databaseBytes: number;
+  photoBytes: number;
+  /** What previous restores are still holding on to; nothing removes these on its own. */
+  replaced: { folders: number; bytes: number };
+} {
   const uploads = uploadsDir();
   let photos = 0;
   let photoBytes = 0;
@@ -101,7 +129,8 @@ export function backupSummary(): { photos: number; databaseBytes: number; photoB
   }
   const dbFile = (getDb().pragma("database_list") as Array<{ file: string }>)[0]?.file;
   const databaseBytes = dbFile && fs.existsSync(dbFile) ? fs.statSync(dbFile).size : 0;
-  return { photos, databaseBytes, photoBytes };
+  const replaced = replacedCollections();
+  return { photos, databaseBytes, photoBytes, replaced: { folders: replaced.folders.length, bytes: replaced.bytes } };
 }
 
 
