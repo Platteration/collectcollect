@@ -1,3 +1,4 @@
+import { PROVIDERS } from "./pricing/index";
 import type { ProviderStatus } from "./types";
 
 /**
@@ -5,7 +6,7 @@ import type { ProviderStatus } from "./types";
  *
  * Every source is listed whether or not it is usable, and one that is not says
  * why. A price source quietly missing from the list would read as "there is no
- * such thing", which is a worse answer than "not wired up yet".
+ * such thing", which is a worse answer than "needs a key".
  */
 export function providerStatuses(): ProviderStatus[] {
   return [
@@ -16,26 +17,12 @@ export function providerStatuses(): ProviderStatus[] {
       optional: false,
       note: "A price you type in overrides every source, on that item.",
     },
-    {
-      id: "steam",
-      label: "Steam Community Market",
-      configured: false,
-      optional: true,
-      note: "Not wired up yet. Needs no key, but is rate limited to roughly twenty requests a minute.",
-    },
-    {
-      id: "skinport",
-      label: "Skinport",
-      configured: false,
-      optional: true,
-      note: "Not wired up yet. Returns the whole catalogue in one call, which suits a large inventory.",
-    },
-    {
-      id: "csfloat",
-      label: "CSFloat",
-      configured: false,
-      optional: true,
-      note: "Not wired up yet. Also the only source for the float of an item you have not inspected.",
-    },
+    ...PROVIDERS.map((provider) => ({
+      id: provider.id,
+      label: provider.label,
+      configured: provider.isConfigured(),
+      optional: provider.optional,
+      note: provider.note,
+    })),
   ];
 }

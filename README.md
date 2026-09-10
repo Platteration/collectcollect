@@ -249,11 +249,37 @@ Steam sends neither the float nor the pattern seed — those need an item's
 inspect link resolved by a float service — so both stay blank rather than
 showing a zero, which would read as a pristine Factory New.
 
-What is not there yet: prices come from a number you type in, because the market
-providers (Steam, Skinport, CSFloat) and the cross-market spread view are still
-to come. Nothing estimates a price from a similar item, so an item nobody has
-priced reads as "not priced" rather than as a number that looks measured and is
-not.
+**Where to sell** is the app's reason to exist. For each item it works out what
+you would actually receive on each market, after that market's cut, and ranks
+them — with one rule it never breaks:
+
+> Steam is never compared against the others. It is where most CS2 trading
+> happens and it usually shows the highest number, but what it pays is wallet
+> funds that cannot be withdrawn. Ranking it against markets that pay money on
+> net price alone would point you somewhere you would not be paid, so the two
+> are listed apart and stay apart.
+
+Trade locks are the other half of it. A difference you cannot act on for six
+days is not a difference, so a locked item says so and its money is left out of
+the total the page says you could realise today. And an item only one market
+lists is reported as "nothing to compare" rather than being given a spread of
+zero, which would read as a measurement.
+
+The amount threshold in Settings is measured against the whole holding rather
+than one copy: nine cents each across thirty-five cases is three dollars, and
+it is one listing either way. The percentage stays per copy, where it means
+something.
+
+**Prices** come from Skinport and Steam, with CSFloat if you give it a key —
+and from you, if you type one in, which overrides all of them on that item. The
+two shapes are quite different, which the code is built around: Skinport
+publishes its whole catalogue in one response, so a refresh loads it once and
+every lookup reads from that; Steam answers one item at a time, about twenty
+times a minute, behind a rate limit shared across the process. Nothing
+estimates a price from a similar item or a neighbouring wear tier, so an item
+nobody is listing reads as "not priced" rather than as a number that looks
+measured and is not — and a refresh that found nothing is never written over an
+item's last known value.
 
 **Password.** Set `SKINS_APP_PASSWORD` — its own variable, and its own cookie.
 Cookies are scoped to a host and not to a port, so two of these apps served from

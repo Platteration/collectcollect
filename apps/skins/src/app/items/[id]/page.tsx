@@ -6,8 +6,12 @@ import { getItem, isTradeLocked, listSnapshots } from "@/lib/items";
 import { listLots } from "@/lib/acquisitions";
 import { listSalesForItem } from "@/lib/sales";
 import { valueOf } from "@/lib/valuation";
+import { getSettings } from "@/lib/settings";
+import { proceedsByMarket } from "@/lib/pricing/index";
 import { CATEGORIES, EXTERIORS, RARITIES } from "@/lib/types";
 import { FloatBar } from "@/components/FloatBar";
+import { PricePanel } from "@/components/PricePanel";
+import { Spread } from "@/components/Spread";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +26,7 @@ export default async function ItemPage({ params }: PageProps<"/items/[id]">) {
   const sales = listSalesForItem(item.id);
   const rarity = item.rarity ? RARITIES[item.rarity] : null;
   const locked = isTradeLocked(item);
+  const { cash, wallet } = proceedsByMarket(snapshots[0]?.summary.quotes ?? [], getSettings());
 
   return (
     <div
@@ -75,6 +80,10 @@ export default async function ItemPage({ params }: PageProps<"/items/[id]">) {
           )}
         </div>
       </header>
+
+      <PricePanel item={item} summary={snapshots[0]?.summary ?? null} />
+
+      <Spread cash={cash} wallet={wallet} quantity={item.quantity} lockedUntil={locked ? item.tradableAfter : null} />
 
       {item.floatValue !== null && (
         <section className="card-surface p-4">

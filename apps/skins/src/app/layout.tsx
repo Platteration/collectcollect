@@ -3,6 +3,7 @@ import { Barlow_Condensed } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 import { authEnabled } from "@/lib/auth";
+import { unreadCount } from "@/lib/alerts";
 import { SkinsTabBar } from "@/components/TabBar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { SignOut } from "@collectcollect/core/components/SignOut";
@@ -41,11 +42,14 @@ const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("theme")||"syst
 const NAV = [
   { href: "/", label: "Portfolio", icon: "▲" },
   { href: "/inventory", label: "Inventory", icon: "▦" },
+  { href: "/spread", label: "Where to sell", icon: "⇄" },
+  { href: "/alerts", label: "Alerts", icon: "◉" },
   { href: "/import", label: "Import", icon: "↧" },
   { href: "/settings", label: "Settings", icon: "⚙" },
 ] as const;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
+  const unread = unreadCount();
   return (
     <html lang="en" data-theme="light" className={`${display.variable} h-full antialiased`} suppressHydrationWarning>
       <head>
@@ -69,6 +73,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               {NAV.map((item) => (
                 <Link key={item.href} href={item.href} className="rounded-md px-2 py-1.5 hover:bg-[var(--surface-raised)] lg:px-3">
                   {item.label}
+                  {item.href === "/alerts" && unread > 0 && (
+                    <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--chart-bad)] px-1.5 text-xs font-medium text-white">
+                      {unread > 99 ? "99+" : unread}
+                    </span>
+                  )}
                 </Link>
               ))}
             </div>
@@ -85,7 +94,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
 
         <main className="safe-x mx-auto w-full max-w-6xl flex-1 py-6 pb-24 md:pb-6">{children}</main>
 
-        <SkinsTabBar items={NAV.map(({ href, label, icon }) => ({ href, label, icon }))} />
+        <SkinsTabBar items={NAV.map(({ href, label, icon }) => ({ href, label, icon }))} unread={unread} />
 
         <footer className="safe-x hidden py-6 text-center text-xs md:block" style={{ color: "var(--muted)" }}>
           Prices are market estimates and change constantly. Steam proceeds are wallet funds and cannot be withdrawn.
