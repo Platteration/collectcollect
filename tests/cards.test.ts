@@ -222,3 +222,21 @@ describe("what the repository refuses and what it matches", () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM alerts").get()).toEqual({ n: 0 });
   });
 });
+
+describe("the order a collection comes back in", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("is stable for cards saved in the same instant", () => {
+    // Timestamps only go down to the millisecond, so several cards created in
+    // one tick share one; without a tiebreaker their order is up to SQLite.
+    const made = Array.from({ length: 6 }, (_, i) => createCard({ game: "pokemon", name: `Same tick ${i}` }));
+    const stamps = new Set(made.map((c) => c.updatedAt));
+    const newestFirst = [...made].map((c) => c.id).reverse();
+    for (let run = 0; run < 3; run++) {
+      expect(listCards().map((c) => c.id)).toEqual(newestFirst);
+    }
+    // The test only means something if they really did share a timestamp.
+    expect(stamps.size).toBeLessThan(made.length);
+  });
+});
+

@@ -52,7 +52,20 @@ export const scryfallProvider: PriceProvider = {
     const variants: Record<string, number> = {};
     if (usd) variants["Non-foil"] = round2(usd);
     if (usdFoil) variants["Foil"] = round2(usdFoil);
-    const chosen = foil ? (usdFoil ?? usd) : (usd ?? usdFoil);
+    // Which price was actually taken, so the quote can say so. Falling back to
+    // the other printing is fine; calling a foil price "Non-foil" is not.
+    const pick = foil
+      ? usdFoil
+        ? { value: usdFoil, label: "Foil" }
+        : usd
+          ? { value: usd, label: "Non-foil" }
+          : null
+      : usd
+        ? { value: usd, label: "Non-foil" }
+        : usdFoil
+          ? { value: usdFoil, label: "Foil" }
+          : null;
+    const chosen = pick?.value ?? null;
     const fetchedAt = new Date().toISOString();
     const detail = `${card.set_name} (${card.set.toUpperCase()}) · #${card.collector_number}${card.rarity ? ` · ${card.rarity}` : ""}`;
     const quotes: PriceQuote[] = [
@@ -62,7 +75,7 @@ export const scryfallProvider: PriceProvider = {
         currency: "USD",
         url: card.scryfall_uri ?? null,
         matchedName: card.name,
-        matchedDetail: `${detail}${chosen ? ` · ${foil && usdFoil ? "Foil" : "Non-foil"}` : ""}`,
+        matchedDetail: `${detail}${pick ? ` · ${pick.label}` : ""}`,
         ungraded: chosen ? round2(chosen) : null,
         ungradedVariants: variants,
         graded: {},

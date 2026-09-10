@@ -176,3 +176,44 @@ describe("PriceCharting provider", () => {
     expect(quotes[0].ungraded).toBe(260);
   });
 });
+
+describe("which printing a Magic price is for", () => {
+  it("says foil when the foil price is the only one there is", async () => {
+    const card = {
+      id: "abc",
+      name: "Lightning Bolt",
+      set: "2xm",
+      set_name: "Double Masters",
+      collector_number: "129",
+      rarity: "uncommon",
+      prices: { usd: null, usd_foil: "42.00" },
+      scryfall_uri: "https://scryfall.example/bolt",
+    };
+    const fetchImpl = fakeFetch([["api.scryfall.com", card]]);
+    // Asking for a non-foil copy, but only the foil has a price.
+    const quotes = await scryfallProvider.lookup({ game: "mtg", name: "Lightning Bolt" }, fetchImpl);
+    expect(quotes[0]).toMatchObject({ ungraded: 42, ungradedVariants: { Foil: 42 } });
+    expect(quotes[0].matchedDetail).toContain("Foil");
+    expect(quotes[0].matchedDetail).not.toContain("Non-foil");
+  });
+
+  it("prefers the printing that was asked for", async () => {
+    const card = {
+      id: "abc",
+      name: "Lightning Bolt",
+      set: "2xm",
+      set_name: "Double Masters",
+      collector_number: "129",
+      prices: { usd: "3.00", usd_foil: "42.00" },
+    };
+    const fetchImpl = fakeFetch([["api.scryfall.com", card]]);
+    const plain = await scryfallProvider.lookup({ game: "mtg", name: "Lightning Bolt" }, fetchImpl);
+    expect(plain[0]).toMatchObject({ ungraded: 3 });
+    expect(plain[0].matchedDetail).toContain("Non-foil");
+
+    const foil = await scryfallProvider.lookup({ game: "mtg", name: "Lightning Bolt", variant: "foil" }, fetchImpl);
+    expect(foil[0]).toMatchObject({ ungraded: 42 });
+    expect(foil[0].matchedDetail).toContain("Foil");
+  });
+});
+

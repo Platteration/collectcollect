@@ -84,7 +84,7 @@ function rowToCard(row: CardRow): CardRecord {
     identification: parseJson<Identification | null>(row.identification, null),
     manualUngraded: row.manual_ungraded,
     manualGraded: parseJson(row.manual_graded, {}),
-    gradingStatus: (row.grading_status in GRADING_STATUSES ? row.grading_status : "undecided") as GradingStatus,
+    gradingStatus: (Object.hasOwn(GRADING_STATUSES, row.grading_status) ? row.grading_status : "undecided") as GradingStatus,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -289,7 +289,9 @@ export function findSimilar(input: { game: Game; name: string; cardNumber?: stri
   const name = input.name.trim().toLowerCase();
   if (!name) return [];
   const rows = getDb()
-    .prepare("SELECT * FROM cards WHERE game = ? AND lower(trim(name)) = ? ORDER BY updated_at DESC")
+    // Timestamps are only millisecond-resolution, so two cards saved in the
+    // same tick would otherwise come back in whatever order SQLite fancied.
+    .prepare("SELECT * FROM cards WHERE game = ? AND lower(trim(name)) = ? ORDER BY updated_at DESC, id DESC")
     .all(input.game, name) as CardRow[];
   const num = normalizeNumber(input.cardNumber);
   const set = normalizeSet(input.setName);
@@ -393,7 +395,7 @@ export function listCards(opts: ListOptions = {}): CardRecord[] {
       params.location = opts.location;
     }
   }
-  const sql = `SELECT * FROM cards ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY updated_at DESC`;
+  const sql = `SELECT * FROM cards ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY updated_at DESC, id DESC`;
   return (getDb().prepare(sql).all(params) as CardRow[]).map(rowToCard);
 }
 
