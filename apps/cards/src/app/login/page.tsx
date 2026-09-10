@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { authEnabled } from "@/lib/auth";
-import { LoginForm } from "@/components/LoginForm";
+import { LoginForm } from "@collectcollect/core/components/LoginForm";
 
 export const dynamic = "force-dynamic";
 

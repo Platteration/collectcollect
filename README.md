@@ -232,11 +232,32 @@ The float also decides the wear tier rather than sitting beside it: Factory New
 through Battle-Scarred are just bands on the float scale, so where an import
 claims a tier the float contradicts, the float wins.
 
-What is not there yet: prices come from a number you type in, because the
-market providers (Steam, Skinport, CSFloat), the Steam inventory import and the
-cross-market spread view are still to come. Nothing estimates a price from a
-similar item, so an item nobody has priced reads as "not priced" rather than as
-a number that looks measured and is not.
+**Getting an inventory in.** Three ways, and none of them writes anything until
+you have seen what would arrive:
+
+- **From Steam**, by SteamID64, for any inventory set to Public. An import is a
+  statement of what you hold *now* rather than a pile of new purchases, so
+  running it again on an unchanged inventory changes nothing; a stack that has
+  grown gains a purchase of unknown cost, one that has shrunk gives up its
+  newest lots, and an object Steam stopped listing is named rather than deleted.
+- **From a spreadsheet**, which is the one that knows what you paid. Steam does
+  not, so a file of your own purchases is what turns an inventory into a record.
+- **One at a time**, where pasting the market hash name fills in the kind, the
+  gun, the finish, the wear tier and the StatTrak flag.
+
+Steam sends neither the float nor the pattern seed — those need an item's
+inspect link resolved by a float service — so both stay blank rather than
+showing a zero, which would read as a pristine Factory New.
+
+What is not there yet: prices come from a number you type in, because the market
+providers (Steam, Skinport, CSFloat) and the cross-market spread view are still
+to come. Nothing estimates a price from a similar item, so an item nobody has
+priced reads as "not priced" rather than as a number that looks measured and is
+not.
+
+**Password.** Set `SKINS_APP_PASSWORD` — its own variable, and its own cookie.
+Cookies are scoped to a host and not to a port, so two of these apps served from
+localhost would otherwise hand each other their sessions.
 
 Its plain-text mirror works exactly like the card app's, under
 `<data>/collection/items/`, and carries the float, the pattern seed, the

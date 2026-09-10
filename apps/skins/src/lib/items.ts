@@ -481,6 +481,72 @@ export function intakeItem(input: ItemInput): IntakeOutcome {
   }
 }
 
+export type SyncOutcome =
+  | { result: "created"; item: ItemRecord }
+  | { result: "updated"; item: ItemRecord }
+  | { result: "increased"; item: ItemRecord; by: number }
+  | { result: "decreased"; item: ItemRecord; by: number }
+  | { result: "unchanged"; item: ItemRecord };
+
+/**
+ * Take an item from a reading of a whole inventory, where the count is the
+ * truth rather than an addition.
+ *
+ * This is the difference between "I bought three more cases" and "Steam says I
+ * have twenty". `intakeItem` is right for the first and catastrophic for the
+ * second: reading the same inventory twice would double every stack, and a
+ * whole-inventory import is exactly the thing people run more than once.
+ *
+ * So a stack is reconciled to what the source says. More than is held is a
+ * purchase nobody recorded, and gets a lot with an unknown cost; fewer means
+ * copies left by some route this app never saw, and the newest lots give them
+ * up. A unique object needs none of this — its asset id already says whether
+ * it is the same object — so it is simply updated.
+ */
+export function syncFromInventory(input: ItemInput): SyncOutcome {
+  const clean = normalizeInput(input);
+  const run = getDb().transaction((): SyncOutcome => {
+    if (clean.assetId) {
+      const same = findByAssetId(clean.assetId);
+      if (same) return { result: "updated", item: updateItem(same.id, input)! };
+    }
+    if (!clean.stackable) return { result: "created", item: createItem(input) };
+
+    const stack = findStack(clean.marketHashName);
+    if (!stack) return { result: "created", item: createItem(input) };
+
+    const wanted = clean.quantity;
+    if (wanted === stack.quantity) return { result: "unchanged", item: stack };
+    if (wanted > stack.quantity) {
+      addLot(stack.id, { quantity: wanted - stack.quantity, unitCost: null, source: "steam" });
+      return { result: "increased", item: updateItem(stack.id, { quantity: wanted })!, by: wanted - stack.quantity };
+    }
+    return { result: "decreased", item: updateItem(stack.id, { quantity: wanted })!, by: stack.quantity - wanted };
+  });
+  try {
+    const outcome = run();
+    flushDeferredMirror();
+    return outcome;
+  } catch (e) {
+    discardDeferredMirror();
+    throw e;
+  }
+}
+
+/**
+ * Unique objects this app holds that a reading of the inventory did not
+ * mention — traded away, sold elsewhere, or moved into a storage unit, which
+ * the public endpoint does not cover.
+ *
+ * Reported rather than removed. This app's whole point is not losing the record
+ * of what something cost, and "Steam did not mention it" is far too weak a
+ * reason to throw that away.
+ */
+export function itemsMissingFrom(assetIds: Iterable<string>): ItemRecord[] {
+  const seen = new Set(assetIds);
+  return listItems().filter((item) => item.assetId !== null && item.quantity > 0 && !seen.has(item.assetId));
+}
+
 export function deleteItem(id: number): boolean {
   const gone = getDb().prepare("DELETE FROM items WHERE id = ?").run(id).changes > 0;
   if (gone) unmirrorItem(id);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api } from "@/lib/api-client";
+import { api } from "../api-client";
 
 /**
  * Resolve ?next= against this origin and refuse anything that leaves it, so a
@@ -18,7 +18,7 @@ export function safeNext(next: string, origin = window.location.origin): string 
   }
 }
 
-export function LoginForm({ next }: { next: string }) {
+export function LoginForm({ next, note = "This collection is password protected." }: { next: string; note?: string }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +43,9 @@ export function LoginForm({ next }: { next: string }) {
     <div className="mx-auto mt-16 max-w-sm">
       <form onSubmit={submit} className="card-surface space-y-3 p-6">
         <h1 className="font-display text-2xl font-semibold uppercase tracking-wide">Sign in</h1>
-        <p className="text-sm text-neutral-500">This collection is password protected.</p>
+        <p className="text-sm" style={{ color: "var(--muted)" }}>
+          {note}
+        </p>
         <label className="block">
           <span className="label">Password</span>
           <input
@@ -55,7 +57,11 @@ export function LoginForm({ next }: { next: string }) {
             autoComplete="current-password"
           />
         </label>
-        {error && <p className="text-sm text-red-700 dark:text-red-300">{error}</p>}
+        {error && (
+          <p className="text-sm" style={{ color: "var(--chart-bad-text)" }}>
+            {error}
+          </p>
+        )}
         <button type="submit" className="btn-primary w-full" disabled={busy || !password}>
           {busy ? "Checking…" : "Sign in"}
         </button>

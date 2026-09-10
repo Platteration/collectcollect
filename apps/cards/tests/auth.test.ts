@@ -53,7 +53,7 @@ describe("optional password gate", () => {
 
 describe("login redirect target", () => {
   it("only ever returns a path on this origin", async () => {
-    const { safeNext } = await import("@/components/LoginForm");
+    const { safeNext } = await import("@collectcollect/core/components/LoginForm");
     const origin = "https://cards.example";
     expect(safeNext("/collection?q=char", origin)).toBe("/collection?q=char");
     expect(safeNext("/", origin)).toBe("/");

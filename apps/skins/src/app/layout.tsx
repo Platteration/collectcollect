@@ -2,8 +2,10 @@ import type { Metadata, Viewport } from "next";
 import { Barlow_Condensed } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
+import { authEnabled } from "@/lib/auth";
 import { SkinsTabBar } from "@/components/TabBar";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { SignOut } from "@collectcollect/core/components/SignOut";
 
 // Condensed display face for the hero value, item names and headings.
 const display = Barlow_Condensed({
@@ -39,7 +41,7 @@ const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("theme")||"syst
 const NAV = [
   { href: "/", label: "Portfolio", icon: "▲" },
   { href: "/inventory", label: "Inventory", icon: "▦" },
-  { href: "/alerts", label: "Alerts", icon: "◉" },
+  { href: "/import", label: "Import", icon: "↧" },
   { href: "/settings", label: "Settings", icon: "⚙" },
 ] as const;
 
@@ -73,13 +75,17 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
 
             <div className="ml-auto flex items-center gap-2 md:ml-0">
               <ThemeToggle />
+              {authEnabled() && <SignOut />}
+              <Link href="/add" className="btn-primary whitespace-nowrap">
+                + Add
+              </Link>
             </div>
           </nav>
         </header>
 
         <main className="safe-x mx-auto w-full max-w-6xl flex-1 py-6 pb-24 md:pb-6">{children}</main>
 
-        <SkinsTabBar items={NAV.map(({ href, label, icon }) => ({ href, label, icon }))} unread={0} />
+        <SkinsTabBar items={NAV.map(({ href, label, icon }) => ({ href, label, icon }))} />
 
         <footer className="safe-x hidden py-6 text-center text-xs md:block" style={{ color: "var(--muted)" }}>
           Prices are market estimates and change constantly. Steam proceeds are wallet funds and cannot be withdrawn.

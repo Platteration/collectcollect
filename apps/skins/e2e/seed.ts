@@ -1,14 +1,18 @@
 import { addAcquisition, addSnapshot, createItem } from "../src/lib/items";
 import { flushCollection } from "../src/lib/markdown/mirror";
 import { recordSale } from "../src/lib/sales";
-import { E2E_DATA_DIR } from "./data-dir";
+import { READ_DATA_DIR } from "./data-dir";
 
 /**
  * Build the inventory the specs read.
  *
- * There is no intake API yet, so this goes through the repository directly —
- * which also means the specs exercise the same write path the app will, rather
- * than a fixture shaped to suit them.
+ * This goes through the repository rather than the API, because it has to run
+ * before the server does — which also means the fixture is built by the same
+ * code paths the app writes through, rather than shaped to suit the specs.
+ *
+ * Only the reading inventory is seeded. The specs that add and import get an
+ * empty one of their own, so what they write cannot move the totals the
+ * reading specs are held to.
  *
  * Nothing here assumes it runs before the server: the directory is new every
  * run, and both sides open the same file lazily, so whichever starts first the
@@ -17,7 +21,7 @@ import { E2E_DATA_DIR } from "./data-dir";
  * probe against it.
  */
 export default async function seed() {
-  process.env.SKINS_DATA_DIR = E2E_DATA_DIR;
+  process.env.SKINS_DATA_DIR = READ_DATA_DIR;
 
   const price = (id: number, at: string, value: number) =>
     addSnapshot(id, {

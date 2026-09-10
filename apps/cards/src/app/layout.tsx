@@ -4,7 +4,7 @@ import Link from "next/link";
 import "./globals.css";
 import { unreadCount } from "@/lib/alerts";
 import { authEnabled } from "@/lib/auth";
-import { SignOut } from "@/components/SignOut";
+import { SignOut } from "@collectcollect/core/components/SignOut";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { TabBar } from "@/components/TabBar";
 import { ServiceWorker } from "@/components/ServiceWorker";
