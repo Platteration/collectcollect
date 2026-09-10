@@ -1,8 +1,14 @@
-node_modules
-.next
-data
+# Patterns are matched against the whole path, so anything that can appear
+# inside an app as well as at the root needs the ** prefix.
+**/node_modules
+**/.next
+**/data
 .git
 *.md
 .env*
 !.env.example
-tests
+**/tests
+**/e2e
+**/playwright.config.ts
+**/test-results
+**/playwright-report

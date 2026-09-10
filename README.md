@@ -18,7 +18,9 @@ cp .env.example .env      # add ANTHROPIC_API_KEY (and optional price-source key
 npm run dev               # http://localhost:3000
 ```
 
-Production: `npm run build && npm start`. Everything is stored locally in `./data` (SQLite database, uploaded photos, and a Markdown copy of the collection); set `DATA_DIR` to move it.
+Production: `npm run build && npm start`. Everything is stored locally in `apps/cards/data` (SQLite database, uploaded photos, and a Markdown copy of the collection); set `DATA_DIR` to move it.
+
+> Upgrading from a version before the app moved into `apps/cards`? Your collection is still where it was. On start the app looks for a `data` folder above itself and uses the one it finds, saying so in the log. Move it to `apps/cards/data`, or set `DATA_DIR`, to settle it permanently.
 
 Docker: `docker compose up --build` (reads `.env`, keeps data in a named volume at `/data`).
 
@@ -116,6 +118,17 @@ A small service worker makes that work and lets the shell open without a network
 
 ## Project layout
 
+The repository is an npm workspace. The card app is one workspace among
+several so that a second collectible can get its own app without either one
+inheriting the other's assumptions; root scripts fan out across all of them.
+
+```
+apps/cards/              this app
+packages/core/           code with no opinion about what is being collected
+```
+
+Inside `apps/cards`:
+
 ```
 src/app/                 Next.js App Router pages and API routes
   /                      Portfolio: hero value, change, value chart, grading outlook
@@ -167,10 +180,14 @@ npm run dev         # development server
 npm run build       # production build
 npm test            # unit tests (vitest)
 npm run e2e         # end-to-end tests (playwright, boots its own servers)
-npm run e2e:ui      # the same suite in Playwright's UI mode
 npm run typecheck   # tsc (after generating Next route types)
 npm run lint
 ```
+
+Every script above runs from the repository root and covers every workspace.
+To drive one app on its own, add `-w @collectcollect/cards` — which is how you
+reach the app-only scripts, such as `npm run e2e:ui -w @collectcollect/cards`
+for the Playwright suite in UI mode.
 
 ## Testing
 

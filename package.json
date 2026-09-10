@@ -2,36 +2,18 @@
   "name": "collectcollect",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
-    "typecheck": "next typegen && tsc --noEmit",
-    "test": "vitest run",
-    "e2e": "playwright test",
-    "e2e:ui": "playwright test --ui"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.124.0",
-    "better-sqlite3": "^13.0.3",
-    "next": "16.3.4",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "sharp": "^0.35.4",
-    "zod": "^4.5.4"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.56.1",
-    "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^9.6.0",
-    "@types/node": "^22.20.1",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.4",
-    "tailwindcss": "^4",
-    "typescript": "^5",
-    "vitest": "^5.0.0"
+    "dev": "npm run dev -w @collectcollect/cards",
+    "start": "npm run start -w @collectcollect/cards",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "e2e": "npm run e2e --workspaces --if-present",
+    "cards": "npm run dev -w @collectcollect/cards"
   }
 }

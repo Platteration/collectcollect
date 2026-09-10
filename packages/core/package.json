@@ -1,0 +1,10 @@
+{
+  "name": "@collectcollect/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Code with no opinion about what is being collected: archives, CSV, the Markdown codec, chart geometry.",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  }
+}
