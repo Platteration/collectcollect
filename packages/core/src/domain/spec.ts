@@ -25,7 +25,7 @@ export interface FieldSpec {
   key: string;
   label: string;
   type: FieldType;
-  /** enum: id -> label, in display order. */
+  /** enum: id -> label, in display order. On a list, the choices of a multi-select. */
   options?: Record<string, string>;
   /** enum: other spellings accepted on import, keyed by `headerKey` form, e.g. { ntscu: "ntsc_u" }. */
   aliases?: Record<string, string>;
@@ -444,6 +444,6 @@ export function optionLabel(field: FieldSpec | undefined, value: unknown): strin
   if (value === null || value === undefined || value === "") return "";
   if (field?.type === "enum" && field.options && Object.hasOwn(field.options, String(value))) return field.options[String(value)];
   if (field?.type === "boolean") return value ? "Yes" : "No";
-  if (Array.isArray(value)) return value.join(", ");
+  if (Array.isArray(value)) return value.map((v) => (field?.options && Object.hasOwn(field.options, String(v)) ? field.options[String(v)] : String(v))).join(", ");
   return String(value);
 }

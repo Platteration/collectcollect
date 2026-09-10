@@ -232,6 +232,24 @@ function Field({ field, value, onChange, id }: { field: FieldSpec; value: string
         </label>
       );
     case "list":
+      if (field.options) {
+        const chosen = value.split(/\n/).filter(Boolean);
+        const toggle = (k: string) => onChange((chosen.includes(k) ? chosen.filter((c) => c !== k) : [...chosen, k]).join("\n"));
+        return (
+          <fieldset className={cls}>
+            <legend className="label">{field.label}</legend>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+              {Object.entries(field.options).map(([k, v]) => (
+                <label key={k} className="flex items-center gap-1.5 text-sm">
+                  <input type="checkbox" checked={chosen.includes(k)} onChange={() => toggle(k)} />
+                  {v}
+                </label>
+              ))}
+            </div>
+            {help}
+          </fieldset>
+        );
+      }
       return (
         <label className={cls}>
           {label}

@@ -60,6 +60,18 @@ export const isoDate = (v: unknown): string | null => {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 };
 
+/** The option id an entry names, by id, label or alias; null when it is none of them. */
+export function listOptionId(field: Pick<FieldSpec, "options" | "aliases">, entry: string): string | null {
+  const options = field.options ?? {};
+  const key = entry.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (Object.hasOwn(options, entry.trim())) return entry.trim();
+  for (const [id, label] of Object.entries(options)) {
+    if (id.toLowerCase().replace(/[^a-z0-9]/g, "") === key || label.toLowerCase().replace(/[^a-z0-9]/g, "") === key) return id;
+  }
+  const alias = field.aliases?.[key];
+  return alias && Object.hasOwn(options, alias) ? alias : null;
+}
+
 export function normalizeField(field: FieldSpec, raw: unknown): unknown {
   const missing = raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "") || (Array.isArray(raw) && raw.length === 0);
   if (missing) {
@@ -102,8 +114,16 @@ export function normalizeField(field: FieldSpec, raw: unknown): unknown {
       return d;
     }
     case "list": {
-      const list = Array.isArray(raw) ? raw : String(raw).split(/[\n;|]/);
-      return list.map((v) => str(v)).filter((v): v is string => v !== null);
+      const list = (Array.isArray(raw) ? raw : String(raw).split(/[\n;|]/)).map((v) => str(v)).filter((v): v is string => v !== null);
+      if (!field.options) return list;
+      // A list with options is a multi-select: every entry has to be one of them, by id, label or alias.
+      const out: string[] = [];
+      for (const entry of list) {
+        const id = listOptionId(field, entry);
+        if (id === null) throw new Error(`Unknown ${field.label.toLowerCase()}: ${entry}`);
+        if (!out.includes(id)) out.push(id);
+      }
+      return out;
     }
     case "json":
       return raw;

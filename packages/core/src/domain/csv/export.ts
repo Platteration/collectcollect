@@ -23,7 +23,7 @@ function fieldCell(field: { type: string; options?: Record<string, string> }, va
     case "enum":
       return optionLabel(field as never, value);
     case "list":
-      return Array.isArray(value) ? value.join("; ") : String(value);
+      return Array.isArray(value) ? value.map((v) => (field.options && Object.hasOwn(field.options, String(v)) ? field.options[String(v)] : String(v))).join("; ") : String(value);
     case "json":
       return JSON.stringify(value);
     default:

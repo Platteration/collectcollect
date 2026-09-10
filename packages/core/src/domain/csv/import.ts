@@ -2,7 +2,7 @@ import { headerKey, parseCsv } from "../../csv";
 import type { Repository } from "../repository";
 import type { DomainSpec, FieldSpec, ItemInput } from "../spec";
 import { columnOf } from "../spec";
-import { bool, num, str } from "../normalize";
+import { bool, listOptionId, num, str } from "../normalize";
 
 /**
  * Reading a collection out of a spreadsheet, with the columns matched by
@@ -71,8 +71,14 @@ export function readCell(field: FieldSpec, text: string): { value: unknown; warn
     }
     case "date":
       return Number.isNaN(Date.parse(text)) ? { value: undefined, warning: `${field.label} "${text}" is not a date, so it was left out` } : { value: text.trim() };
-    case "list":
-      return { value: text.split(/[;|\n]/).map((s) => s.trim()).filter(Boolean) };
+    case "list": {
+      const entries = text.split(/[;|\n]/).map((s) => s.trim()).filter(Boolean);
+      if (!field.options) return { value: entries };
+      const ids = entries.map((e) => listOptionId(field, e));
+      const unknown = entries.filter((_, i) => ids[i] === null);
+      const value = [...new Set(ids.filter((id): id is string => id !== null))];
+      return unknown.length ? { value, warning: `${field.label} "${unknown.join(", ")}" ${unknown.length === 1 ? "was" : "were"} not recognised, so ${unknown.length === 1 ? "it was" : "they were"} left out` } : { value };
+    }
     case "json":
       try {
         return { value: JSON.parse(text) };
