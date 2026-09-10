@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import type { Engine } from "../domain/engine";
 import type { Acquisition } from "../domain/acquisitions";
 import type { ItemRecord, PriceSnapshot, PriceSummary, Sale, Settings } from "../domain/spec";
-import { conditionHolds, optionLabel } from "../domain/spec";
+import { clientFields, conditionHolds, optionLabel } from "../domain/spec";
 import { money, when } from "../format";
 import { CertCheck } from "../components/domain/CertCheck";
 import { EditItem } from "../components/domain/EditItem";
@@ -156,7 +156,7 @@ export async function ItemPage<F extends object, S extends object, X extends obj
         </section>
       )}
 
-      <EditItem fields={spec.fields} item={item as Record<string, unknown> & ItemRecord<F>} unique={unique} noun={spec.noun.singular} locations={repo.listLocations().map((l) => l.location)} />
+      <EditItem fields={clientFields(spec.fields)} item={item as Record<string, unknown> & ItemRecord<F>} unique={unique} noun={spec.noun.singular} locations={repo.listLocations().map((l) => l.location)} />
 
       {facts.length > 0 && (
         <section>

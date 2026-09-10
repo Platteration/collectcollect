@@ -60,6 +60,11 @@ export function ReportPage<F extends object, S extends object, X extends object,
             {settings.ownerName ? `${settings.ownerName} · ` : ""}
             {when(new Date().toISOString())}
           </p>
+          {spec.report.preamble?.(settings) && (
+            <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
+              {spec.report.preamble(settings)}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm print:hidden">
           {hasPrivate && (

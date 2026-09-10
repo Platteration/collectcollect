@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Engine } from "../domain/engine";
+import { clientFields } from "../domain/spec";
 import { isClaudeConfigured } from "../domain/identify";
 import { AddItemFlow } from "../components/domain/AddItemFlow";
 import { Heading } from "./shared";
@@ -21,7 +22,7 @@ export function AddPage<F extends object, S extends object, X extends object, Q>
           </>
         }
       />
-      <AddItemFlow fields={spec.fields} noun={spec.noun} canIdentify={hasIdentify && isClaudeConfigured()} hasIdentify={hasIdentify} locations={repo.listLocations().map((l) => l.location)} />
+      <AddItemFlow fields={clientFields(spec.fields)} noun={spec.noun} canIdentify={hasIdentify && isClaudeConfigured()} hasIdentify={hasIdentify} locations={repo.listLocations().map((l) => l.location)} />
     </div>
   );
 }

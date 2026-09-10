@@ -67,6 +67,8 @@ export function fillForm(fields: FieldSpec[], form: ItemFormValue, input: Record
 export function formToInput(fields: FieldSpec[], form: ItemFormValue): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const f of fields) {
+    // A hidden field is edited elsewhere; leaving it out of the patch leaves it as it is.
+    if (f.hidden) continue;
     const raw = form.fields[f.key] ?? "";
     switch (f.type) {
       case "boolean":
@@ -130,7 +132,7 @@ export function ItemForm({ fields, value, onChange, disabled, locations, unique,
   for (const f of fields) current[f.key] = f.type === "boolean" ? value.fields[f.key] === "true" : value.fields[f.key];
 
   const sections = new Map<string, FieldSpec[]>();
-  for (const f of fields) {
+  for (const f of fields.filter((f) => !f.hidden)) {
     if (!conditionHolds(f.showWhen, current)) continue;
     const key = f.section ?? "";
     sections.set(key, [...(sections.get(key) ?? []), f]);

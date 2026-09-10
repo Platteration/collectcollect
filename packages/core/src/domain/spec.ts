@@ -52,6 +52,10 @@ export interface FieldSpec {
   default?: unknown;
   /** Takes a full row in the form. */
   wide?: boolean;
+  /** Kept out of the generic form: the app edits it with its own UI (a service log, a list of entries). */
+  hidden?: boolean;
+  /** How a spreadsheet cell reads for this field, when the type's own reading is not enough (a service log written as prose). May throw. */
+  parse?(text: string): unknown;
   /** Shown on tiles and the report as an extra line. */
   summary?: boolean;
 }
@@ -405,6 +409,8 @@ export interface DomainSpec<
   };
   report: {
     title?: string;
+    /** A line under the title, e.g. the insurer and policy number from Settings. */
+    preamble?(settings: Settings<S>): string | null;
     columns: Array<{ header: string; value(item: ItemRecord<F>): string; private?: boolean }>;
     note?: string;
   };
@@ -422,6 +428,20 @@ export interface DomainSpec<
 /** The camelCase key as a snake_case column and front-matter key. */
 export function columnOf(key: string): string {
   return key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+}
+
+/**
+ * The field specs as a client component may receive them: a function (a
+ * spreadsheet parser) cannot cross into the browser, and the form has no use
+ * for it anyway.
+ */
+export function clientFields(fields: FieldSpec[]): FieldSpec[] {
+  return fields.map((f) => {
+    if (!f.parse) return f;
+    const { parse: _parse, ...rest } = f;
+    void _parse;
+    return rest;
+  });
 }
 
 export function fieldByKey(spec: Pick<DomainSpec, "fields">, key: string): FieldSpec | undefined {

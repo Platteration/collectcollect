@@ -47,6 +47,13 @@ export function aliasesFor(field: FieldSpec): string[] {
 /** Read a cell for one field; a warning explains anything assumed, a problem stops the row. */
 export function readCell(field: FieldSpec, text: string): { value: unknown; warning?: string; problem?: string } {
   if (!text.trim()) return { value: undefined };
+  if (field.parse) {
+    try {
+      return { value: field.parse(text) };
+    } catch (e) {
+      return { value: undefined, warning: `${field.label} "${text}" ${e instanceof Error ? e.message : "could not be read"}, so it was left out` };
+    }
+  }
   switch (field.type) {
     case "enum": {
       const key = headerKey(text);
