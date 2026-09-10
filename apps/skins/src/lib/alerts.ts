@@ -1,4 +1,4 @@
-import { getDb } from "./db";
+import { building, databaseExists, getDb } from "./db";
 import { money } from "@collectcollect/core/format";
 import { proceedsByMarket } from "./pricing/index";
 import type { Alert, AlertKind, ItemRecord, PriceSummary, Settings } from "./types";
@@ -54,12 +54,20 @@ export function listAlerts(limit = 100): Alert[] {
   ).map(rowToAlert);
 }
 
+/**
+ * How many alerts have not been read.
+ *
+ * The header asks for this on every page, which makes it the one database call
+ * that reaches a build: Next prerenders the not-found page, and this layout
+ * comes with it. So it does not ask while building, and it does not ask about
+ * a collection that is not there — an inventory that does not exist has no
+ * unread alerts. A real read that fails is still not worth a blank page.
+ */
 export function unreadCount(): number {
+  if (building() || !databaseExists()) return 0;
   try {
     return (getDb().prepare("SELECT COUNT(*) AS n FROM alerts WHERE read_at IS NULL").get() as { n: number }).n;
   } catch {
-    // The header asks for this on every page, including before the database
-    // exists. A count is not worth a blank page.
     return 0;
   }
 }

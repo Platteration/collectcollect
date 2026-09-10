@@ -1,6 +1,14 @@
+# Two apps, two images, two volumes. They share code and nothing else: separate
+# databases, separate directories, separate passwords.
+#
+#   docker compose up --build            # both
+#   docker compose up --build cards      # just the card app
 services:
-  collectcollect:
-    build: .
+  cards:
+    build:
+      context: .
+      args:
+        APP: cards
     ports:
       - "3000:3000"
     env_file:
@@ -9,5 +17,19 @@ services:
       - collectcollect-data:/data
     restart: unless-stopped
 
+  skins:
+    build:
+      context: .
+      args:
+        APP: skins
+    ports:
+      - "3001:3000"
+    env_file:
+      - .env
+    volumes:
+      - collectcollect-skins-data:/data
+    restart: unless-stopped
+
 volumes:
   collectcollect-data:
+  collectcollect-skins-data:

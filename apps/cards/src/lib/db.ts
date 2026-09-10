@@ -249,6 +249,28 @@ export function databaseFile(): string {
   return process.env.DATABASE_FILE ?? path.join(dataDir(), DB_FILE);
 }
 
+/**
+ * Whether `next build` is running.
+ *
+ * Nothing should read a collection while building — every page that needs data
+ * is rendered on demand — and reading one leaves an empty database beside the
+ * source on any machine that does not have one.
+ */
+export function building(): boolean {
+  return process.env.NEXT_PHASE === "phase-production-build";
+}
+
+/**
+ * Whether there is a collection to read without bringing one into existence.
+ *
+ * An open connection counts, which is what a test that swapped in an in-memory
+ * database has; otherwise it is whether the file is there. Opening one is what
+ * creates it, so anything that only wants to look has to ask first.
+ */
+export function databaseExists(): boolean {
+  return Boolean(globalForDb.__collectcollectDb) || fs.existsSync(databaseFile());
+}
+
 export function getDb(): Database.Database {
   if (globalForDb.__collectcollectLocked) {
     // A restore is swapping the file out; opening it now would either cache a

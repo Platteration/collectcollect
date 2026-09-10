@@ -143,6 +143,31 @@ export function databaseFile(): string {
   return process.env.SKINS_DATABASE_FILE ?? path.join(dataDir(), DB_FILE);
 }
 
+/**
+ * Whether `next build` is running.
+ *
+ * Nothing should read a collection while building — every page that needs data
+ * is rendered on demand — and reading one has two costs that are easy to miss.
+ * On a machine with no collection it creates an empty database beside the
+ * source; on a machine with one, the file tracer sees the read and packages
+ * that collection into the standalone output, and from there into any image
+ * built from it.
+ */
+export function building(): boolean {
+  return process.env.NEXT_PHASE === "phase-production-build";
+}
+
+/**
+ * Whether there is an inventory to read without bringing one into existence.
+ *
+ * An open connection counts, which is what a test that swapped in an in-memory
+ * database has; otherwise it is whether the file is there. Opening one is what
+ * creates it, so anything that only wants to look has to ask first.
+ */
+export function databaseExists(): boolean {
+  return Boolean(globalForDb.__skinsDb) || fs.existsSync(databaseFile());
+}
+
 export function getDb(): Database.Database {
   if (globalForDb.__skinsLocked) {
     // A restore is swapping the file out; opening it now would either cache a

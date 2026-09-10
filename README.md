@@ -22,7 +22,15 @@ Production: `npm run build && npm start`. Everything is stored locally in `apps/
 
 > Upgrading from a version before the app moved into `apps/cards`? Your collection is still where it was. On start the app looks for a `data` folder above itself and uses the one it finds, saying so in the log. Move it to `apps/cards/data`, or set `DATA_DIR`, to settle it permanently.
 
-Docker: `docker compose up --build` (reads `.env`, keeps data in a named volume at `/data`).
+Docker: `docker compose up --build` brings up both apps — the card app on 3000
+and the skins app on 3001 — each with its own image and its own named volume at
+`/data`. `docker compose up --build cards` brings up just one. To build an image
+directly, pick the app with a build argument:
+
+```bash
+docker build -t collectcollect .                            # the card app
+docker build -t collectcollect-skins --build-arg APP=skins .
+```
 
 **Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach. Failed attempts are rate limited, and changing the password invalidates existing sessions.
 

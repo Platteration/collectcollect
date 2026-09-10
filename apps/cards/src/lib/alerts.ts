@@ -1,4 +1,4 @@
-import { getDb } from "./db";
+import { building, databaseExists, getDb } from "./db";
 import { gradingVerdict, isReadyToGrade, outlookSeries } from "./analytics";
 import { money } from "./format";
 import type { Alert, AlertKind, CardRecord, PriceSnapshot, PriceSummary, Settings } from "./types";
@@ -41,7 +41,17 @@ export function listAlerts(limit = 100): Alert[] {
   return (getDb().prepare("SELECT * FROM alerts ORDER BY created_at DESC, id DESC LIMIT ?").all(limit) as AlertRow[]).map(rowToAlert);
 }
 
+/**
+ * How many alerts have not been read.
+ *
+ * The header asks for this on every page, which makes it the one database call
+ * that reaches a build: Next prerenders the offline and not-found pages, and
+ * this layout comes with them. So it does not ask while building, and it does
+ * not ask about a collection that is not there — which otherwise leaves an
+ * empty database beside the source every time anyone builds.
+ */
 export function unreadCount(): number {
+  if (building() || !databaseExists()) return 0;
   const row = getDb().prepare("SELECT COUNT(*) AS n FROM alerts WHERE read_at IS NULL").get() as { n: number };
   return row.n;
 }
