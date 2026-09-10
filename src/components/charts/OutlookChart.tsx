@@ -44,6 +44,15 @@ export function OutlookChart({ series, compact = false }: Props) {
   const active = index !== null ? series[index] : null;
   const last = series[series.length - 1];
   const single = series.length === 1;
+  const description =
+    `Grading outlook: gem-mint and mid-grade outcomes versus the raw price over time. ` +
+    `Latest ${last.maxLabel} ${money(last.max)}, ${last.minLabel} ${money(last.min)}, raw ${money(last.raw)}, ` +
+    `upside after the ${money(last.fee)} fee ${money(last.upside)}.` +
+    (compact ? "" : " Use the left and right arrow keys to read each point.");
+  const spoken = active
+    ? `${shortDate(active.t, true)}: ${active.maxLabel} ${money(active.max)}, ${active.minLabel} ${money(active.min)}, ` +
+      `raw ${money(active.raw)}, upside after the ${money(active.fee)} fee ${money(active.upside)}.`
+    : "";
 
   return (
     <div ref={ref} className="relative">
@@ -53,7 +62,7 @@ export function OutlookChart({ series, compact = false }: Props) {
         height={layout.height}
         className="block h-auto w-full touch-none select-none rounded-md outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
         role="img"
-        aria-label="Grading outlook: gem-mint and mid-grade outcomes versus the raw price over time"
+        aria-label={description}
         tabIndex={compact ? -1 : 0}
         onPointerMove={onMove}
         onPointerLeave={onLeave}
@@ -106,6 +115,12 @@ export function OutlookChart({ series, compact = false }: Props) {
           <rect key={i} x={x - 12} y={0} width={24} height={layout.height} fill="transparent" onPointerEnter={() => setIndex(i)} />
         ))}
       </svg>
+      {/* The tooltip is drawn for the eye; this is the same thing, spoken. */}
+      {!compact && (
+        <p className="sr-only" role="status" aria-live="polite">
+          {spoken}
+        </p>
+      )}
       {active && (
         <div
           className="tooltip-surface pointer-events-none absolute top-0 z-10 rounded-md px-2 py-1 text-xs"

@@ -50,6 +50,16 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
   }
 
   const active = index !== null ? points[index] : null;
+  const first = points[0];
+  const last = points[points.length - 1];
+  // What a screen reader is told. The crosshair is reachable from the keyboard,
+  // so what it lands on has to be readable without seeing the tooltip.
+  const description =
+    `${label}. ${points.length} price${points.length === 1 ? "" : "s"} from ${shortDate(first.t)} to ${shortDate(last.t)}, ` +
+    `latest ${money(last.value)}. Use the left and right arrow keys to read each value.`;
+  const spoken = active
+    ? `${shortDate(active.t, true)}: ${money(active.value)}. ${detail ? detail(active) : `raw NM ${money(active.ungraded)}, ${active.priced} priced`}`
+    : "";
 
   return (
     <div ref={ref} className="relative">
@@ -59,7 +69,7 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
         height={layout.height}
         className="block h-auto w-full touch-none select-none rounded-md outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
         role="img"
-        aria-label={label}
+        aria-label={description}
         tabIndex={0}
         onPointerMove={onMove}
         onPointerLeave={onLeave}
@@ -101,6 +111,10 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
           <rect key={i} x={x - 12} y={layout.top} width={24} height={layout.height - layout.top - layout.bottom} fill="transparent" onPointerEnter={() => setIndex(i)} />
         ))}
       </svg>
+      {/* The tooltip is drawn for the eye; this is the same thing, spoken. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {spoken}
+      </p>
       {active && (
         <div
           className="tooltip-surface pointer-events-none absolute top-0 rounded-md px-2 py-1 text-xs"

@@ -41,7 +41,9 @@ test.describe("theme", () => {
     // The card's own chart, rather than the portfolio total, so other tests
     // adding cards to the same collection cannot change the direction here.
     await page.goto(`/cards/${card.id}`);
-    const chart = page.locator("svg[aria-label='Value of this card over time']");
+    // The label carries the chart's current numbers for screen readers, so
+    // match its opening rather than the whole of it.
+    const chart = page.locator("svg[aria-label^='Value of this card over time']");
     await expect(chart).toBeVisible();
     // The area is painted with a gradient rather than a flat wash.
     await expect(chart.locator("linearGradient")).toHaveCount(1);
@@ -114,6 +116,36 @@ test.describe("installable app", () => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
     }
     await context.close();
+  });
+
+  test("the value chart can be read with a keyboard and a screen reader", async ({ page }) => {
+    const created = await page.request.post("/api/cards", {
+      data: { game: "pokemon", name: "Readable Raichu", setName: "A11y Set", manualUngraded: 120 },
+    });
+    const { card } = (await created.json()) as { card: { id: number } };
+    try {
+      // Two prices, so the card has a line rather than a single point.
+      await page.request.post(`/api/cards/${card.id}/price`);
+      await page.request.patch(`/api/cards/${card.id}`, { data: { manualUngraded: 180 } });
+      await page.request.post(`/api/cards/${card.id}/price`);
+      await page.goto(`/cards/${card.id}`);
+
+      const svg = page.locator("svg[aria-label^='Value of this card over time']").first();
+      // The label says what the chart holds, not just that it is a chart.
+      await expect(svg).toHaveAttribute("aria-label", /\$/);
+      await expect(svg).toHaveAttribute("aria-label", /arrow keys/);
+
+      const live = page.locator("[role=status][aria-live=polite]").first();
+      await expect(live).toHaveText("");
+      await svg.focus();
+      await page.keyboard.press("ArrowRight");
+      // Whatever the crosshair lands on is said out loud, not only drawn.
+      await expect(live).toHaveText(/\$\d/);
+      await page.keyboard.press("Escape");
+      await expect(live).toHaveText("");
+    } finally {
+      await page.request.delete(`/api/cards/${card.id}`);
+    }
   });
 
   test("has an offline page that needs no session", async ({ request }) => {
