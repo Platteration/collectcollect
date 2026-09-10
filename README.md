@@ -104,6 +104,26 @@ The archive is written and read by a small built-in zip writer and reader rather
 
 **Export.** The Collection page has an *Export CSV* button (also `GET /api/export`) with every card, its grade or condition, purchase price, and latest ungraded / PSA 10 / your-copy prices.
 
+## Sports cards
+
+The card app covers sports cards as a game type of its own rather than a separate app: the grading verdict, the outlook chart, submissions, sales and the report all apply unchanged. Choosing **Sports** in the form adds what a sports card has and a TCG card does not:
+
+| Field | Notes |
+| --- | --- |
+| Player | the card's name field, labelled Player |
+| Sport, manufacturer / brand | baseball, basketball…; Topps, Panini, Upper Deck… |
+| Team | |
+| Rookie card | flag |
+| Parallel / refractor | the parallel's name and colour as printed: Gold Refractor, Silver Prizm, Blue Wave 1:25 |
+| Serial number | `12/99`, however it was typed (`12 of 99`, `#12/99`) |
+| Autograph, relic / patch | flags |
+| Grading company, grade, cert | PSA, BGS, SGC, CGC, TAG |
+| Subgrades | centering, corners, edges, surface, shown for BGS slabs |
+
+**One specific object, or a stack?** A serial-numbered card is one specific object: `12/99` names it, so it is never merged with another copy and nothing is merged into it. So is a graded card at its own grade. Raw copies of the same card stack only when they are the same parallel: a base card and its Refractor are two rows, and two base copies are one row with a quantity of two and a purchase lot each.
+
+**Pricing.** There is no free sports-card price API. PriceCharting (`PRICECHARTING_TOKEN`, paid) is the only source, through the same adapter as every other game: the search carries the year, brand, set, player, number and the parallel, autograph and relic words the way PriceCharting names its listings, and a listing that names the parallel outranks the base card when the copy is one. Without a token, type the ungraded and graded prices in by hand on the card; they override every source and the chart, verdict and report work from them. Photo identification reads the team, RC logo, parallel, serial numbering, autograph and relic, and the four subgrades on a BGS label. Sports cards have no set-checklist source either, and the Sets page says so.
+
 ## Card identification
 
 Identification runs on Claude (`claude-opus-5` by default; override with `CLAUDE_MODEL`). Photos are downscaled server-side before being sent. The model returns a structured identification with a confidence score and alternative matches when the card is ambiguous; you can add a back or slab-label photo, give it a hint ("it's Japanese"), and re-identify. Without an Anthropic key the app still works for manual entry and pricing.

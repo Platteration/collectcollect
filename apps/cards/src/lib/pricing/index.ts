@@ -184,7 +184,13 @@ export function summarize(
   };
 }
 
-export function cardToQuery(card: Pick<CardRecord, "game" | "name" | "sport" | "setName" | "setCode" | "cardNumber" | "year" | "variant" | "manufacturer" | "externalIds">): CardQuery {
+export function cardToQuery(
+  card: Pick<CardRecord, "game" | "name" | "sport" | "setName" | "setCode" | "cardNumber" | "year" | "variant" | "manufacturer" | "externalIds"> &
+    Partial<Pick<CardRecord, "parallel" | "autograph" | "relic">>,
+): CardQuery {
+  // A parallel, an autograph and a relic are each their own listing at every
+  // price guide, so they go into the search the way the guides name them.
+  const parallel = [card.parallel ?? null, card.autograph ? "Auto" : null, card.relic ? "Relic" : null].filter(Boolean).join(" ");
   return {
     game: card.game,
     name: card.name,
@@ -195,6 +201,7 @@ export function cardToQuery(card: Pick<CardRecord, "game" | "name" | "sport" | "
     year: card.year,
     variant: card.variant,
     manufacturer: card.manufacturer,
+    parallel: parallel || null,
     externalIds: card.externalIds,
   };
 }

@@ -24,10 +24,25 @@ export const IdentificationSchema = z.object({
   language: z.string().nullable().describe("Language of the card text, e.g. 'English', 'Japanese'."),
   manufacturer: z.string().nullable().describe("Topps, Panini, Upper Deck, Bowman, Fleer, Konami, etc. Null if not applicable."),
   subject: z.string().nullable().describe("The character, player, or creature depicted if different from the card name."),
+  team: z.string().nullable().describe("For sports cards: the team printed on the card. Otherwise null."),
+  rookie: z.boolean().describe("For sports cards: true when this is a rookie card (an RC logo, 'Rookie' printed on it, or a known first-year issue). Otherwise false."),
+  parallel: z.string().nullable().describe("For sports cards: the parallel or refractor, with its colour and any ratio, e.g. 'Gold Refractor', 'Silver Prizm', 'Blue Wave 1:25'. Null for the base card."),
+  serial_number: z.string().nullable().describe("Serial numbering as printed, e.g. '12/99'. Null when the card is not numbered."),
+  autograph: z.boolean().describe("True when the card carries an on-card or sticker autograph."),
+  relic: z.boolean().describe("True when the card carries a jersey, patch, bat or other memorabilia piece."),
   grading: z.object({
     company: z.string().nullable().describe("If the card is in a grading slab: PSA, BGS, CGC, SGC, TAG. Else null."),
     grade: z.string().nullable().describe("Grade printed on the slab label, e.g. '10', '9.5'. Else null."),
     cert_number: z.string().nullable().describe("Certification number printed on the slab label, if legible."),
+    subgrades: z
+      .object({
+        centering: z.number().nullable(),
+        corners: z.number().nullable(),
+        edges: z.number().nullable(),
+        surface: z.number().nullable(),
+      })
+      .nullable()
+      .describe("The four subgrades on a BGS label (centering, corners, edges, surface), else null."),
   }),
   condition_notes: z
     .string()

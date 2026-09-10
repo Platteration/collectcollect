@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { imageSrc, money, when } from "@/lib/format";
-import { GAMES, GRADING_STATUSES, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Sale, type Settings } from "@/lib/types";
+import { GAMES, GRADING_STATUSES, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Sale, type Settings, subgradesLabel } from "@/lib/types";
 import { gradingVerdict, isReadyToGrade, outlookSeries } from "@/lib/analytics";
 import { OutlookChart } from "./charts/OutlookChart";
 import { PortfolioChart } from "./charts/PortfolioChart";
@@ -341,6 +341,13 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             <Field label="Kept in" value={card.location ?? "—"} />
             <Field label="Language" value={card.language ?? "—"} />
             <Field label="Manufacturer" value={card.manufacturer ?? "—"} />
+            {card.team && <Field label="Team" value={card.team} />}
+            {card.parallel && <Field label="Parallel" value={card.parallel} />}
+            {card.serialNumber && <Field label="Numbered" value={card.serialNumber} />}
+            {(card.rookie || card.autograph || card.relic) && (
+              <Field label="Card type" value={[card.rookie ? "Rookie" : null, card.autograph ? "Autograph" : null, card.relic ? "Relic" : null].filter(Boolean).join(" · ")} />
+            )}
+            {card.subgrades && <Field label="Subgrades" value={subgradesLabel(card.subgrades)} />}
             <Field label="Added" value={when(card.createdAt)} />
             {card.notes && (
               <div className="col-span-2 sm:col-span-3">

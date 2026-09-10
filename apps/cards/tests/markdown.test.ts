@@ -118,11 +118,18 @@ describe("a card as a document", () => {
       variant: "Star",
       language: "English",
       manufacturer: "Upper Deck",
+      team: "Seattle Mariners",
+      rookie: true,
+      parallel: "Base",
+      serialNumber: "1/1",
+      autograph: false,
+      relic: true,
       quantity: 2,
       condition: "LP",
       gradingCompany: "PSA",
       grade: "8",
       certNumber: "1234",
+      subgrades: { centering: 9, corners: 9, edges: 9, surface: 9 },
       purchasePrice: 40,
       notes: "Off-centre.",
       imagePath: "11111111-1111-4111-8111-111111111111.jpg",
@@ -599,3 +606,37 @@ function totalValue(): number {
   const latest = latestSnapshotsByCard();
   return listCards().reduce((sum, card) => sum + (latest.get(card.id)?.summary.yourCopyValue ?? 0) * card.quantity, 0);
 }
+
+describe("sports card files", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("writes the sports fields to the front matter and reads them back", () => {
+    const card = createCard({
+      game: "sports",
+      sport: "Baseball",
+      name: "Mike Trout",
+      setName: "Topps Chrome",
+      cardNumber: "US175",
+      year: 2011,
+      team: "Los Angeles Angels",
+      rookie: true,
+      parallel: "Gold Refractor",
+      serialNumber: "12/50",
+      autograph: true,
+      relic: false,
+      gradingCompany: "BGS",
+      grade: "9.5",
+      certNumber: "0012345678",
+      subgrades: { centering: 9.5, corners: 9.5, edges: 10, surface: 9 },
+    });
+    const text = fs.readFileSync(path.join(cardsDir(), fs.readdirSync(cardsDir())[0]), "utf8");
+    expect(text).toContain("Los Angeles Angels · Gold Refractor · 12/50 · RC · Auto");
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.input).toMatchObject({ team: "Los Angeles Angels", rookie: true, parallel: "Gold Refractor", serialNumber: "12/50", autograph: true, relic: false, subgrades: { centering: 9.5, corners: 9.5, edges: 10, surface: 9 } });
+    // A file written before these fields existed reads as a plain card.
+    const older = parseCardMarkdown(text.replace(/^(team|rookie|parallel|serial_number|autograph|relic|subgrades):.*\n/gm, ""))!;
+    expect(older.input).toMatchObject({ team: null, rookie: false, parallel: null, serialNumber: null, autograph: false, relic: false, subgrades: null });
+    expect(older.warnings).toEqual([]);
+    expect(card.id).toBe(1);
+  });
+});

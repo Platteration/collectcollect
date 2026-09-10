@@ -4,7 +4,8 @@ import { listSales } from "@/lib/sales";
 
 const COLUMNS = [
   "id", "game", "sport", "name", "set", "set_code", "number", "year", "rarity", "variant", "language", "manufacturer",
-  "quantity", "condition", "grading_company", "grade", "cert_number", "grading_status", "purchase_price", "location",
+  "team", "rookie", "parallel", "serial_number", "autograph", "relic",
+  "quantity", "condition", "grading_company", "grade", "cert_number", "centering", "corners", "edges", "surface", "grading_status", "purchase_price", "location",
   "value_each", "value_total", "ungraded_price", "psa_10_price", "psa_10_estimate", "price_source", "price_date", "notes",
 ] as const;
 
@@ -52,7 +53,10 @@ export async function GET(request: Request) {
     lines.push(
       [
         c.id, GAMES[c.game], c.sport, c.name, c.setName, c.setCode, c.cardNumber, c.year, c.rarity, c.variant, c.language, c.manufacturer,
-        c.quantity, c.grade ? "" : c.condition, c.gradingCompany, c.grade, c.certNumber, c.grade ? "" : c.gradingStatus, c.purchasePrice, c.location,
+        c.team, c.rookie ? "yes" : "", c.parallel, c.serialNumber, c.autograph ? "yes" : "", c.relic ? "yes" : "",
+        c.quantity, c.grade ? "" : c.condition, c.gradingCompany, c.grade, c.certNumber,
+        c.subgrades?.centering ?? null, c.subgrades?.corners ?? null, c.subgrades?.edges ?? null, c.subgrades?.surface ?? null,
+        c.grade ? "" : c.gradingStatus, c.purchasePrice, c.location,
         each, each === null ? null : Math.round(each * c.quantity * 100) / 100, s?.ungraded ?? null,
         s?.graded["PSA 10"] ?? null, s?.estimatedGraded["PSA 10"] ?? null, s?.ungradedSource ?? null, s?.fetchedAt ?? null, c.notes,
       ]

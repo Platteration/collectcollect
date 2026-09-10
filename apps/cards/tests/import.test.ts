@@ -161,3 +161,37 @@ describe("rows an import cannot decide about", () => {
   });
 });
 
+
+describe("sports columns", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("reads the team, rookie and parallel columns, the serial numbering, the flags and BGS subgrades", () => {
+    const csv = [
+      "player,sport,year,brand,set,number,team,RC,parallel,serial,auto,relic,grading company,grade,cert,centering,corners,edges,surface,paid",
+      "Mike Trout,baseball,2011,Topps,Topps Chrome,US175,Los Angeles Angels,yes,Gold Refractor,12/50,x,,BGS,9.5,0012345678,9.5,9.5,10,9,650",
+    ].join("\n");
+    const preview = previewImport(csv);
+    expect(preview.unmapped).toEqual([]);
+    expect(preview.rows[0].input).toMatchObject({
+      game: "sports",
+      name: "Mike Trout",
+      team: "Los Angeles Angels",
+      rookie: true,
+      parallel: "Gold Refractor",
+      serialNumber: "12/50",
+      autograph: true,
+      relic: false,
+      gradingCompany: "BGS",
+      grade: "9.5",
+      certNumber: "0012345678",
+      subgrades: { centering: 9.5, corners: 9.5, edges: 10, surface: 9 },
+    });
+    expect(applyImport(preview)).toMatchObject({ created: 1, merged: 0 });
+    expect(listCards()[0]).toMatchObject({ serialNumber: "12/50", subgrades: { edges: 10 } });
+  });
+
+  it("no longer reads a serial column as a cert number, and a parallel column as a variant", () => {
+    const preview = previewImport(["name,game,serial,parallel", "Mike Trout,sports,7/25,Silver Prizm"].join("\n"));
+    expect(preview.rows[0].input).toMatchObject({ serialNumber: "7/25", parallel: "Silver Prizm", certNumber: null, variant: null });
+  });
+});

@@ -1,6 +1,9 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb, openDatabase, setDb } from "@/lib/db";
-import { addSnapshot, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
+import { addSnapshot, createCard, deleteCard, findSimilar, getCard, intakeCard, latestSnapshotsByCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
 import { recordSale } from "@/lib/sales";
 import { createAlert } from "@/lib/alerts";
 import { getSettings, saveSettings } from "@/lib/settings";
@@ -239,3 +242,53 @@ describe("the order a collection comes back in", () => {
   });
 });
 
+
+describe("sports cards", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  const trout = { game: "sports", sport: "baseball", name: "Mike Trout", setName: "Topps Chrome", cardNumber: "US175", year: 2011 } as const;
+
+  it("keeps the team, the flags, the parallel, the numbering and BGS subgrades", () => {
+    const card = createCard({ ...trout, team: "Los Angeles Angels", rookie: "yes" as never, parallel: "Gold Refractor", serialNumber: "12 of 50", autograph: true, relic: 0 as never, gradingCompany: "BGS", grade: "9.5", subgrades: { centering: "9.5", corners: 9, edges: "10", surface: null } as never });
+    expect(card).toMatchObject({ team: "Los Angeles Angels", rookie: true, parallel: "Gold Refractor", serialNumber: "12/50", autograph: true, relic: false, subgrades: { centering: 9.5, corners: 9, edges: 10, surface: null } });
+    expect(getCard(card.id)).toMatchObject({ rookie: true, autograph: true, relic: false, subgrades: { centering: 9.5 } });
+    const plain = createCard({ ...trout });
+    expect(plain).toMatchObject({ team: null, rookie: false, parallel: null, serialNumber: null, autograph: false, relic: false, subgrades: null });
+    // Subgrades outside the scale, or an empty set, are no subgrades.
+    expect(createCard({ ...trout, subgrades: { centering: 11, corners: null, edges: null, surface: null } }).subgrades).toBeNull();
+  });
+
+  it("never merges a serial-numbered card, and never merges into one", async () => {
+    const first = intakeCard({ ...trout, parallel: "Gold Refractor", serialNumber: "12/50" });
+    const second = intakeCard({ ...trout, parallel: "Gold Refractor", serialNumber: "12/50" });
+    expect(first.result).toBe("created");
+    expect(second.result).toBe("created");
+    // A copy of the same parallel without numbering is not a copy of a numbered one either.
+    expect(intakeCard({ ...trout, parallel: "Gold Refractor" }).result).toBe("created");
+    expect(listCards()).toHaveLength(3);
+  });
+
+  it("stacks base copies together and keeps a parallel apart from them", async () => {
+    expect(intakeCard({ ...trout }).result).toBe("created");
+    expect(intakeCard({ ...trout }).result).toBe("merged");
+    expect(intakeCard({ ...trout, parallel: "Refractor" }).result).toBe("created");
+    expect(intakeCard({ ...trout, parallel: "refractor" }).result).toBe("merged");
+    const cards = listCards();
+    expect(cards).toHaveLength(2);
+    expect(cards.map((c) => c.quantity).sort()).toEqual([2, 2]);
+  });
+
+  it("adds the new columns to a database from before they existed", () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cc-migrate-")), "old.db");
+    const older = openDatabase(file);
+    for (const column of ["team", "rookie", "parallel", "serial_number", "autograph", "relic", "subgrades"]) older.exec(`ALTER TABLE cards DROP COLUMN ${column}`);
+    older.exec("INSERT INTO cards (game, name, created_at, updated_at) VALUES ('sports', 'Ken Griffey Jr.', '2020-01-01', '2020-01-01')");
+    older.close();
+    setDb(openDatabase(file));
+    const columns = (getDb().prepare("PRAGMA table_info(cards)").all() as Array<{ name: string }>).map((c) => c.name);
+    expect(columns).toEqual(expect.arrayContaining(["team", "rookie", "parallel", "serial_number", "autograph", "relic", "subgrades"]));
+    expect(listCards()[0]).toMatchObject({ name: "Ken Griffey Jr.", team: null, rookie: false, subgrades: null });
+    getDb().close();
+    fs.rmSync(path.dirname(file), { recursive: true, force: true });
+  });
+});

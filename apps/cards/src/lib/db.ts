@@ -79,6 +79,13 @@ CREATE TABLE IF NOT EXISTS cards (
   variant TEXT,
   language TEXT,
   manufacturer TEXT,
+  team TEXT,
+  rookie INTEGER NOT NULL DEFAULT 0,
+  parallel TEXT,
+  serial_number TEXT,
+  autograph INTEGER NOT NULL DEFAULT 0,
+  relic INTEGER NOT NULL DEFAULT 0,
+  subgrades TEXT,
   quantity INTEGER NOT NULL DEFAULT 1,
   condition TEXT NOT NULL DEFAULT 'NM',
   grading_company TEXT,
@@ -190,6 +197,14 @@ const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "cards", column: "grading_status", ddl: "ALTER TABLE cards ADD COLUMN grading_status TEXT NOT NULL DEFAULT 'undecided'" },
   { table: "cards", column: "accent_color", ddl: "ALTER TABLE cards ADD COLUMN accent_color TEXT" },
   { table: "cards", column: "location", ddl: "ALTER TABLE cards ADD COLUMN location TEXT" },
+  // Sports cards: the team, rookie flag, parallel, serial numbering, autograph and relic flags, BGS subgrades.
+  { table: "cards", column: "team", ddl: "ALTER TABLE cards ADD COLUMN team TEXT" },
+  { table: "cards", column: "rookie", ddl: "ALTER TABLE cards ADD COLUMN rookie INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "parallel", ddl: "ALTER TABLE cards ADD COLUMN parallel TEXT" },
+  { table: "cards", column: "serial_number", ddl: "ALTER TABLE cards ADD COLUMN serial_number TEXT" },
+  { table: "cards", column: "autograph", ddl: "ALTER TABLE cards ADD COLUMN autograph INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "relic", ddl: "ALTER TABLE cards ADD COLUMN relic INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "subgrades", ddl: "ALTER TABLE cards ADD COLUMN subgrades TEXT" },
 ];
 
 export function openDatabase(file: string): Database.Database {

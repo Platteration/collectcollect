@@ -4,6 +4,7 @@ import { buildQuery, pickVariantKey, pokemonTcgProvider } from "@/lib/pricing/pr
 import { ygoprodeckProvider } from "@/lib/pricing/providers/ygoprodeck";
 import { scryfallProvider } from "@/lib/pricing/providers/scryfall";
 import { buildSearch, priceChartingProvider, productToQuote, scoreProduct } from "@/lib/pricing/providers/pricecharting";
+import { cardToQuery } from "@/lib/pricing/index";
 
 describe("Pokémon TCG provider", () => {
   it("builds a name+number query", () => {
@@ -217,3 +218,36 @@ describe("which printing a Magic price is for", () => {
   });
 });
 
+
+describe("sports card searches", () => {
+  it("puts the parallel, the autograph and the relic into the PriceCharting search", () => {
+    const query = cardToQuery({
+      game: "sports",
+      name: "Mike Trout",
+      sport: "baseball",
+      setName: "Topps Chrome",
+      setCode: null,
+      cardNumber: "US175",
+      year: 2011,
+      variant: null,
+      manufacturer: "Topps",
+      parallel: "Gold Refractor",
+      autograph: true,
+      relic: false,
+      externalIds: {},
+    });
+    expect(query.parallel).toBe("Gold Refractor Auto");
+    expect(buildSearch(query)).toBe("2011 Topps Chrome Mike Trout #US175 Gold Refractor Auto");
+    // A base card without any of that searches as before.
+    expect(cardToQuery({ game: "sports", name: "Mike Trout", sport: null, setName: null, setCode: null, cardNumber: null, year: null, variant: null, manufacturer: null, externalIds: {} }).parallel).toBeNull();
+  });
+
+  it("ranks the listing that names the parallel above the base card when the copy is one", () => {
+    const base = { id: "1", "product-name": "Mike Trout #US175", "console-name": "2011 Topps Update", "loose-price": 5000 };
+    const gold = { id: "2", "product-name": "Mike Trout #US175 [Gold Refractor]", "console-name": "2011 Topps Update", "loose-price": 90000 };
+    const plain = { game: "sports", name: "Mike Trout", cardNumber: "US175", setName: "Topps Update", year: 2011 } as const;
+    expect(scoreProduct(plain, base)).toBeGreaterThan(scoreProduct(plain, gold));
+    const withParallel = { ...plain, parallel: "Gold Refractor" };
+    expect(scoreProduct(withParallel, gold)).toBeGreaterThan(scoreProduct(withParallel, base));
+  });
+});

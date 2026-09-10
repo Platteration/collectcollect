@@ -8,7 +8,7 @@ import type {
   PriceSnapshot,
   PriceSummary,
 } from "./types";
-import { CONDITIONS, GAMES, GRADING_STATUSES, type GradingStatus } from "./types";
+import { CONDITIONS, GAMES, GRADING_STATUSES, cleanSubgrades, flag, serial, type GradingStatus } from "./types";
 import { addLot, costBasisByCard, deleteLot, getLot, listLots, reconcileToQuantity, recomputePurchasePrice, type AcquisitionInput } from "./acquisitions";
 import { isValidUploadName } from "./images";
 import { mirrorCard, unmirrorCard } from "./markdown/mirror";
@@ -27,6 +27,13 @@ interface CardRow {
   variant: string | null;
   language: string | null;
   manufacturer: string | null;
+  team: string | null;
+  rookie: number;
+  parallel: string | null;
+  serial_number: string | null;
+  autograph: number;
+  relic: number;
+  subgrades: string | null;
   quantity: number;
   condition: string;
   grading_company: string | null;
@@ -70,6 +77,13 @@ function rowToCard(row: CardRow): CardRecord {
     variant: row.variant,
     language: row.language,
     manufacturer: row.manufacturer,
+    team: row.team,
+    rookie: row.rookie === 1,
+    parallel: row.parallel,
+    serialNumber: row.serial_number,
+    autograph: row.autograph === 1,
+    relic: row.relic === 1,
+    subgrades: cleanSubgrades(parseJson<unknown>(row.subgrades, null)),
     quantity: row.quantity,
     condition: row.condition as Condition,
     gradingCompany: row.grading_company,
@@ -150,6 +164,13 @@ export function normalizeInput(input: CardInput): Required<
     variant: str(input.variant),
     language: str(input.language),
     manufacturer: str(input.manufacturer),
+    team: str(input.team),
+    rookie: flag(input.rookie),
+    parallel: str(input.parallel),
+    serialNumber: serial(input.serialNumber),
+    autograph: flag(input.autograph),
+    relic: flag(input.relic),
+    subgrades: cleanSubgrades(input.subgrades),
     quantity,
     condition,
     gradingCompany: str(input.gradingCompany),
@@ -218,16 +239,22 @@ export function createCard(input: CardInput): CardRecord {
   const result = getDb()
     .prepare(
       `INSERT INTO cards (game, sport, name, set_name, set_code, card_number, year, rarity, variant,
-        language, manufacturer, quantity, condition, grading_company, grade, cert_number, purchase_price,
+        language, manufacturer, team, rookie, parallel, serial_number, autograph, relic, subgrades,
+        quantity, condition, grading_company, grade, cert_number, purchase_price,
         notes, image_path, reference_image_url, accent_color, location, external_ids, identification, manual_ungraded, manual_graded,
         grading_status, created_at, updated_at)
        VALUES (@game, @sport, @name, @setName, @setCode, @cardNumber, @year, @rarity, @variant,
-        @language, @manufacturer, @quantity, @condition, @gradingCompany, @grade, @certNumber, @purchasePrice,
+        @language, @manufacturer, @team, @rookie, @parallel, @serialNumber, @autograph, @relic, @subgrades,
+        @quantity, @condition, @gradingCompany, @grade, @certNumber, @purchasePrice,
         @notes, @imagePath, @referenceImageUrl, @accentColor, @location, @externalIds, @identification, @manualUngraded, @manualGraded,
         @gradingStatus, @now, @now)`,
     )
     .run({
       ...c,
+      rookie: c.rookie ? 1 : 0,
+      autograph: c.autograph ? 1 : 0,
+      relic: c.relic ? 1 : 0,
+      subgrades: c.subgrades ? JSON.stringify(c.subgrades) : null,
       externalIds: JSON.stringify(c.externalIds),
       identification: c.identification ? JSON.stringify(c.identification) : null,
       manualGraded: JSON.stringify(c.manualGraded),
@@ -252,7 +279,9 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
     .prepare(
       `UPDATE cards SET game=@game, sport=@sport, name=@name, set_name=@setName, set_code=@setCode,
         card_number=@cardNumber, year=@year, rarity=@rarity, variant=@variant, language=@language,
-        manufacturer=@manufacturer, quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
+        manufacturer=@manufacturer, team=@team, rookie=@rookie, parallel=@parallel, serial_number=@serialNumber,
+        autograph=@autograph, relic=@relic, subgrades=@subgrades,
+        quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
         grade=@grade, cert_number=@certNumber, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
         reference_image_url=@referenceImageUrl, accent_color=@accentColor, location=@location, external_ids=@externalIds, identification=@identification,
         manual_ungraded=@manualUngraded, manual_graded=@manualGraded, grading_status=@gradingStatus, updated_at=@now
@@ -261,6 +290,10 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
     .run({
       ...merged,
       id,
+      rookie: merged.rookie ? 1 : 0,
+      autograph: merged.autograph ? 1 : 0,
+      relic: merged.relic ? 1 : 0,
+      subgrades: merged.subgrades ? JSON.stringify(merged.subgrades) : null,
       externalIds: JSON.stringify(merged.externalIds),
       identification: merged.identification ? JSON.stringify(merged.identification) : null,
       manualGraded: JSON.stringify(merged.manualGraded),
@@ -373,18 +406,22 @@ export type IntakeOutcome =
  * and each adding one copy.
  *
  * A match only counts when the copies are interchangeable: both ungraded, or
- * graded by the same company to the same grade. A raw scan must never be
- * folded into a slab, since it would then be valued as a graded copy.
+ * graded by the same company to the same grade, and the same parallel. A raw
+ * scan must never be folded into a slab, since it would then be valued as a
+ * graded copy. A serial-numbered card is one specific object ("12/99" names
+ * it), so it is never merged and never merged into.
  */
 export function intakeCard(input: CardInput): IntakeOutcome {
   const clean = normalizeInput(input);
   const run = getDb().transaction((): IntakeOutcome => {
+    if (clean.serialNumber) return { result: "created", card: createCard(input) };
+    const parallelKey = (p: string | null) => (p ?? "").trim().toLowerCase();
     const candidates = findSimilar({
       game: clean.game,
       name: clean.name,
       cardNumber: clean.cardNumber,
       setName: clean.setName,
-    });
+    }).filter((c) => !c.serialNumber && parallelKey(c.parallel) === parallelKey(clean.parallel));
     const interchangeable = candidates.filter(
       (c) =>
         (c.grade ?? null) === (clean.grade ?? null) &&

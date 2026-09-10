@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
-import { CONDITIONS, GAMES, GAME_IDS, GRADING_COMPANIES, type CardInput, type Game } from "@/lib/types";
+import { CONDITIONS, GAMES, GAME_IDS, GRADING_COMPANIES, SUBGRADE_KEYS, type CardInput, type Game, type Subgrades } from "@/lib/types";
 
 /** String-typed form state; converted to CardInput on submit. */
 export interface CardFormState {
@@ -17,11 +17,23 @@ export interface CardFormState {
   variant: string;
   language: string;
   manufacturer: string;
+  team: string;
+  /** "true" or "" like a checkbox. */
+  rookie: string;
+  parallel: string;
+  serialNumber: string;
+  autograph: string;
+  relic: string;
   quantity: string;
   condition: string;
   gradingCompany: string;
   grade: string;
   certNumber: string;
+  /** BGS subgrades as typed, one field each. */
+  centering: string;
+  corners: string;
+  edges: string;
+  surface: string;
   purchasePrice: string;
   location: string;
   notes: string;
@@ -39,11 +51,21 @@ export const emptyForm = (game: Game = "pokemon"): CardFormState => ({
   variant: "",
   language: "",
   manufacturer: "",
+  team: "",
+  rookie: "",
+  parallel: "",
+  serialNumber: "",
+  autograph: "",
+  relic: "",
   quantity: "1",
   condition: "NM",
   gradingCompany: "",
   grade: "",
   certNumber: "",
+  centering: "",
+  corners: "",
+  edges: "",
+  surface: "",
   purchasePrice: "",
   location: "",
   notes: "",
@@ -63,11 +85,21 @@ export function formFromCard(card: Partial<CardInput> & { game: Game; name: stri
     variant: s(card.variant),
     language: s(card.language),
     manufacturer: s(card.manufacturer),
+    team: s(card.team),
+    rookie: card.rookie ? "true" : "",
+    parallel: s(card.parallel),
+    serialNumber: s(card.serialNumber),
+    autograph: card.autograph ? "true" : "",
+    relic: card.relic ? "true" : "",
     quantity: s(card.quantity ?? 1),
     condition: s(card.condition ?? "NM"),
     gradingCompany: s(card.gradingCompany),
     grade: s(card.grade),
     certNumber: s(card.certNumber),
+    centering: s(card.subgrades?.centering),
+    corners: s(card.subgrades?.corners),
+    edges: s(card.subgrades?.edges),
+    surface: s(card.subgrades?.surface),
     purchasePrice: s(card.purchasePrice),
     location: s(card.location),
     notes: s(card.notes),
@@ -89,15 +121,28 @@ export function formToInput(f: CardFormState): CardInput {
     variant: t(f.variant),
     language: t(f.language),
     manufacturer: t(f.manufacturer),
+    team: t(f.team),
+    rookie: f.rookie === "true",
+    parallel: t(f.parallel),
+    serialNumber: t(f.serialNumber),
+    autograph: f.autograph === "true",
+    relic: f.relic === "true",
     quantity: n(f.quantity) ?? 1,
     condition: (f.condition || "NM") as CardInput["condition"],
     gradingCompany: t(f.gradingCompany),
     grade: t(f.grade),
     certNumber: t(f.certNumber),
+    subgrades: subgradesFromForm(f),
     purchasePrice: n(f.purchasePrice),
     location: t(f.location),
     notes: t(f.notes),
   };
+}
+
+function subgradesFromForm(f: CardFormState): Subgrades | null {
+  const n = (v: string) => (v.trim() === "" ? null : Number(v));
+  const out = { centering: n(f.centering), corners: n(f.corners), edges: n(f.edges), surface: n(f.surface) };
+  return SUBGRADE_KEYS.some((k) => out[k] !== null) ? out : null;
 }
 
 interface Props {
@@ -124,8 +169,10 @@ export function CardForm({ value, onChange, disabled }: Props) {
 
   const set = (key: keyof CardFormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     onChange({ ...value, [key]: e.target.value });
+  const toggle = (key: "rookie" | "autograph" | "relic") => () => onChange({ ...value, [key]: value[key] === "true" ? "" : "true" });
   const isSports = value.game === "sports";
   const isGraded = value.gradingCompany !== "" || value.grade !== "";
+  const isBgs = value.gradingCompany.toUpperCase() === "BGS";
 
   return (
     <fieldset disabled={disabled} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -154,6 +201,40 @@ export function CardForm({ value, onChange, disabled }: Props) {
           <span className="label">Manufacturer / brand</span>
           <input className="input" value={value.manufacturer} onChange={set("manufacturer")} placeholder="Topps" />
         </label>
+      )}
+      {isSports && (
+        <label className="block">
+          <span className="label">Team</span>
+          <input className="input" value={value.team} onChange={set("team")} placeholder="Los Angeles Angels" />
+        </label>
+      )}
+      {isSports && (
+        <label className="block">
+          <span className="label">Parallel / refractor</span>
+          <input className="input" value={value.parallel} onChange={set("parallel")} placeholder="Gold Refractor, Silver Prizm" />
+        </label>
+      )}
+      {isSports && (
+        <label className="block">
+          <span className="label">Serial number</span>
+          <input className="input" value={value.serialNumber} onChange={set("serialNumber")} placeholder="12/99" />
+        </label>
+      )}
+      {isSports && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 self-end pb-2 text-sm">
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={value.rookie === "true"} onChange={toggle("rookie")} />
+            Rookie card
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={value.autograph === "true"} onChange={toggle("autograph")} />
+            Autograph
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={value.relic === "true"} onChange={toggle("relic")} />
+            Relic / patch
+          </label>
+        </div>
       )}
       <label className="block">
         <span className="label">Set / product</span>
@@ -212,6 +293,16 @@ export function CardForm({ value, onChange, disabled }: Props) {
             <span className="label">Cert number</span>
             <input className="input" value={value.certNumber} onChange={set("certNumber")} />
           </label>
+          {isBgs && (
+            <div className="grid grid-cols-4 gap-2 sm:col-span-2">
+              {(["centering", "corners", "edges", "surface"] as const).map((k) => (
+                <label key={k} className="block">
+                  <span className="label capitalize">{k}</span>
+                  <input className="input" value={value[k]} onChange={set(k)} inputMode="decimal" placeholder="9.5" />
+                </label>
+              ))}
+            </div>
+          )}
         </>
       ) : (
         <label className="block">
