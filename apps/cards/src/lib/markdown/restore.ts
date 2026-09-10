@@ -2,7 +2,7 @@ import { reconcileToQuantity } from "../acquisitions";
 import { createCard, discardDeferredMirror, findSimilar, getCard, updateCard } from "../cards";
 import { getDb } from "../db";
 import type { CardInput, CardRecord } from "../types";
-import { isSafeEntryName, readZip } from "../zip";
+import { isSafeEntryName, readZip } from "@collectcollect/core/zip";
 import { parseCardMarkdown } from "./card";
 import { mirrorCard, readCardFiles } from "./mirror";
 

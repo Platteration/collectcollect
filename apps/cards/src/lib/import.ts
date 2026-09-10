@@ -1,5 +1,5 @@
 import { intakeCard } from "./cards";
-import { headerKey, parseCsv } from "./csv";
+import { headerKey, parseCsv } from "@collectcollect/core/csv";
 import { CONDITIONS, GAMES, type CardInput, type Condition, type Game } from "./types";
 
 /**

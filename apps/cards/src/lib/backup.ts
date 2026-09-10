@@ -6,7 +6,7 @@ import { listCards } from "./cards";
 import { dataDir, databaseFile, getDb, lockDatabase, openDatabase, setDb, unlockDatabase, uploadsDir } from "./db";
 import { isValidUploadName } from "./images";
 import { collectionDir, collectionFiles, rebuildCollection } from "./markdown/mirror";
-import { assertZippable, fileChunks, isSafeEntryName, readZip, zipStream, type ZipEntry } from "./zip";
+import { assertZippable, fileChunks, isSafeEntryName, readZip, zipStream, type ZipEntry } from "@collectcollect/core/zip";
 
 /**
  * Everything needed to restore a collection: a consistent copy of the database,

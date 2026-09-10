@@ -1,5 +1,5 @@
 {
-  "name": "@collectcollect/cards",
+  "name": "@collectcollect/skins",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -13,13 +13,11 @@
     "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.124.0",
     "@collectcollect/core": "*",
     "better-sqlite3": "^13.0.3",
     "next": "16.3.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "sharp": "^0.35.4",
     "zod": "^4.5.4"
   },
   "devDependencies": {

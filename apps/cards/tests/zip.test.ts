@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assertZippable, crc32, zipStream } from "@/lib/zip";
+import { assertZippable, crc32, zipStream } from "@collectcollect/core/zip";
 
 async function build(entries: Array<{ name: string; body: Uint8Array; chunkSize?: number }>): Promise<Buffer> {
   const parts: Uint8Array[] = [];
@@ -133,7 +133,7 @@ describe("zip reader", () => {
     const fsm = await import("node:fs");
     const osm = await import("node:os");
     const pathm = await import("node:path");
-    const { readZip } = await import("@/lib/zip");
+    const { readZip } = await import("@collectcollect/core/zip");
     const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), "zip-read-"));
     fsm.mkdirSync(pathm.join(dir, "src", "uploads"), { recursive: true });
     const text = "collection\n".repeat(200);
@@ -152,13 +152,13 @@ describe("zip reader", () => {
   });
 
   it("refuses damaged, oversized and unrecognised files", async () => {
-    const { readZip } = await import("@/lib/zip");
+    const { readZip } = await import("@collectcollect/core/zip");
     const limits = { maxTotalBytes: 1e6, maxEntries: 10 };
     await expect(readZip(new Uint8Array([1, 2, 3]), limits)).rejects.toThrow(/not a zip archive/);
 
     const good = await (async () => {
       const parts: Uint8Array[] = [];
-      const { zipStream } = await import("@/lib/zip");
+      const { zipStream } = await import("@collectcollect/core/zip");
       const body = new TextEncoder().encode("x".repeat(100));
       for await (const c of zipStream([{ name: "manifest.json", size: body.length, chunks: () => [body] }])) parts.push(c);
       return Buffer.concat(parts);
@@ -181,7 +181,7 @@ describe("zip reader", () => {
     const fsm = await import("node:fs");
     const osm = await import("node:os");
     const pathm = await import("node:path");
-    const { readZip } = await import("@/lib/zip");
+    const { readZip } = await import("@collectcollect/core/zip");
     const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), "zip-bomb-"));
     // 32 MB of zeroes compresses to a few tens of kilobytes.
     fsm.writeFileSync(pathm.join(dir, "big.bin"), Buffer.alloc(32 * 1024 * 1024));
@@ -194,7 +194,7 @@ describe("zip reader", () => {
   });
 
   it("rejects entry names that would escape the target directory", async () => {
-    const { isSafeEntryName } = await import("@/lib/zip");
+    const { isSafeEntryName } = await import("@collectcollect/core/zip");
     expect(isSafeEntryName("uploads/a.jpg")).toBe(true);
     expect(isSafeEntryName("collectcollect.db")).toBe(true);
     for (const bad of ["../escape", "uploads/../../etc/passwd", "/etc/passwd", "C:\\windows", "uploads\\a.jpg", "", "./x", "a//b", "a\0b"]) {
@@ -278,7 +278,7 @@ describe("restore", () => {
     process.env.DATA_DIR = dir;
     const { setDb, openDatabase } = await import("@/lib/db");
     const { restoreBackup } = await import("@/lib/backup");
-    const { zipStream } = await import("@/lib/zip");
+    const { zipStream } = await import("@collectcollect/core/zip");
     setDb(openDatabase(pathm.join(dir, "collectcollect.db")));
 
     const build = async (name: string, body: Uint8Array) => {

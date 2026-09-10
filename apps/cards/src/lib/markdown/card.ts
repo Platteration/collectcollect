@@ -12,7 +12,7 @@ import type {
 } from "../types";
 import { CONDITIONS, GAMES, GAME_IDS, GRADING_STATUSES } from "../types";
 import { IdentificationSchema } from "../identify/schema";
-import { money, parseDocument, readFenced, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "./format";
+import { money, parseDocument, readFenced, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "@collectcollect/core/markdown/format";
 
 /** Everything about one card that the plain-text copy preserves. */
 export interface CardBundle {

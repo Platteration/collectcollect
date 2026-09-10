@@ -11,7 +11,7 @@ import { listSales } from "@/lib/sales";
 import { realizedReturn } from "@/lib/analytics";
 import { latestSnapshotsByCard } from "@/lib/cards";
 import { parseCardMarkdown } from "@/lib/markdown/card";
-import { parseDocument, readSection, readTable, writeFrontMatter } from "@/lib/markdown/format";
+import { parseDocument, readSection, readTable, writeFrontMatter } from "@collectcollect/core/markdown/format";
 import type { PriceSummary } from "@/lib/types";
 
 const summary = (value: number, at: string): PriceSummary => ({

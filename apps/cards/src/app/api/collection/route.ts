@@ -1,6 +1,6 @@
 import { collectionFiles } from "@/lib/markdown/mirror";
 import { errorMessage, jsonError } from "@/lib/http";
-import { assertZippable, fileChunks, zipStream, type ZipEntry } from "@/lib/zip";
+import { assertZippable, fileChunks, zipStream, type ZipEntry } from "@collectcollect/core/zip";
 
 /**
  * GET — the plain-text collection as a zip: one Markdown file per card, an

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { headerKey, parseCsv } from "@/lib/csv";
+import { headerKey, parseCsv } from "@collectcollect/core/csv";
 import { applyImport, previewImport } from "@/lib/import";
 import { createCard, listCards } from "@/lib/cards";
 import { openDatabase, setDb } from "@/lib/db";
