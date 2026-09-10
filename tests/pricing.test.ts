@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { fetchQuotes, gradeKey, gradeLookupKeys, learnFromQuotes, summarize } from "@/lib/pricing";
+import { priceChartingProvider } from "@/lib/pricing/providers/pricecharting";
 import { refreshAll, resetRefreshThrottle } from "@/lib/pricing/refresh";
 import { addSnapshot, createCard, listSnapshots, updateCard } from "@/lib/cards";
 import { openDatabase, setDb } from "@/lib/db";
@@ -236,6 +237,77 @@ describe("refreshing a whole collection", () => {
     expect(listSnapshots(card.id)[0].summary.yourCopyValue).toBe(30);
     // Its stored snapshot is still stale, but it was just tried, so it waits.
     expect(await refreshAll({ staleHours: 24 })).toMatchObject({ refreshed: 0, unpriced: 0, skipped: 1 });
+  });
+});
+
+describe("prices in another currency", () => {
+  const quote = (over: Partial<PriceQuote>): PriceQuote => ({
+    source: "scryfall",
+    sourceLabel: "Scryfall",
+    currency: "USD",
+    url: null,
+    matchedName: "Card",
+    matchedDetail: null,
+    ungraded: null,
+    ungradedVariants: {},
+    graded: {},
+    fetchedAt: "2026-01-01T00:00:00.000Z",
+    ...over,
+  });
+
+  it("are left out of both halves of the summary", () => {
+    const owner = { condition: "NM" as const, gradingCompany: null, grade: null };
+    const summary = summarize(
+      [
+        quote({ currency: "EUR", ungraded: 90, graded: { "PSA 10": 900 }, sourceLabel: "Cardmarket" }),
+        quote({ currency: "USD", ungraded: 100, sourceLabel: "TCGplayer" }),
+      ],
+      [],
+      DEFAULT_SETTINGS,
+      owner,
+    );
+    expect(summary.ungraded).toBe(100);
+    expect(summary.ungradedSource).toBe("TCGplayer");
+    // The euro graded price is not folded into a dollar summary.
+    expect(summary.graded).toEqual({});
+    expect(summary.gradedSource).toBeNull();
+    // ...so the PSA 10 figure shown is an estimate off the dollar price.
+    expect(summary.estimatedGraded["PSA 10"]).toBe(300);
+  });
+
+  it("still says so when every source quoted another currency", () => {
+    const owner = { condition: "NM" as const, gradingCompany: null, grade: null };
+    const summary = summarize([quote({ currency: "EUR", ungraded: 90 })], [], DEFAULT_SETTINGS, owner);
+    expect(summary.ungraded).toBeNull();
+    expect(summary.yourCopyValue).toBeNull();
+    expect(summary.quotes).toHaveLength(1);
+  });
+});
+
+describe("what PriceCharting refuses to answer with", () => {
+  it("passes its own error message through", async () => {
+    process.env.PRICECHARTING_TOKEN = "t";
+    try {
+      const fetchImpl = fakeFetch([["pricecharting.com", { status: "error", "error-message": "invalid token" }]]);
+      await expect(priceChartingProvider.lookup({ game: "pokemon", name: "Charizard" }, fetchImpl)).rejects.toThrow(/invalid token/);
+    } finally {
+      delete process.env.PRICECHARTING_TOKEN;
+    }
+  });
+
+  it("refuses a best match that is not plausibly the card", async () => {
+    process.env.PRICECHARTING_TOKEN = "t";
+    try {
+      const fetchImpl = fakeFetch([
+        [
+          "pricecharting.com",
+          { status: "success", products: [{ id: "1", "product-name": "Garden Hose", "console-name": "Hardware", "loose-price": 1200 }] },
+        ],
+      ]);
+      expect(await priceChartingProvider.lookup({ game: "pokemon", name: "Charizard", setName: "Base Set" }, fetchImpl)).toEqual([]);
+    } finally {
+      delete process.env.PRICECHARTING_TOKEN;
+    }
   });
 });
 

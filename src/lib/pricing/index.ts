@@ -129,7 +129,7 @@ export function summarize(
   let gradedSource: string | null = null;
   for (const q of byPriority) {
     if (q.currency !== "USD" || Object.keys(q.graded).length === 0) continue;
-    for (const [k, v] of Object.entries(q.graded)) if (!(k in graded)) graded[k] = v;
+    for (const [k, v] of Object.entries(q.graded)) if (!Object.hasOwn(graded, k)) graded[k] = v;
     if (!gradedSource) gradedSource = q.sourceLabel;
     else if (q.source !== "manual" && gradedSource === "Manual entry") gradedSource = `Manual entry + ${q.sourceLabel}`;
   }
@@ -137,7 +137,7 @@ export function summarize(
   const estimatedGraded: Record<string, number> = {};
   if (ungraded) {
     for (const [k, mult] of Object.entries(settings.gradeMultipliers)) {
-      if (!(k in graded)) estimatedGraded[k] = round2(ungraded * mult);
+      if (!Object.hasOwn(graded, k)) estimatedGraded[k] = round2(ungraded * mult);
     }
   }
 
