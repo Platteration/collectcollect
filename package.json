@@ -15,6 +15,7 @@
     "test": "npm run test --workspaces --if-present",
     "e2e": "npm run e2e --workspaces --if-present",
     "cards": "npm run dev -w @collectcollect/cards",
-    "skins": "npm run dev -w @collectcollect/skins"
+    "skins": "npm run dev -w @collectcollect/skins",
+    "retro-games": "npm run dev -w @collectcollect/retro-games"
   }
 }

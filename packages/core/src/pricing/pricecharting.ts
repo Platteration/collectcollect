@@ -149,8 +149,16 @@ export function scoreProduct(q: ProductMatch, p: PcProduct): number {
   }
   if (q.year && (console.includes(String(q.year)) || p["release-date"]?.startsWith(String(q.year)))) score += 1;
   const pn = productName.toLowerCase();
-  for (const word of q.variantWords ?? []) {
-    if (pn.includes(word.toLowerCase())) score += 0.5;
+  // Single letters ("s" from an apostrophe) match anything and say nothing.
+  const words = (q.variantWords ?? []).filter((w) => w.length > 1);
+  if (words.length) {
+    // A copy that says which variant it is should land on the listing that says so, year or no year.
+    const hits = words.filter((w) => pn.includes(w.toLowerCase())).length;
+    score += (hits / words.length) * 2;
+  } else if (/\[[^\]]+\]/.test(productName)) {
+    // PriceCharting brackets a variant ("[Player's Choice]", "[Not for Resale]",
+    // "[Newsstand]"); a plain copy should not be priced off one.
+    score -= 1;
   }
   return score;
 }
