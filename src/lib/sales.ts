@@ -49,9 +49,15 @@ export function recordSale(cardId: number, input: SaleInput): Sale {
   const quantity = Math.floor(Number(input.quantity ?? 1));
   if (!Number.isFinite(quantity) || quantity < 1) throw new Error("Sell at least one copy");
   if (quantity > card.quantity) throw new Error(`You only have ${card.quantity} cop${card.quantity === 1 ? "y" : "ies"} to sell`);
+  // A price that is not a number reaches here as null, because that is what
+  // JSON does with NaN — and Number(null) is 0, which would book a free sale
+  // and take the copies away with it. A deliberate 0 is still allowed.
+  if (input.unitPrice === null || input.unitPrice === undefined || (input.unitPrice as unknown) === "") {
+    throw new Error("Sale price is required");
+  }
   const unitPrice = Number(input.unitPrice);
   if (!Number.isFinite(unitPrice) || unitPrice < 0) throw new Error("Sale price must be a number");
-  const fees = Number(input.fees ?? 0);
+  const fees = input.fees === null || input.fees === undefined ? 0 : Number(input.fees);
   if (!Number.isFinite(fees) || fees < 0) throw new Error("Fees must be a number");
   const soldAt = input.soldAt ? new Date(input.soldAt) : new Date();
   if (Number.isNaN(soldAt.getTime())) throw new Error("Sale date is not a valid date");

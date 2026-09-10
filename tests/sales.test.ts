@@ -60,3 +60,34 @@ describe("sales", () => {
     expect(realizedReturn([]).percent).toBeNull();
   });
 });
+
+describe("a sale with no usable price", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("is refused rather than booked as free", () => {
+    const card = createCard({ game: "pokemon", name: "Snorlax", quantity: 2 });
+    // What a browser sends when the price box holds "abc": JSON has no NaN,
+    // so it arrives as null — and Number(null) is 0.
+    expect(() => recordSale(card.id, { unitPrice: null as unknown as number })).toThrow(/Sale price is required/);
+    expect(() => recordSale(card.id, { unitPrice: undefined as unknown as number })).toThrow(/Sale price is required/);
+    expect(() => recordSale(card.id, { unitPrice: "" as unknown as number })).toThrow(/Sale price is required/);
+    expect(() => recordSale(card.id, { unitPrice: "abc" as unknown as number })).toThrow(/must be a number/);
+    expect(() => recordSale(card.id, { unitPrice: -5 })).toThrow(/must be a number/);
+    // Nothing was sold and no copies went anywhere.
+    expect(listSalesForCard(card.id)).toHaveLength(0);
+    expect(getCard(card.id)?.quantity).toBe(2);
+
+    // A deliberate giveaway is still a sale.
+    const free = recordSale(card.id, { unitPrice: 0 });
+    expect(free.unitPrice).toBe(0);
+    expect(getCard(card.id)?.quantity).toBe(1);
+  });
+
+  it("refuses fees that are not a number", () => {
+    const card = createCard({ game: "pokemon", name: "Lapras", quantity: 1 });
+    expect(() => recordSale(card.id, { unitPrice: 10, fees: "abc" as unknown as number })).toThrow(/Fees must be a number/);
+    // Absent fees are still zero.
+    expect(recordSale(card.id, { unitPrice: 10, fees: null as unknown as number }).fees).toBe(0);
+  });
+});
+

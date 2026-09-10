@@ -104,15 +104,30 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
   };
 
   const logSale = async () => {
+    const price = Number(saleForm.unitPrice);
+    if (!Number.isFinite(price) || price < 0) {
+      setError("Sale price must be a number.");
+      return;
+    }
+    const copies = Number(saleForm.quantity);
+    if (!Number.isInteger(copies) || copies < 1) {
+      setError("Sell at least one copy.");
+      return;
+    }
+    const fees = saleForm.fees.trim() === "" ? 0 : Number(saleForm.fees);
+    if (!Number.isFinite(fees) || fees < 0) {
+      setError("Fees must be a number.");
+      return;
+    }
     setBusy("sell");
     setError(null);
     try {
       const res = await api<{ sale: Sale; card: CardRecord }>(`/api/cards/${card.id}/sales`, {
         method: "POST",
         body: JSON.stringify({
-          quantity: Number(saleForm.quantity),
-          unitPrice: Number(saleForm.unitPrice),
-          fees: saleForm.fees.trim() === "" ? 0 : Number(saleForm.fees),
+          quantity: copies,
+          unitPrice: price,
+          fees,
           // "2026-09-07" alone parses as UTC midnight, which reads as the day
           // before in the Americas; the time suffix makes it local.
           soldAt: saleForm.soldAt ? new Date(`${saleForm.soldAt}T12:00:00`).toISOString() : undefined,

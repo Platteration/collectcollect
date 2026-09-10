@@ -10,7 +10,11 @@ import { assertZippable, fileChunks, zipStream, type ZipEntry } from "@/lib/zip"
 export async function GET() {
   try {
     const files = collectionFiles();
-    if (!files.length) return jsonError("There is nothing in the collection yet", 404);
+    // The folder always holds its own explainer; a download of nothing but
+    // that is not what anyone asked for.
+    if (!files.some((file) => file.name.startsWith("cards/"))) {
+      return jsonError("There is nothing in the collection yet", 404);
+    }
     const entries: ZipEntry[] = files.map((file) => ({
       name: file.name,
       size: file.size,
