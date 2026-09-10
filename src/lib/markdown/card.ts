@@ -1,3 +1,4 @@
+import type { Acquisition } from "../acquisitions";
 import type {
   CardInput,
   CardRecord,
@@ -18,6 +19,18 @@ export interface CardBundle {
   card: CardRecord;
   sales: Sale[];
   snapshots: PriceSnapshot[];
+  acquisitions: Acquisition[];
+  /** Which lots each sale took, keyed by sale id, when that is recorded. */
+  saleLots?: Map<number, Array<{ quantity: number; unitCost: number | null; acquiredAt: string | null }>>;
+}
+
+export interface ParsedLot {
+  quantity: number;
+  remaining: number;
+  unitCost: number | null;
+  acquiredAt: string;
+  source: string | null;
+  notes: string | null;
 }
 
 /** What reading one of those files back gives you. */
@@ -26,7 +39,8 @@ export interface ParsedCard {
   input: CardInput;
   createdAt: string | null;
   updatedAt: string | null;
-  sales: Array<Omit<Sale, "id" | "cardId" | "createdAt">>;
+  sales: Array<Omit<Sale, "id" | "cardId" | "createdAt"> & { lots: ParsedSaleLot[] }>;
+  acquisitions: ParsedLot[];
   snapshots: Array<{ fetchedAt: string; summary: PriceSummary }>;
   warnings: string[];
 }
@@ -41,8 +55,19 @@ const STORED_IDENTIFICATION = IdentificationSchema.extend({
   condition_assessment: IdentificationSchema.shape.condition_assessment.nullish(),
 });
 
+export interface ParsedSaleLot {
+  quantity: number;
+  unitCost: number | null;
+  /** The day the lot was acquired, which is how it is matched back to one. */
+  acquiredOn: string | null;
+}
+
 const VALUE_HEADERS = ["Date", "Your copy", "Ungraded", "Graded", "Basis"];
-const SALE_HEADERS = ["Sold", "Copies", "Each", "Fees", "Cost each", "Venue", "Notes"];
+const ACQUISITION_HEADERS = ["Acquired", "Copies", "Left", "Cost each", "From", "Notes"];
+// "Lots" is appended rather than slotted in beside "Cost each", which would read
+// better: the parser reads sale columns by position, so a file written before
+// this column existed has to keep parsing exactly as it did.
+const SALE_HEADERS = ["Sold", "Copies", "Each", "Fees", "Cost each", "Venue", "Notes", "Lots"];
 
 /** `0007-charizard-base-set.md` — sorts by acquisition order and still reads. */
 export function cardFileName(card: Pick<CardRecord, "id" | "name" | "setName">): string {
@@ -110,6 +135,33 @@ function moneyCell(value: number | null, source: string | null): string {
 
 // Source labels carry their own brackets ("Scryfall (TCGplayer-derived USD)"),
 // so the split has to run to the last bracket, not the first balanced pair.
+/** `2 @ $40.00 (2019-05-02) · 1 @ $120.00 (2021-08-11)` */
+function lotsCell(lots: Array<{ quantity: number; unitCost: number | null; acquiredAt: string | null }>): string {
+  if (!lots.length) return "";
+  return lots
+    .map((lot) => {
+      const cost = lot.unitCost === null ? "—" : money(lot.unitCost);
+      const day = lot.acquiredAt ? ` (${lot.acquiredAt.slice(0, 10)})` : "";
+      return `${lot.quantity} @ ${cost}${day}`;
+    })
+    .join(" · ");
+}
+
+const LOT_RE = /^\s*(\d+)\s*@\s*(.*?)\s*(?:\((\d{4}-\d{2}-\d{2})\))?\s*$/;
+
+function parseLotsCell(text: string): ParsedSaleLot[] {
+  const out: ParsedSaleLot[] = [];
+  if (!text) return out;
+  for (const part of text.split("·")) {
+    const match = LOT_RE.exec(part);
+    if (!match) continue;
+    const quantity = Number(match[1]);
+    if (!Number.isInteger(quantity) || quantity < 1) continue;
+    out.push({ quantity, unitCost: readMoney(match[2] ?? ""), acquiredOn: match[3] ?? null });
+  }
+  return out;
+}
+
 const SOURCE_RE = /^(.*?)\s*\((.*)\)\s*$/;
 
 function splitSource(text: string): { rest: string; source: string | null } {
@@ -151,7 +203,7 @@ function unescapeProse(text: string): string {
  * the app to make sense of it.
  */
 export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: string) => string } = {}): string {
-  const { card, sales, snapshots } = bundle;
+  const { card, sales, snapshots, acquisitions, saleLots } = bundle;
   const latest = snapshots.length ? snapshots[0].summary : null;
   const photoHref = opts.photoHref ?? ((name: string) => `../uploads/${name}`);
 
@@ -241,12 +293,40 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
     );
   }
 
+  if (acquisitions.length) {
+    blocks.push(
+      "## Acquisitions",
+      table(
+        ACQUISITION_HEADERS,
+        acquisitions.map((a) => [
+          a.acquiredAt,
+          a.quantity,
+          a.remaining,
+          // An unrecorded cost writes as an em dash and reads back as "not
+          // known", which is a different thing from a card that was free.
+          a.unitCost === null ? "" : money(a.unitCost),
+          a.source ?? "",
+          a.notes ?? "",
+        ]),
+      ),
+    );
+  }
+
   if (sales.length) {
     blocks.push(
       "## Sales",
       table(
         SALE_HEADERS,
-        sales.map((s) => [s.soldAt, s.quantity, money(s.unitPrice), money(s.fees), s.unitCost === null ? "" : money(s.unitCost), s.venue ?? "", s.notes ?? ""]),
+        sales.map((s) => [
+          s.soldAt,
+          s.quantity,
+          money(s.unitPrice),
+          money(s.fees),
+          s.unitCost === null ? "" : money(s.unitCost),
+          s.venue ?? "",
+          s.notes ?? "",
+          lotsCell(saleLots?.get(s.id) ?? []),
+        ]),
       ),
     );
   }
@@ -391,6 +471,42 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
       soldAt,
       venue: venue || null,
       notes: notes || null,
+      // Absent in files written before sales said which copies they took.
+      lots: parseLotsCell(row[7] ?? ""),
+    });
+  }
+
+  const acquisitions: ParsedLot[] = [];
+  const lotSection = readSection(body, "Acquisitions");
+  for (const row of readTable(body, "Acquisitions")) {
+    const [acquiredAt, copies, left, cost, source, lotNotes] = row;
+    const quantity = num(copies);
+    if (!acquiredAt || Number.isNaN(Date.parse(acquiredAt)) || quantity === null || quantity < 1) {
+      warnings.push(`Skipped an unreadable purchase row: ${row.join(" | ")}`);
+      continue;
+    }
+    const remaining = num(left);
+    acquisitions.push({
+      quantity: Math.round(quantity),
+      remaining: remaining === null ? Math.round(quantity) : Math.max(0, Math.min(Math.round(quantity), Math.round(remaining))),
+      unitCost: readMoney(cost ?? ""),
+      acquiredAt,
+      source: source || null,
+      notes: lotNotes || null,
+    });
+  }
+  if (lotSection === null && (input.quantity ?? 0) > 0) {
+    // A file written before this app recorded purchases separately. It knows
+    // how many copies there are and what they cost on average, which is exactly
+    // one lot's worth of information — the same reading the database backfill
+    // gives an older collection.
+    acquisitions.push({
+      quantity: input.quantity!,
+      remaining: input.quantity!,
+      unitCost: input.purchasePrice ?? null,
+      acquiredAt: str(data.created_at) ?? str(data.updated_at) ?? new Date(0).toISOString(),
+      source: null,
+      notes: null,
     });
   }
 
@@ -433,6 +549,7 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
     createdAt: str(data.created_at),
     updatedAt: str(data.updated_at),
     sales,
+    acquisitions,
     snapshots,
     warnings,
   };

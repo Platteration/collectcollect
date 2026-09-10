@@ -1,3 +1,4 @@
+import { reconcileToQuantity } from "../acquisitions";
 import { createCard, discardDeferredMirror, findSimilar, getCard, updateCard } from "../cards";
 import { getDb } from "../db";
 import type { CardInput, CardRecord } from "../types";
@@ -19,6 +20,7 @@ export interface CollectionImport {
   created: number;
   replaced: number;
   sales: number;
+  acquisitions: number;
   prices: number;
   skipped: Array<{ file: string; reason: string }>;
   warnings: Array<{ file: string; message: string }>;
@@ -28,7 +30,7 @@ export interface CollectionImport {
 export const IMPORT_MAX_BYTES = 128 * 1024 * 1024;
 
 export function importCardFiles(files: Array<{ name: string; text: string }>): CollectionImport {
-  const result: CollectionImport = { created: 0, replaced: 0, sales: 0, prices: 0, skipped: [], warnings: [] };
+  const result: CollectionImport = { created: 0, replaced: 0, sales: 0, acquisitions: 0, prices: 0, skipped: [], warnings: [] };
   const db = getDb();
   /** Card id -> whether it could already be filed under another name. */
   const touched = new Map<number, boolean>();
@@ -87,12 +89,45 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
 
       // The file is the record of this card's history, so it replaces what is
       // held rather than adding to it; that is what makes a repeat import safe.
+
+      // Purchases first: the sales below say which of them they took from.
+      // The file records how many copies each lot has left, so they go in
+      // exactly as written rather than being replayed against the sales.
+      db.prepare("DELETE FROM acquisitions WHERE card_id = ?").run(card.id);
+      const restoredLots: Array<{ id: number; day: string; unitCost: number | null }> = [];
+      for (const lot of parsed.acquisitions) {
+        const inserted = db
+          .prepare(
+            `INSERT INTO acquisitions (card_id, quantity, remaining, unit_cost, acquired_at, source, notes, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(card.id, lot.quantity, lot.remaining, lot.unitCost, lot.acquiredAt, lot.source, lot.notes, lot.acquiredAt);
+        restoredLots.push({ id: Number(inserted.lastInsertRowid), day: lot.acquiredAt.slice(0, 10), unitCost: lot.unitCost });
+        result.acquisitions++;
+      }
+
       db.prepare("DELETE FROM sales WHERE card_id = ?").run(card.id);
       for (const sale of parsed.sales) {
-        db.prepare(
-          `INSERT INTO sales (card_id, quantity, unit_price, fees, unit_cost, sold_at, venue, notes, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(card.id, sale.quantity, sale.unitPrice, sale.fees, sale.unitCost, sale.soldAt, sale.venue, sale.notes, sale.soldAt);
+        const inserted = db
+          .prepare(
+            `INSERT INTO sales (card_id, quantity, unit_price, fees, unit_cost, sold_at, venue, notes, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(card.id, sale.quantity, sale.unitPrice, sale.fees, sale.unitCost, sale.soldAt, sale.venue, sale.notes, sale.soldAt);
+        const saleId = Number(inserted.lastInsertRowid);
+        // Which copies this sale took, matched back to the lots just restored
+        // by the day they were bought and what they cost. A file that predates
+        // the column simply has no provenance, and undoing such a sale
+        // reconstructs a lot instead of restoring one.
+        for (const took of sale.lots) {
+          const match = restoredLots.find((lot) => lot.day === took.acquiredOn && lot.unitCost === took.unitCost);
+          db.prepare("INSERT INTO sale_lots (sale_id, acquisition_id, quantity, unit_cost) VALUES (?, ?, ?, ?)").run(
+            saleId,
+            match?.id ?? null,
+            took.quantity,
+            took.unitCost,
+          );
+        }
         result.sales++;
       }
 
@@ -108,6 +143,20 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
           JSON.stringify(snapshot.summary),
         );
         result.prices++;
+      }
+
+      // The quantity in the front matter is what a person reads at the top of
+      // the file and in the index, so it decides how many copies there are; the
+      // purchases decide what they cost. In a hand-edited file where the two
+      // disagree, the gap is closed with copies of unknown cost rather than by
+      // inventing a price, and the difference is reported.
+      const held = parsed.acquisitions.reduce((n, lot) => n + lot.remaining, 0);
+      if (held !== card.quantity) {
+        result.warnings.push({
+          file: file.name,
+          message: `This file says ${card.quantity} cop${card.quantity === 1 ? "y" : "ies"} but its purchases account for ${held}; the difference was recorded with no cost`,
+        });
+        reconcileToQuantity(card.id, card.quantity);
       }
     }
   });
@@ -168,14 +217,21 @@ function isSameCard(existing: CardRecord, input: CardInput): boolean {
 
 /**
  * Move a freshly created card onto the id its file claims, so that a collection
- * rebuilt from files keeps the numbering its links and file names use. Only the
- * card row exists at this point, so nothing references the id being changed.
+ * rebuilt from files keeps the numbering its links and file names use.
  */
 function adoptId(card: CardRecord, wanted: number): CardRecord | null {
   const db = getDb();
   if (!Number.isInteger(wanted) || wanted < 1) return null;
   if (getCard(wanted)) return null;
+  // The card now has children — its acquisition lot, and in principle anything
+  // else keyed on the card — so parent and children have to move together.
+  // Deferring foreign keys holds the check until the transaction commits, by
+  // which point both ends agree; the pragma is scoped to this transaction.
+  db.pragma("defer_foreign_keys = ON");
   db.prepare("UPDATE cards SET id = ? WHERE id = ?").run(wanted, card.id);
+  for (const table of ["acquisitions", "price_snapshots", "sales", "submission_cards", "alerts"]) {
+    db.prepare(`UPDATE ${table} SET card_id = ? WHERE card_id = ?`).run(wanted, card.id);
+  }
   // AUTOINCREMENT hands out one past the high-water mark, which the update above
   // does not raise; leaving it behind would hand out an id that already exists.
   // Never lower the mark: ids that belonged to deleted cards must not be

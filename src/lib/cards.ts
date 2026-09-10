@@ -9,6 +9,7 @@ import type {
   PriceSummary,
 } from "./types";
 import { CONDITIONS, GAMES, GRADING_STATUSES, type GradingStatus } from "./types";
+import { addLot, costBasisByCard, deleteLot, getLot, listLots, reconcileToQuantity, recomputePurchasePrice, type AcquisitionInput } from "./acquisitions";
 import { isValidUploadName } from "./images";
 import { mirrorCard, unmirrorCard } from "./markdown/mirror";
 import { normalizeNumber } from "./pricing/match";
@@ -202,6 +203,11 @@ export function flushDeferredMirror(): void {
   deferredMirror.clear();
 }
 
+/** Rewrite a card's Markdown file after something outside this module changed it. */
+export function refreshMirror(cardId: number): void {
+  touch(getCard(cardId));
+}
+
 export function discardDeferredMirror(): void {
   deferredMirror.clear();
 }
@@ -227,7 +233,13 @@ export function createCard(input: CardInput): CardRecord {
       manualGraded: JSON.stringify(c.manualGraded),
       now,
     });
-  const card = getCard(Number(result.lastInsertRowid))!;
+  const created = getCard(Number(result.lastInsertRowid))!;
+  // Every copy has to belong to a lot, or the cost basis and the quantity stop
+  // agreeing. A card added without a price gets a lot with an unknown cost.
+  if (created.quantity > 0) {
+    addLot(created.id, { quantity: created.quantity, unitCost: created.purchasePrice, acquiredAt: created.createdAt });
+  }
+  const card = getCard(created.id)!;
   touch(card, { mayHaveOldName: false });
   return card;
 }
@@ -254,9 +266,54 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
       manualGraded: JSON.stringify(merged.manualGraded),
       now: new Date().toISOString(),
     });
+  if (merged.quantity !== existing.quantity) reconcileToQuantity(id, merged.quantity);
+  if (patch.purchasePrice !== undefined) {
+    // With one lot the purchase price is still something the owner sets
+    // directly. With several it is an average of them, so the edit is ignored
+    // and the recompute below puts the average back.
+    const lots = listLots(id);
+    if (lots.length === 1) {
+      getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, lots[0].id);
+    }
+  }
+  recomputePurchasePrice(id);
   const card = getCard(id);
   touch(card);
   return card;
+}
+
+/** Record another purchase of a card already held. */
+export function addAcquisition(cardId: number, input: AcquisitionInput): CardRecord | null {
+  const run = getDb().transaction(() => {
+    const card = getCard(cardId);
+    if (!card) return null;
+    const lot = addLot(cardId, input);
+    getDb().prepare("UPDATE cards SET quantity = quantity + ?, updated_at = ? WHERE id = ?").run(lot.quantity, new Date().toISOString(), cardId);
+    recomputePurchasePrice(cardId);
+    return getCard(cardId);
+  });
+  const updated = run();
+  touch(updated);
+  return updated;
+}
+
+/** Undo a purchase that was recorded by mistake. */
+export function removeAcquisition(lotId: number): CardRecord | null {
+  const run = getDb().transaction(() => {
+    const lot = getLot(lotId);
+    if (!lot) return null;
+    const card = getCard(lot.cardId);
+    if (!card) return null;
+    deleteLot(lotId);
+    getDb()
+      .prepare("UPDATE cards SET quantity = MAX(0, quantity - ?), updated_at = ? WHERE id = ?")
+      .run(lot.remaining, new Date().toISOString(), lot.cardId);
+    recomputePurchasePrice(lot.cardId);
+    return getCard(lot.cardId);
+  });
+  const updated = run();
+  touch(updated);
+  return updated;
 }
 
 function normalizeSet(value: string | null | undefined): string {
@@ -338,7 +395,11 @@ export function intakeCard(input: CardInput): IntakeOutcome {
     }
     if (interchangeable.length === 1) {
       const existing = interchangeable[0];
-      const patch: Partial<CardInput> = { quantity: existing.quantity + (clean.quantity || 1) };
+      const copies = clean.quantity || 1;
+      // The copies being merged in are their own purchase at their own price;
+      // folding them into the existing row's price would lose what they cost.
+      addLot(existing.id, { quantity: copies, unitCost: clean.purchasePrice });
+      const patch: Partial<CardInput> = { quantity: existing.quantity + copies };
       if (!existing.imagePath && clean.imagePath) {
         patch.imagePath = clean.imagePath;
         patch.accentColor = clean.accentColor;
@@ -455,6 +516,8 @@ export function allSnapshots(): PriceSnapshot[] {
 }
 
 /** Latest snapshot for every card in one query (for the collection view). */
+export { costBasisByCard };
+
 export function latestSnapshotsByCard(): Map<number, PriceSnapshot> {
   const rows = getDb()
     .prepare(

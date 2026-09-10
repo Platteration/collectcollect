@@ -2,10 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb, openDatabase, setDb } from "@/lib/db";
-import { addSnapshot, createCard, deleteCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
+import { addAcquisition, addSnapshot, createCard, deleteCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
 import { deleteSale, recordSale } from "@/lib/sales";
 import { cardsDir, collectionDir, collectionStatus, flushCollection, readCardFiles, rebuildCollection } from "@/lib/markdown/mirror";
 import { importCardFiles } from "@/lib/markdown/restore";
+import { costBasis, listLots, verifyLotInvariant } from "@/lib/acquisitions";
+import { listSales } from "@/lib/sales";
+import { realizedReturn } from "@/lib/analytics";
 import { latestSnapshotsByCard } from "@/lib/cards";
 import { parseCardMarkdown } from "@/lib/markdown/card";
 import { parseDocument, readSection, readTable, writeFrontMatter } from "@/lib/markdown/format";
@@ -271,6 +274,80 @@ describe("files written by something other than this app", () => {
     expect(brokenParsed.warnings.join(" ")).toMatch(/did not describe a card/);
   });
 
+  it("writes what every copy cost into the file and reads it back", () => {
+    const card = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", purchasePrice: 100 });
+    addAcquisition(card.id, { quantity: 2, unitCost: 0, source: "pack pull | free" });
+    addAcquisition(card.id, { quantity: 1, unitCost: null, source: "inherited" });
+
+    const text = fileFor(card.id);
+    expect(text).toContain("## Acquisitions");
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.acquisitions).toMatchObject([
+      { quantity: 1, remaining: 1, unitCost: 100 },
+      // Free is a price. Unknown is not, and the two must not collapse.
+      { quantity: 2, remaining: 2, unitCost: 0, source: "pack pull | free" },
+      { quantity: 1, remaining: 1, unitCost: null, source: "inherited" },
+    ]);
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("says which copies a sale took", () => {
+    const card = createCard({ game: "pokemon", name: "Charizard", purchasePrice: 100 });
+    addAcquisition(card.id, { quantity: 1, unitCost: 300 });
+    recordSale(card.id, { quantity: 2, unitPrice: 500 });
+    const parsed = parseCardMarkdown(fileFor(card.id))!;
+    expect(parsed.sales[0].lots).toMatchObject([
+      { quantity: 1, unitCost: 100 },
+      { quantity: 1, unitCost: 300 },
+    ]);
+  });
+
+  it("reads an old file that only says what was paid", () => {
+    const text = [
+      "---",
+      'id: 7',
+      'name: "Charizard"',
+      'game: "pokemon"',
+      "quantity: 3",
+      "purchase_price: 250",
+      'created_at: "2024-01-01T00:00:00.000Z"',
+      "---",
+      "",
+      "# Charizard",
+      "",
+    ].join("\n");
+    const parsed = parseCardMarkdown(text)!;
+    // One purchase of three copies at the only price the file knows.
+    expect(parsed.acquisitions).toEqual([
+      { quantity: 3, remaining: 3, unitCost: 250, acquiredAt: "2024-01-01T00:00:00.000Z", source: null, notes: null },
+    ]);
+
+    const empty = parseCardMarkdown(text.replace("quantity: 3", "quantity: 0"))!;
+    expect(empty.acquisitions).toEqual([]);
+  });
+
+  it("keeps a sale readable in a file written before lots existed", () => {
+    const text = [
+      "---",
+      'name: "Charizard"',
+      'game: "pokemon"',
+      "quantity: 0",
+      "---",
+      "",
+      "# Charizard",
+      "",
+      "## Sales",
+      "",
+      "| Sold | Copies | Each | Fees | Cost each | Venue | Notes |",
+      "| --- | --- | --- | --- | --- | --- | --- |",
+      "| 2026-01-02T10:00:00.000Z | 1 | $500.00 | $40.00 | $100.00 | eBay | — |",
+      "",
+    ].join("\n");
+    const parsed = parseCardMarkdown(text)!;
+    // Seven columns, not eight: the sale still reads, with no provenance.
+    expect(parsed.sales[0]).toMatchObject({ quantity: 1, unitPrice: 500, fees: 40, unitCost: 100, venue: "eBay", lots: [] });
+  });
+
   it("keeps a source label that has brackets of its own", () => {
     const text = [
       "---",
@@ -481,9 +558,12 @@ describe("recovering a collection from its files", () => {
 
   it("survives losing the database entirely", () => {
     // The whole promise: throw away everything but the folder, and the
-    // collection still values the same.
+    // collection still values the same — and still knows what it cost.
     const a = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", quantity: 2, purchasePrice: 100 });
     const b = createCard({ game: "mtg", name: "Black Lotus", quantity: 1, purchasePrice: 400 });
+    // A second copy at a different price, and a sale that takes the older one.
+    addAcquisition(a.id, { quantity: 1, unitCost: 250, source: "card show" });
+    recordSale(a.id, { quantity: 1, unitPrice: 500, fees: 20 });
     // Several prices each, so the rebuilt history has to keep its direction:
     // the newest price is the one the portfolio is valued at.
     addSnapshot(a.id, summary(120, "2025-06-02T10:00:00.000Z"));
@@ -492,13 +572,24 @@ describe("recovering a collection from its files", () => {
     addSnapshot(b.id, summary(9000, "2026-01-02T10:00:00.000Z"));
     flushCollection();
     const before = totalValue();
+    const investedBefore = costBasis(a.id);
+    const realizedBefore = realizedReturn(listSales());
     const files = readCardFiles();
 
     setDb(openDatabase(":memory:"));
     importCardFiles(files);
     expect(totalValue()).toBe(before);
-    expect(before).toBe(300 * 2 + 9000);
     const restored = listCards().find((c) => c.name === "Charizard")!;
+    // What was paid for the copies still held, and for the one sold, both come
+    // back — including which copy the sale took.
+    expect(costBasis(restored.id)).toEqual(investedBefore);
+    expect(realizedReturn(listSales())).toEqual(realizedBefore);
+    expect(listLots(restored.id).map((l) => [l.quantity, l.remaining, l.unitCost])).toEqual([
+      [2, 1, 100],
+      [1, 1, 250],
+    ]);
+    expect(verifyLotInvariant()).toEqual([]);
+    expect(before).toBe(300 * 2 + 9000);
     expect(listSnapshots(restored.id).map((s) => s.summary.yourCopyValue)).toEqual([300, 120]);
   });
 });

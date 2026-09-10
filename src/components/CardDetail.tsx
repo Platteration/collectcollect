@@ -11,9 +11,11 @@ import { PortfolioChart } from "./charts/PortfolioChart";
 import { Slab } from "./Slab";
 import { VERDICT_STYLE } from "./verdict";
 import { CardForm, formFromCard, formToInput } from "./CardForm";
+import type { Acquisition } from "@/lib/acquisitions";
 import { PricePanel } from "./PricePanel";
 
 interface Props {
+  acquisitions: Acquisition[];
   card: CardRecord;
   latest: PriceSummary | null;
   history: PriceSnapshot[];
@@ -21,7 +23,7 @@ interface Props {
   sales: Sale[];
 }
 
-export function CardDetail({ card: initial, latest: initialLatest, history: initialHistory, settings, sales: initialSales }: Props) {
+export function CardDetail({ card: initial, latest: initialLatest, history: initialHistory, settings, sales: initialSales, acquisitions: initialAcquisitions }: Props) {
   const router = useRouter();
   const [card, setCard] = useState(initial);
   const [latest, setLatest] = useState(initialLatest);
@@ -35,9 +37,12 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
       .join(", "),
   );
   const [sales, setSales] = useState(initialSales);
+  const [acquisitions, setAcquisitions] = useState(initialAcquisitions);
+  const [buying, setBuying] = useState(false);
+  const [buyForm, setBuyForm] = useState({ quantity: "1", unitCost: "", acquiredAt: new Date().toISOString().slice(0, 10), source: "" });
   const [selling, setSelling] = useState(false);
   const [saleForm, setSaleForm] = useState({ quantity: "1", unitPrice: "", fees: "", soldAt: new Date().toISOString().slice(0, 10), venue: "", notes: "" });
-  const [busy, setBusy] = useState<"" | "price" | "save" | "delete" | "sell">("");
+  const [busy, setBusy] = useState<"" | "price" | "save" | "delete" | "sell" | "buy">("");
   const [error, setError] = useState<string | null>(null);
 
   const refreshPrice = async () => {
@@ -103,6 +108,61 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
     }
   };
 
+  const recordPurchase = async () => {
+    const copies = Number(buyForm.quantity);
+    if (!Number.isInteger(copies) || copies < 1) {
+      setError("Enter at least one copy.");
+      return;
+    }
+    const cost = buyForm.unitCost.trim() === "" ? null : Number(buyForm.unitCost);
+    if (cost !== null && (!Number.isFinite(cost) || cost < 0)) {
+      setError("Cost each must be a number.");
+      return;
+    }
+    setBusy("buy");
+    setError(null);
+    try {
+      const res = await api<{ card: CardRecord; acquisitions: Acquisition[] }>(`/api/cards/${card.id}/acquisitions`, {
+        method: "POST",
+        body: JSON.stringify({
+          quantity: copies,
+          unitCost: cost,
+          acquiredAt: buyForm.acquiredAt ? new Date(`${buyForm.acquiredAt}T12:00:00`).toISOString() : undefined,
+          source: buyForm.source,
+        }),
+      });
+      setCard(res.card);
+      setAcquisitions(res.acquisitions);
+      setBuying(false);
+      setBuyForm({ ...buyForm, quantity: "1", unitCost: "", source: "" });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const removePurchase = async (lot: Acquisition) => {
+    if (!confirm(`Remove the purchase of ${lot.quantity} cop${lot.quantity === 1 ? "y" : "ies"}? The copies go with it.`)) return;
+    setError(null);
+    try {
+      const res = await api<{ card: CardRecord; acquisitions: Acquisition[] }>(`/api/cards/${card.id}/acquisitions/${lot.id}`, { method: "DELETE" });
+      setCard(res.card);
+      setAcquisitions(res.acquisitions);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const reloadPurchases = async () => {
+    try {
+      const res = await api<{ acquisitions: Acquisition[] }>(`/api/cards/${card.id}/acquisitions`);
+      setAcquisitions(res.acquisitions);
+    } catch {
+      /* the sale itself went through; the list catches up on the next load */
+    }
+  };
+
   const logSale = async () => {
     const price = Number(saleForm.unitPrice);
     if (!Number.isFinite(price) || price < 0) {
@@ -137,6 +197,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
       });
       setSales((prev) => [res.sale, ...prev]);
       setCard(res.card);
+      await reloadPurchases();
       setSelling(false);
       setSaleForm((f) => ({ ...f, unitPrice: "", fees: "", venue: "", notes: "" }));
       router.refresh();
@@ -154,6 +215,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
       setSales((prev) => prev.filter((s) => s.id !== sale.id));
       const res = await api<{ card: CardRecord }>(`/api/cards/${card.id}`);
       setCard(res.card);
+      await reloadPurchases();
       router.refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -417,6 +479,84 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             </p>
           </section>
         )}
+
+        <section className="card-surface p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-semibold">What you paid</h3>
+            {!buying && (
+              <button type="button" className="btn-secondary" onClick={() => setBuying(true)}>
+                Add copies
+              </button>
+            )}
+          </div>
+
+          {buying && (
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <label className="block">
+                <span className="label">Copies</span>
+                <input className="input" value={buyForm.quantity} onChange={(e) => setBuyForm({ ...buyForm, quantity: e.target.value })} inputMode="numeric" />
+              </label>
+              <label className="block">
+                <span className="label">Cost each (USD)</span>
+                <input
+                  className="input"
+                  value={buyForm.unitCost}
+                  onChange={(e) => setBuyForm({ ...buyForm, unitCost: e.target.value })}
+                  inputMode="decimal"
+                  placeholder="leave blank if unknown"
+                  autoFocus
+                />
+              </label>
+              <label className="block">
+                <span className="label">Bought</span>
+                <input className="input" type="date" value={buyForm.acquiredAt} onChange={(e) => setBuyForm({ ...buyForm, acquiredAt: e.target.value })} />
+              </label>
+              <label className="block">
+                <span className="label">Where from</span>
+                <input className="input" value={buyForm.source} onChange={(e) => setBuyForm({ ...buyForm, source: e.target.value })} placeholder="eBay, show, pack" />
+              </label>
+              <div className="col-span-2 flex gap-2 sm:col-span-4">
+                <button type="button" className="btn-primary" onClick={recordPurchase} disabled={busy !== ""}>
+                  {busy === "buy" ? "Saving…" : "Record purchase"}
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => setBuying(false)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {acquisitions.length === 0 ? (
+            !buying && <p className="mt-2 text-sm text-neutral-500">No purchases recorded.</p>
+          ) : (
+            <ul className="mt-3 divide-y divide-black/5 text-sm dark:divide-white/5">
+              {acquisitions.map((lot) => (
+                <li key={lot.id} className="flex flex-wrap items-baseline justify-between gap-x-3 py-2">
+                  <div>
+                    <div>
+                      <strong>{lot.unitCost === null ? "Cost not recorded" : `${money(lot.unitCost)} each`}</strong>
+                      {lot.source ? ` · ${lot.source}` : ""}
+                    </div>
+                    <div className="text-xs text-neutral-500">
+                      {lot.quantity} cop{lot.quantity === 1 ? "y" : "ies"}
+                      {lot.remaining === lot.quantity ? "" : lot.remaining === 0 ? ", all gone" : `, ${lot.remaining} left`} · {when(lot.acquiredAt)}
+                    </div>
+                  </div>
+                  {lot.remaining === lot.quantity && (
+                    <button type="button" className="text-xs text-neutral-500 underline" onClick={() => removePurchase(lot)}>
+                      Remove
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {acquisitions.some((l) => l.unitCost === null && l.remaining > 0) && (
+            <p className="mt-2 text-xs text-neutral-500">
+              Copies with no recorded cost are left out of the return rather than counted as free.
+            </p>
+          )}
+        </section>
 
         <section className="card-surface p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">

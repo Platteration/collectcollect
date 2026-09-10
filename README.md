@@ -78,11 +78,17 @@ Sports cards have no free price API; without a PriceCharting token you can still
 
 **Backup and restore.** Settings offers a single zip holding a consistent copy of the database (taken through SQLite's own backup, so it is safe while the app is running) and every photo, and takes one back to restore it. A restore validates the whole archive and opens its database before touching anything, refuses names that would escape the data directory or files the app did not write, and moves the collection being replaced into a dated folder rather than deleting it, so restoring the wrong file can be undone by hand. It holds the archive in memory, so it is capped at 512 MB; a larger collection is restored by unpacking the zip into the data directory with the app stopped.
 
+**What each copy cost.** Cards get bought more than once, rarely at the same price. Every purchase is recorded as its own lot — when, how many, what each one cost, and where from — so a second copy never overwrites what the first one cost. Adding a copy of a card you already own asks for that copy's price rather than just bumping a number. Selling takes the copies you have held longest first, and the gain is measured against what *those* copies cost, not against an average and not against the newest price. Undoing a sale puts the copies back in the lots they came from.
+
+A cost that was never recorded stays unrecorded rather than becoming zero: a card out of a bulk lot or a childhood shoebox is counted separately and left out of the return, because pricing it at nothing would report it as pure profit. `purchase_price` is now the average across the copies you still hold, worked out from the lots. Editing the quantity directly is treated as a correction to the count, not a purchase — the copies it adds have no price attached, and the app says so.
+
+Collections from before this existed get one lot per card from what was already known, and the same rule applies to Markdown files written by an older version.
+
 **Your collection is also plain text.** Every card is written to a Markdown file under `data/collection/cards/`, rewritten whenever that card changes: front matter holding the record (name, set, number, grade, copies, what you paid, where it is kept) and, below it, the same card written for a person — its photo, your notes, every price the app has recorded, and any sales. `index.md` lists the whole collection in one table, `README.md` in that folder explains the format to whoever finds it.
 
 This exists so the collection outlives the app. If CollectCollect is never updated again, or you would rather keep your catalogue somewhere else, the folder is already a complete, readable record that any text editor, spreadsheet, git repository or notes tool can open — no database, no export step, nothing to run. Settings has *Download the Markdown* for a zip of it, *Rewrite the files* to bring them up to date from the database, and *Rebuild from these files* to read a collection back in. Reading files back matches each file to the card it describes — by the id in the file, or, when that id belongs to something else, by the card itself — so importing the same folder twice changes nothing the second time, and a folder from somewhere else can only add to a collection, never overwrite a card it has nothing to do with. Rewriting never deletes: a file describing a card the database does not have is counted and left alone, since the likeliest reason for one is that the folder is the copy that survived. Writing is best-effort by design: a full or read-only disk degrades the plain-text copy and is reported in Settings, but never stops a card being saved. Set `MARKDOWN_MIRROR=off` to switch it off.
 
-The files hold every recorded price, but not the individual provider quotes behind each one. Photos stay in `data/uploads/`, which the card files link to, so keep the two together — the Markdown download is text only, while the full backup carries both.
+The files hold every purchase and every recorded price — including which purchase each sale drew from — but not the individual provider quotes behind each price. Photos stay in `data/uploads/`, which the card files link to, so keep the two together — the Markdown download is text only, while the full backup carries both.
 
 The archive is written and read by a small built-in zip writer and reader rather than a dependency. Tests check the writer against the system `unzip` and Python's `zipfile`, read back archives made by the system `zip` in both stored and deflated form, and confirm that a corrupted payload, a doctored entry name, a path that escapes, an oversized expansion and a database that will not open are each refused with the collection left untouched.
 
@@ -127,6 +133,8 @@ src/app/                 Next.js App Router pages and API routes
   api/alerts[/id]        GET the feed, POST marks all read, DELETE dismisses one
   api/cards/intake       POST — atomic add-or-merge used by scan mode
   api/backup             GET — the database and photos as one zip; /restore puts one back
+  api/cards/[id]/acquisitions
+                         GET/POST — what each copy cost; POST records another purchase
   api/collection         GET — the collection as Markdown; /rebuild rewrites it, /import reads it back
   api/import             POST — preview a CSV, or apply it with `apply: true`
   api/locations          GET — storage locations in use, for autocomplete
@@ -138,6 +146,7 @@ src/lib/pricing/         Providers, matching heuristics, summary/valuation, refr
 src/lib/analytics.ts     Portfolio value series, grading outlook (min/max/upside) and timing verdict
 src/lib/scheduler.ts     Hourly auto-refresh of stale prices (started from src/instrumentation.ts)
 src/components/charts/   Inline-SVG portfolio line and min/max outlook band charts
+src/lib/acquisitions.ts  Purchase lots: what each copy cost, consumed oldest first on a sale
 src/lib/markdown/        The plain-text copy: format, one card as a document, the
                          on-disk mirror, and reading a collection back out of it
 src/lib/zip.ts           Dependency-free streaming zip writer used by the backup

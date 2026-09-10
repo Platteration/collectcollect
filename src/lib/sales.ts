@@ -1,4 +1,5 @@
-import { getCard, updateCard } from "./cards";
+import { consumeFifo, recordSaleLots, restoreForSale, syncQuantityFromLots } from "./acquisitions";
+import { discardDeferredMirror, flushDeferredMirror, getCard, refreshMirror } from "./cards";
 import { getDb } from "./db";
 import type { Game, Sale, SaleWithCard } from "./types";
 
@@ -62,25 +63,44 @@ export function recordSale(cardId: number, input: SaleInput): Sale {
   const soldAt = input.soldAt ? new Date(input.soldAt) : new Date();
   if (Number.isNaN(soldAt.getTime())) throw new Error("Sale date is not a valid date");
 
-  const now = new Date().toISOString();
-  const result = getDb()
-    .prepare(
-      `INSERT INTO sales (card_id, quantity, unit_price, fees, unit_cost, sold_at, venue, notes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      cardId,
-      quantity,
-      unitPrice,
-      fees,
-      card.purchasePrice,
-      soldAt.toISOString(),
-      (input.venue ?? "")?.toString().trim() || null,
-      (input.notes ?? "")?.toString().trim() || null,
-      now,
-    );
-  updateCard(cardId, { quantity: card.quantity - quantity });
-  return rowToSale(getDb().prepare("SELECT * FROM sales WHERE id = ?").get(Number(result.lastInsertRowid)) as SaleRow);
+  // One transaction: the copies leave their lots, the sale records which lots
+  // they came from, and the card's count follows the lots. A sale that got only
+  // part way through would leave the cost basis lying.
+  const run = getDb().transaction(() => {
+    const taken = consumeFifo(cardId, quantity);
+    const now = new Date().toISOString();
+    const result = getDb()
+      .prepare(
+        `INSERT INTO sales (card_id, quantity, unit_price, fees, unit_cost, sold_at, venue, notes, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        cardId,
+        quantity,
+        unitPrice,
+        fees,
+        taken.unitCost,
+        soldAt.toISOString(),
+        (input.venue ?? "")?.toString().trim() || null,
+        (input.notes ?? "")?.toString().trim() || null,
+        now,
+      );
+    const saleId = Number(result.lastInsertRowid);
+    recordSaleLots(saleId, taken.lots);
+    syncQuantityFromLots(cardId);
+    return saleId;
+  });
+
+  let saleId: number;
+  try {
+    saleId = run();
+  } catch (e) {
+    discardDeferredMirror();
+    throw e;
+  }
+  refreshMirror(cardId);
+  flushDeferredMirror();
+  return rowToSale(getDb().prepare("SELECT * FROM sales WHERE id = ?").get(saleId) as SaleRow);
 }
 
 export function listSalesForCard(cardId: number): Sale[] {
@@ -109,10 +129,23 @@ export function listSales(): SaleWithCard[] {
 export function deleteSale(id: number): boolean {
   const sale = getDb().prepare("SELECT * FROM sales WHERE id = ?").get(id) as SaleRow | undefined;
   if (!sale) return false;
-  // Remove the sale first: putting the copies back rewrites the card's
-  // plain-text file, which must not still list the sale being undone.
-  const removed = getDb().prepare("DELETE FROM sales WHERE id = ?").run(id).changes > 0;
-  const card = getCard(sale.card_id);
-  if (card) updateCard(card.id, { quantity: card.quantity + sale.quantity });
+  const run = getDb().transaction(() => {
+    // The lots the sale took have to be read back before the sale goes, since
+    // deleting it takes its record of them with it.
+    restoreForSale(sale.card_id, id);
+    const removed = getDb().prepare("DELETE FROM sales WHERE id = ?").run(id).changes > 0;
+    syncQuantityFromLots(sale.card_id);
+    return removed;
+  });
+  let removed: boolean;
+  try {
+    removed = run();
+  } catch (e) {
+    discardDeferredMirror();
+    throw e;
+  }
+  // Only now is the file rewritten, so it cannot still list the undone sale.
+  refreshMirror(sale.card_id);
+  flushDeferredMirror();
   return removed;
 }

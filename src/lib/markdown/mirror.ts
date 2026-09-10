@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { listLots, listSaleLots } from "../acquisitions";
 import { dataDir, getDb } from "../db";
 import type { CardRecord, Condition, Game, PriceSnapshot, Sale } from "../types";
 import { CONDITIONS, GAMES } from "../types";
@@ -95,6 +96,25 @@ function salesFor(cardId: number): Sale[] {
   }));
 }
 
+/**
+ * Which lots each of a card's sales took. Written into the file so that undoing
+ * a sale after a rebuild returns the copies to the lots they actually came
+ * from, rather than to a reconstruction of them.
+ */
+function saleLotsFor(cardId: number, sales: Sale[]): Map<number, Array<{ quantity: number; unitCost: number | null; acquiredAt: string | null }>> {
+  const lots = new Map(listLots(cardId).map((lot) => [lot.id, lot]));
+  const out = new Map<number, Array<{ quantity: number; unitCost: number | null; acquiredAt: string | null }>>();
+  for (const sale of sales) {
+    const consumed = listSaleLots(sale.id).map((c) => ({
+      quantity: c.quantity,
+      unitCost: c.unitCost,
+      acquiredAt: c.acquisitionId === null ? null : (lots.get(c.acquisitionId)?.acquiredAt ?? null),
+    }));
+    if (consumed.length) out.set(sale.id, consumed);
+  }
+  return out;
+}
+
 function snapshotsFor(cardId: number): PriceSnapshot[] {
   const rows = readRows(
     "SELECT * FROM price_snapshots WHERE card_id = ? ORDER BY fetched_at DESC, id DESC",
@@ -120,6 +140,12 @@ function readRows(sql: string, ...params: unknown[]): unknown[] {
   return getDb().prepare(sql).all(...(params as never[]));
 }
 
+/** Everything a card's file says, gathered in one place. */
+function bundleFor(card: CardRecord) {
+  const sales = salesFor(card.id);
+  return { card, sales, snapshots: snapshotsFor(card.id), acquisitions: listLots(card.id), saleLots: saleLotsFor(card.id, sales) };
+}
+
 /**
  * Rewrite one card's file. Safe to call for any card, at any time.
  *
@@ -132,7 +158,7 @@ export function mirrorCard(card: CardRecord, opts: { mayHaveOldName?: boolean } 
   if (!mirrorEnabled()) return;
   try {
     ensureDirs();
-    const contents = cardMarkdown({ card, sales: salesFor(card.id), snapshots: snapshotsFor(card.id) });
+    const contents = cardMarkdown(bundleFor(card));
     const wanted = cardFileName(card);
     const file = path.join(cardsDir(), wanted);
     // If the card already has this file, its name cannot have changed.
@@ -319,7 +345,22 @@ number, grade, how many copies, what you paid, where it is kept. It is written
 as YAML with JSON values, which means both people and programs can read it.
 
 Underneath is the same card written for a person: what it is, its photo, your
-notes, every price the app ever recorded for it, and any sales.
+notes, every price the app ever recorded for it, what each copy cost, and any
+sales.
+
+## Purchases
+
+The \`Acquisitions\` table is one row per purchase: when you got the copies, how
+many, how many of those you still have, and what each one cost. A cost of
+\`\u2014\` means nobody recorded what those copies cost, which is a different thing
+from a card that was free (that reads \`$0.00\`).
+
+Sales are matched to them: the \`Lots\` column on a sale says which purchase each
+sold copy came out of, so the profit on a sale is measured against what that
+particular copy cost rather than an average. Copies are sold oldest first.
+
+The \`purchase_price\` in the block at the top is the average across the copies
+you still hold, worked out from these rows.
 
 ## Getting it back into an app
 
@@ -372,7 +413,7 @@ export function rebuildCollection(cards: CardRecord[]): RebuildResult {
   let written = 0;
   for (const card of cards) {
     const name = cardFileName(card);
-    writeAtomic(path.join(cardsDir(), name), cardMarkdown({ card, sales: salesFor(card.id), snapshots: snapshotsFor(card.id) }));
+    writeAtomic(path.join(cardsDir(), name), cardMarkdown(bundleFor(card)));
     keep.add(name);
     written++;
   }

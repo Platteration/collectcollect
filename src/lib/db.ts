@@ -46,6 +46,26 @@ CREATE TABLE IF NOT EXISTS cards (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS acquisitions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  quantity INTEGER NOT NULL,
+  remaining INTEGER NOT NULL,
+  unit_cost REAL,
+  acquired_at TEXT NOT NULL,
+  source TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_acquisitions_card ON acquisitions(card_id, acquired_at, id);
+CREATE TABLE IF NOT EXISTS sale_lots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+  acquisition_id INTEGER REFERENCES acquisitions(id) ON DELETE SET NULL,
+  quantity INTEGER NOT NULL,
+  unit_cost REAL
+);
+CREATE INDEX IF NOT EXISTS idx_sale_lots_sale ON sale_lots(sale_id);
 CREATE TABLE IF NOT EXISTS price_snapshots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
@@ -132,7 +152,44 @@ export function openDatabase(file: string): Database.Database {
     const cols = db.prepare(`PRAGMA table_info(${m.table})`).all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === m.column)) db.exec(m.ddl);
   }
+  backfillAcquisitions(db);
   return db;
+}
+
+const BACKFILL_KEY = "acquisitions_backfilled";
+
+/**
+ * Cost used to be one price per card, however many copies were bought and
+ * whenever. Every card that predates acquisition lots gets one lot standing for
+ * everything ever bought of it.
+ *
+ * The lot's size counts the copies sold as well as the copies still held, so a
+ * card already sold down does not end up claiming it was never owned. The cost
+ * may be null: "we do not know what this cost" is a real answer and a better
+ * one than a made-up number.
+ */
+function backfillAcquisitions(db: Database.Database): void {
+  const done = db.prepare("SELECT value FROM settings WHERE key = ?").get(BACKFILL_KEY);
+  if (done) return;
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.quantity, c.purchase_price, c.created_at,
+              COALESCE((SELECT SUM(s.quantity) FROM sales s WHERE s.card_id = c.id), 0) AS sold
+       FROM cards c
+       WHERE NOT EXISTS (SELECT 1 FROM acquisitions a WHERE a.card_id = c.id)`,
+    )
+    .all() as Array<{ id: number; quantity: number; purchase_price: number | null; created_at: string; sold: number }>;
+  const insert = db.prepare(
+    `INSERT INTO acquisitions (card_id, quantity, remaining, unit_cost, acquired_at, source, notes, created_at)
+     VALUES (?, ?, ?, ?, ?, 'migrated', NULL, ?)`,
+  );
+  const mark = db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+  db.transaction(() => {
+    for (const row of rows) {
+      insert.run(row.id, row.quantity + row.sold, row.quantity, row.purchase_price, row.created_at, row.created_at);
+    }
+    mark.run(BACKFILL_KEY, new Date().toISOString());
+  })();
 }
 
 // Next.js reloads server modules in development; keep one connection per process.

@@ -180,6 +180,9 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
             <p className="mt-2 max-w-xl text-xs text-neutral-500">
               Based on the grade or condition you recorded for each copy: {pricedCount} of {cardCount} cards priced, {copyCount} copies in total. Raw NM value of everything: {money(shown?.ungraded ?? 0)}.
               {returns.cardsWithCost === 0 && returns.cardsAwaitingPrice === 0 ? " Record purchase prices to see your total return." : ""}
+              {returns.copiesWithoutCost > 0
+                ? ` ${returns.copiesWithoutCost} cop${returns.copiesWithoutCost === 1 ? "y" : "ies"} ${returns.copiesWithoutCost === 1 ? "has" : "have"} no recorded cost, so ${returns.copiesWithoutCost === 1 ? "it is" : "they are"} left out too.`
+                : ""}
               {returns.cardsAwaitingPrice > 0
                 ? ` ${returns.cardsAwaitingPrice} card${returns.cardsAwaitingPrice === 1 ? "" : "s"} you paid for ${returns.cardsAwaitingPrice === 1 ? "is" : "are"} waiting on a first price, so ${returns.cardsAwaitingPrice === 1 ? "it is" : "they are"} left out of the return.`
                 : ""}

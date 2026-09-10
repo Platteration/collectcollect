@@ -227,16 +227,15 @@ describe("the order a collection comes back in", () => {
   beforeEach(() => setDb(openDatabase(":memory:")));
 
   it("is stable for cards saved in the same instant", () => {
-    // Timestamps only go down to the millisecond, so several cards created in
-    // one tick share one; without a tiebreaker their order is up to SQLite.
+    // Timestamps only go down to the millisecond, so cards saved in one tick —
+    // a scan or an import — share one. Rather than race the clock, put them on
+    // the same stamp deliberately and check the order is still decided.
     const made = Array.from({ length: 6 }, (_, i) => createCard({ game: "pokemon", name: `Same tick ${i}` }));
-    const stamps = new Set(made.map((c) => c.updatedAt));
-    const newestFirst = [...made].map((c) => c.id).reverse();
+    getDb().prepare("UPDATE cards SET updated_at = ?").run("2026-01-01T00:00:00.000Z");
+    const newestFirst = made.map((c) => c.id).reverse();
     for (let run = 0; run < 3; run++) {
       expect(listCards().map((c) => c.id)).toEqual(newestFirst);
     }
-    // The test only means something if they really did share a timestamp.
-    expect(stamps.size).toBeLessThan(made.length);
   });
 });
 

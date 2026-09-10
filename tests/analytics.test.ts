@@ -132,10 +132,23 @@ describe("returns and allocation", () => {
     { ...card(3), purchasePrice: null, game: "pokemon" },
   ] as CardRecord[];
   const values: Record<number, number | null> = { 1: 150, 2: 8, 3: 500 };
+  /** Cost basis in the shape the lots produce: one price per copy held. */
+  const basisOf = (c: CardRecord) =>
+    c.purchasePrice === null || c.purchasePrice < 0
+      ? { invested: 0, copiesWithCost: 0, copiesWithoutCost: c.quantity }
+      : { invested: c.purchasePrice * c.quantity, copiesWithCost: c.quantity, copiesWithoutCost: 0 };
   it("computes total return only over cards with a known cost", async () => {
     const { totalReturn } = await import("@/lib/analytics");
-    expect(totalReturn(cards, (c) => values[c.id])).toEqual({ invested: 120, valueOfInvested: 166, amount: 46, percent: 38.33, cardsWithCost: 2, cardsAwaitingPrice: 0 });
-    expect(totalReturn([], () => null).percent).toBeNull();
+    expect(totalReturn(cards, (c) => values[c.id], basisOf)).toEqual({
+      invested: 120,
+      valueOfInvested: 166,
+      amount: 46,
+      percent: 38.33,
+      cardsWithCost: 2,
+      cardsAwaitingPrice: 0,
+      copiesWithoutCost: 1,
+    });
+    expect(totalReturn([], () => null, basisOf).percent).toBeNull();
   });
   it("splits value by game, largest first", async () => {
     const { allocationByGame } = await import("@/lib/analytics");
@@ -167,19 +180,31 @@ describe("ranges with nothing recent in them", () => {
 describe("what the return figures leave out", () => {
   const card = (over: Partial<CardRecord>): CardRecord =>
     ({ id: 1, game: "pokemon", name: "C", quantity: 1, purchasePrice: null, ...over }) as CardRecord;
+  const basisOf = (c: CardRecord) =>
+    c.purchasePrice === null || c.purchasePrice < 0
+      ? { invested: 0, copiesWithCost: 0, copiesWithoutCost: c.quantity }
+      : { invested: c.purchasePrice * c.quantity, copiesWithCost: c.quantity, copiesWithoutCost: 0 };
 
   it("does not count a card as a total loss just because it has no price yet", () => {
     const cards = [card({ id: 1, purchasePrice: 100 }), card({ id: 2, purchasePrice: 50 })];
     const priced = new Map([[1, 130]]);
-    const r = totalReturn(cards, (c) => priced.get(c.id) ?? null);
+    const r = totalReturn(cards, (c) => priced.get(c.id) ?? null, basisOf);
     expect(r).toMatchObject({ invested: 100, valueOfInvested: 130, amount: 30, percent: 30, cardsWithCost: 1, cardsAwaitingPrice: 1 });
+  });
+
+  it("counts only the copies whose cost is known, on both sides", () => {
+    // Three copies, but only one of them has a recorded price. Counting all
+    // three against one copy's cost would invent a 200% gain.
+    const mixed = [card({ id: 1, quantity: 3 })];
+    const r = totalReturn(mixed, () => 50, () => ({ invested: 40, copiesWithCost: 1, copiesWithoutCost: 2 }));
+    expect(r).toMatchObject({ invested: 40, valueOfInvested: 50, amount: 10, percent: 25, copiesWithoutCost: 2 });
   });
 
   it("leaves out cards with no purchase price, and negative ones", () => {
     const cards = [card({ id: 1, purchasePrice: 20, quantity: 3 }), card({ id: 2 }), card({ id: 3, purchasePrice: -5 })];
-    const r = totalReturn(cards, () => 25);
+    const r = totalReturn(cards, () => 25, basisOf);
     expect(r).toMatchObject({ invested: 60, valueOfInvested: 75, cardsWithCost: 1, cardsAwaitingPrice: 0 });
-    expect(totalReturn([], () => 10)).toMatchObject({ invested: 0, amount: 0, percent: null, cardsWithCost: 0 });
+    expect(totalReturn([], () => 10, basisOf)).toMatchObject({ invested: 0, amount: 0, percent: null, cardsWithCost: 0 });
   });
 
   it("says how many sales it could not price the basis of", () => {

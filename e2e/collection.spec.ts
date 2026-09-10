@@ -11,7 +11,9 @@ test.describe("adding and viewing cards", () => {
 
     await page.getByRole("link", { name: /Machamp/ }).click();
     await expect(page.getByRole("heading", { name: "Machamp" })).toBeVisible();
-    await expect(page.getByText("$12.00")).toBeVisible();
+    // The purchase price shows in the card's summary; what each copy cost has
+    // its own block now, so match the summary's value exactly.
+    await expect(page.getByText("$12.00", { exact: true })).toBeVisible();
   });
 
   test("a card matching one already owned offers to become another copy", async ({ page }) => {

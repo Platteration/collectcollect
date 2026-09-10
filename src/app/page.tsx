@@ -1,4 +1,4 @@
-import { allSnapshots, latestSnapshotsByCard, listCards } from "@/lib/cards";
+import { allSnapshots, costBasisByCard, latestSnapshotsByCard, listCards } from "@/lib/cards";
 import { allocationByGame, gradingVerdict, isReadyToGrade, outlookSeries, portfolioSeries, realizedReturn, totalReturn } from "@/lib/analytics";
 import { imageSrc } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
@@ -72,7 +72,8 @@ export default function HomePage() {
     .slice(0, 5);
 
   const valueOf = (c: (typeof cards)[number]) => latest.get(c.id)?.summary.yourCopyValue ?? null;
-  const returns = totalReturn(cards, valueOf);
+  const basis = costBasisByCard();
+  const returns = totalReturn(cards, valueOf, (c) => basis.get(c.id));
   const sales = listSales();
   const realized = realizedReturn(sales);
   const allocation = allocationByGame(cards, valueOf);

@@ -1,3 +1,4 @@
+import type { CostBasis } from "./acquisitions";
 import type { CardRecord, PriceSnapshot, PriceSummary, Settings } from "./types";
 import { round2 } from "./pricing/match";
 
@@ -248,29 +249,43 @@ export interface Returns {
   cardsWithCost: number;
   /** Cards bought for a known price that have no current price yet, left out of both sides. */
   cardsAwaitingPrice: number;
+  /** Copies whose cost was never recorded, left out of both sides. */
+  copiesWithoutCost: number;
 }
 
 /**
- * Total return over the cards that can be judged: both a purchase price and a
- * current value have to be known. A card counted at zero because its price has
- * not been looked up yet would read as a total loss, which is the wrong thing
- * to tell someone who has just added it.
+ * Total return over the cards that can be judged: both what was paid and what
+ * they are worth now have to be known.
+ *
+ * Cost comes from the purchase lots rather than a single price on the card,
+ * and only the copies whose cost is recorded are counted — on both sides of the
+ * ratio, so it compares like with like. Copies that arrived without a price
+ * (a bulk lot, a gift, an old shoebox) are counted separately rather than
+ * valued at nothing, which would read as pure profit.
  */
-export function totalReturn(cards: CardRecord[], valueOf: (card: CardRecord) => number | null): Returns {
+export function totalReturn(
+  cards: CardRecord[],
+  valueOf: (card: CardRecord) => number | null,
+  basisOf: (card: CardRecord) => CostBasis | undefined,
+): Returns {
   let invested = 0;
   let valueOfInvested = 0;
   let cardsWithCost = 0;
   let cardsAwaitingPrice = 0;
+  let copiesWithoutCost = 0;
   for (const c of cards) {
-    if (c.purchasePrice === null || c.purchasePrice < 0) continue;
+    const basis = basisOf(c);
+    if (!basis) continue;
+    copiesWithoutCost += basis.copiesWithoutCost;
+    if (basis.copiesWithCost === 0) continue;
     const value = valueOf(c);
     if (value === null) {
       cardsAwaitingPrice++;
       continue;
     }
     cardsWithCost++;
-    invested += c.purchasePrice * c.quantity;
-    valueOfInvested += value * c.quantity;
+    invested += basis.invested;
+    valueOfInvested += value * basis.copiesWithCost;
   }
   const amount = round2(valueOfInvested - invested);
   return {
@@ -280,6 +295,7 @@ export function totalReturn(cards: CardRecord[], valueOf: (card: CardRecord) => 
     percent: invested > 0 ? round2((amount / invested) * 100) : null,
     cardsWithCost,
     cardsAwaitingPrice,
+    copiesWithoutCost,
   };
 }
 

@@ -199,13 +199,23 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
     }
   };
 
-  /** Merge into an existing card: bump its quantity and attach the photo if it has none. */
+  /**
+   * Merge into an existing card: record what these copies cost as their own
+   * purchase, and attach the photo if the card has none. Adding to the quantity
+   * instead would say how many copies there are while losing what they cost,
+   * which is exactly the moment a second copy is bought at a different price.
+   */
   const addCopy = async (item: Item, existing: CardRecord) => {
     patch(item.key, { status: "saving", error: null });
     try {
-      const body: Record<string, unknown> = { quantity: existing.quantity + (formToInput(item.form).quantity ?? 1) };
-      if (!existing.imagePath && item.uploads[0]) body.imagePath = item.uploads[0];
-      await api(`/api/cards/${existing.id}`, { method: "PATCH", body: JSON.stringify(body) });
+      const input = formToInput(item.form);
+      await api(`/api/cards/${existing.id}/acquisitions`, {
+        method: "POST",
+        body: JSON.stringify({ quantity: input.quantity ?? 1, unitCost: input.purchasePrice ?? null }),
+      });
+      if (!existing.imagePath && item.uploads[0]) {
+        await api(`/api/cards/${existing.id}`, { method: "PATCH", body: JSON.stringify({ imagePath: item.uploads[0] }) });
+      }
       patch(item.key, { status: "saved", savedId: existing.id, duplicates: null });
     } catch (e) {
       patch(item.key, { status: "review", error: (e as Error).message });
