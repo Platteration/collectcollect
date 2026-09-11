@@ -49,6 +49,7 @@ const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("theme")||"syst
 const NAV = [
   { href: "/", label: "Portfolio", icon: "▲" },
   { href: "/collection", label: "Collection", icon: "▦" },
+  { href: "/scan", label: "Scan", icon: "▣" },
   { href: "/sets", label: "Sets", icon: "◫" },
   { href: "/submissions", label: "Grading", icon: "◈" },
   { href: "/alerts", label: "Alerts", icon: "◉" },

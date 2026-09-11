@@ -66,6 +66,13 @@ export default function ReportPage() {
         />
       </section>
 
+      {items.length === 0 && (
+        <p className="card-surface p-6 text-center text-sm" style={{ color: "var(--muted)" }}>
+          Nothing is held yet, so there is nothing to value. Bring an inventory in and price it, and this page becomes
+          a document you can hand to somebody.
+        </p>
+      )}
+
       <section>
         <h2 className="font-display mb-2 text-lg font-semibold uppercase tracking-wide">Holdings</h2>
         <table className="w-full text-sm">

@@ -117,6 +117,31 @@ describe("refreshing prices over HTTP", () => {
   });
 });
 
+describe("the routes the README documents and nothing in the app calls", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("lists every sale with what they realised", async () => {
+    const card = createCard({ game: "pokemon", name: "Sold Snorlax", quantity: 3, purchasePrice: 1 });
+    recordSale(card.id, { quantity: 2, unitPrice: 4, fees: 0.5 });
+    const { GET } = await import("@/app/api/sales/route");
+    const body = await read<{ sales: Array<{ quantity: number }>; realized: { sales: number; gain: number } }>(await GET());
+    expect(body.sales).toHaveLength(1);
+    expect(body.realized).toMatchObject({ sales: 1, gain: 5.5 });
+  });
+
+  it("hands back a card's price history and a 404 for a card that is not there", async () => {
+    const { addSnapshot } = await import("@/lib/cards");
+    const card = createCard({ game: "pokemon", name: "Priced Snorlax" });
+    const summary = { currency: "USD" as const, ungraded: 10, ungradedSource: "x", graded: {}, gradedSource: null, estimatedGraded: {}, yourCopyValue: 10, yourCopyBasis: "", quotes: [], errors: [] };
+    addSnapshot(card.id, { ...summary, fetchedAt: "2026-01-01T00:00:00.000Z" });
+    addSnapshot(card.id, { ...summary, ungraded: 12, yourCopyValue: 12, fetchedAt: "2026-02-01T00:00:00.000Z" });
+    const { GET } = await import("@/app/api/cards/[id]/prices/route");
+    const body = await read<{ snapshots: Array<{ summary: { yourCopyValue: number } }> }>(await GET(new Request("http://localhost/x"), ctx({ id: String(card.id) }) as never));
+    expect(body.snapshots.map((s) => s.summary.yourCopyValue)).toEqual([12, 10]);
+    expect((await GET(new Request("http://localhost/x"), ctx({ id: "999" }) as never)).status).toBe(404);
+  });
+});
+
 describe("the health check", () => {
   it("answers without opening a collection", async () => {
     const { GET } = await import("@/app/api/health/route");

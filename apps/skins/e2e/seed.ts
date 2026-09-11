@@ -1,3 +1,4 @@
+import { createAlert } from "../src/lib/alerts";
 import { addAcquisition, addSnapshot, createItem } from "../src/lib/items";
 import { flushCollection } from "../src/lib/markdown/mirror";
 import { recordSale } from "../src/lib/sales";
@@ -72,6 +73,13 @@ export default async function seed() {
   // A real spread between the cash markets — and trade locked, so it cannot
   // be acted on. Steam shows the highest number of all and still cannot win.
   price(knife.id, "2026-06-01T00:00:00.000Z", 1180, { skinport: 1180, csfloat: 1150, steam: 1400 });
+  // The alert that refresh would have raised for that spread.
+  createAlert({
+    kind: "spread_opened",
+    itemId: knife.id,
+    title: "★ Karambit | Doppler (Factory New) is worth $88.60 more on Skinport",
+    body: "Skinport nets $1,038.40 against CSFloat's $1,127.00, after fees. It is trade locked, so this cannot be acted on yet.",
+  });
 
   // Two of the same skin at the same wear tier: different objects, and the app
   // must never treat them as one.

@@ -36,3 +36,19 @@ test("a grading submission runs from draft to a booked outcome", async ({ page }
   await page.getByRole("link", { name: /Gradable Dragonite/ }).click();
   await expect(page.getByText("PSA 10").first()).toBeVisible();
 });
+
+test("a card can be put into an open batch from its own page", async ({ page }) => {
+  const made = await page.request.post("/api/submissions", { data: { company: "PSA", name: "From the card page" } });
+  const { submission } = (await made.json()) as { submission: { id: number } };
+  await addCardByHand(page, { name: "Batchable Gyarados", set: "Base Set" });
+  await page.getByRole("link", { name: "Open card" }).click();
+  await expect(page).toHaveURL(/\/cards\/\d+$/);
+
+  await page.getByRole("button", { name: "Add to a submission" }).click();
+  await page.getByLabel("Submission").selectOption({ label: "From the card page · 0 cards" });
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByText(/Added to/)).toContainText("From the card page");
+
+  const after = (await (await page.request.get(`/api/submissions/${submission.id}`)).json()) as { submission: { cards: Array<{ name: string }> } };
+  expect(after.submission.cards.map((c) => c.name)).toContain("Batchable Gyarados");
+});

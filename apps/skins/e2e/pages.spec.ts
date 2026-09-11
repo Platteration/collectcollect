@@ -1,5 +1,18 @@
 import { expect, test } from "@playwright/test";
 
+test.describe("a page that is not there", () => {
+  test("is a 404 with the app still around it", async ({ page }) => {
+    const response = await page.goto("/no-such-page");
+    expect(response?.status()).toBe(404);
+    await expect(page.getByRole("heading", { name: "Not here" })).toBeVisible();
+    await expect(page.getByRole("banner").getByRole("link", { name: "Inventory" })).toBeVisible();
+    await page.getByRole("link", { name: "Open the inventory" }).click();
+    await expect(page).toHaveURL(/\/inventory$/);
+    expect((await page.goto("/items/999999"))?.status()).toBe(404);
+    await expect(page.getByRole("heading", { name: "Not here" })).toBeVisible();
+  });
+});
+
 test.describe("what every response carries", () => {
   test("security headers, and a content security policy the page's own scripts satisfy", async ({ page }) => {
     const violations: string[] = [];

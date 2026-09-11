@@ -13,26 +13,45 @@ const KINDS: Record<AlertKind, { label: string; icon: string }> = {
   trade_lock_lifted: { label: "Trade lock ended", icon: "🔓" },
 };
 
+/**
+ * The feed, and the two things that can be done to it.
+ *
+ * Both are optimistic — the row goes, the counter clears — and both are
+ * undone on the page if the server refuses, with the refusal said out loud. A
+ * dismiss that failed silently would leave an alert that comes back on the
+ * next visit, which reads as the app not listening.
+ */
 export function AlertList({ alerts: initial }: { alerts: Alert[] }) {
   const router = useRouter();
   const [alerts, setAlerts] = useState(initial);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const readAll = async () => {
     setBusy(true);
+    setError(null);
     try {
       await api("/api/alerts", { method: "POST" });
       setAlerts((all) => all.map((a) => ({ ...a, readAt: a.readAt ?? new Date().toISOString() })));
       router.refresh();
+    } catch (e) {
+      setError(`Could not mark them read: ${(e as Error).message}`);
     } finally {
       setBusy(false);
     }
   };
 
-  const dismiss = async (id: number) => {
-    setAlerts((all) => all.filter((a) => a.id !== id));
-    await api(`/api/alerts/${id}`, { method: "DELETE" }).catch(() => undefined);
-    router.refresh();
+  const dismiss = async (alert: Alert) => {
+    setError(null);
+    setAlerts((all) => all.filter((a) => a.id !== alert.id));
+    try {
+      await api(`/api/alerts/${alert.id}`, { method: "DELETE" });
+      router.refresh();
+    } catch (e) {
+      // Put it back where it was, so the list matches what the server holds.
+      setAlerts((all) => (all.some((a) => a.id === alert.id) ? all : [...all, alert].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)));
+      setError(`Could not dismiss "${alert.title}": ${(e as Error).message}`);
+    }
   };
 
   if (alerts.length === 0) {
@@ -53,6 +72,11 @@ export function AlertList({ alerts: initial }: { alerts: Alert[] }) {
         <button type="button" className="btn-secondary" onClick={readAll} disabled={busy}>
           Mark all {unread} read
         </button>
+      )}
+      {error && (
+        <p className="card-surface p-3 text-sm" style={{ color: "var(--chart-bad-text)" }} role="alert">
+          {error}
+        </p>
       )}
       <ul className="space-y-2">
         {alerts.map((alert) => (
@@ -86,7 +110,7 @@ export function AlertList({ alerts: initial }: { alerts: Alert[] }) {
               type="button"
               className="shrink-0 rounded-md px-2 py-1 text-xs"
               style={{ color: "var(--muted)" }}
-              onClick={() => dismiss(alert.id)}
+              onClick={() => dismiss(alert)}
               aria-label={`Dismiss: ${alert.title}`}
             >
               ✕

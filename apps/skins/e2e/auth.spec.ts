@@ -25,6 +25,13 @@ test.describe("password gate", () => {
     expect((await request.post("/api/items", { data: { marketHashName: "Clutch Case" } })).status()).toBe(401);
   });
 
+  test("the installed app's shell needs no session either", async ({ request }) => {
+    for (const path of ["/offline", "/manifest.webmanifest", "/sw.js", "/icons/icon-192.png"]) {
+      const res = await request.get(path);
+      expect(res.status(), path).toBe(200);
+    }
+  });
+
   test("the health check answers without a session", async ({ request }) => {
     const res = await request.get("/api/health");
     expect(res.status()).toBe(200);

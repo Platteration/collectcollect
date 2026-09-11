@@ -55,6 +55,13 @@ export default function ReportPage() {
         <p className="mt-1 text-sm text-neutral-500">Prepared {when(generated)}</p>
       </header>
 
+      {cards.length === 0 && (
+        <p className="card-surface p-6 text-center text-sm text-neutral-500">
+          Nothing is held yet, so there is nothing to value. Add cards and refresh their prices, and this page becomes
+          a document you can hand to somebody.
+        </p>
+      )}
+
       <section className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Summary label="Cards" value={String(cards.length)} />
         <Summary label="Copies" value={String(copies)} />
@@ -65,13 +72,13 @@ export default function ReportPage() {
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-black/15 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-white/15">
-            <th className="py-2 pr-2">Card</th>
-            <th className="py-2 pr-2">Details</th>
-            <th className="py-2 pr-2">Condition</th>
-            <th className="py-2 pr-2">Kept in</th>
-            <th className="py-2 pr-2 text-right">Qty</th>
-            <th className="py-2 pr-2 text-right">Each</th>
-            <th className="py-2 text-right">Value</th>
+            <th scope="col" className="py-2 pr-2">Card</th>
+            <th scope="col" className="py-2 pr-2">Details</th>
+            <th scope="col" className="py-2 pr-2">Condition</th>
+            <th scope="col" className="py-2 pr-2">Kept in</th>
+            <th scope="col" className="py-2 pr-2 text-right">Qty</th>
+            <th scope="col" className="py-2 pr-2 text-right">Each</th>
+            <th scope="col" className="py-2 text-right">Value</th>
           </tr>
         </thead>
         <tbody>

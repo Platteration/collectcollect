@@ -10,6 +10,7 @@ import { GAMES, GRADING_STATUSES, type Game, type GradingStatus, type Settings }
 import { PortfolioChart } from "./charts/PortfolioChart";
 import { OutlookChart } from "./charts/OutlookChart";
 import { VERDICT_STYLE } from "./verdict";
+import { AddToSubmission } from "./AddToSubmission";
 
 export interface Opportunity {
   id: number;
@@ -208,6 +209,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
             <button
               key={r}
               type="button"
+              aria-pressed={range === r}
               onClick={() => setRange(r)}
               className={`rounded-md px-3 py-1 text-xs font-medium ${range === r ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900" : "text-neutral-600 hover:bg-black/5 dark:text-neutral-300 dark:hover:bg-white/10"}`}
             >
@@ -261,6 +263,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
                 <button
                   key={key}
                   type="button"
+                  aria-pressed={filter === key}
                   onClick={() => setFilter(key)}
                   className={`rounded-full px-3 py-1 text-xs font-medium ${filter === key ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900" : "bg-black/5 text-neutral-700 hover:bg-black/10 dark:bg-white/10 dark:text-neutral-200"}`}
                 >
@@ -319,6 +322,11 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
                     <OutlookChart series={o.series} compact />
                   </div>
                   <p className="mt-1 text-xs text-neutral-500">{o.verdict.detail}</p>
+                  {o.ready && o.status !== "submitted" && o.status !== "keep_raw" && (
+                    <div className="mt-2">
+                      <AddToSubmission cardId={o.id} compact />
+                    </div>
+                  )}
                 </li>
               );
             })}

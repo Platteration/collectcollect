@@ -8,6 +8,7 @@ import { unreadCount } from "@/lib/alerts";
 import { SkinsTabBar } from "@/components/TabBar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { SignOut } from "@collectcollect/core/components/SignOut";
+import { ServiceWorker } from "@/components/ServiceWorker";
 
 // Condensed display face for the hero value, item names and headings.
 const display = Barlow_Condensed({
@@ -20,7 +21,11 @@ export const metadata: Metadata = {
   title: "CollectCollect · Skins",
   description: "Track what your CS2 inventory cost, what it is worth, and where it would sell for most.",
   applicationName: "CollectCollect Skins",
+  // Not "black-translucent": that draws the page under the status bar, whose
+  // white glyphs would be unreadable over the light theme.
   appleWebApp: { capable: true, title: "CC Skins", statusBarStyle: "default" },
+  manifest: "/manifest.webmanifest",
+  icons: { icon: "/icons/icon-192.png", apple: "/icons/apple-touch-icon.png" },
 };
 
 export const viewport: Viewport = {
@@ -63,6 +68,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body className="flex min-h-full flex-col">
+        <ServiceWorker />
         <header
           className="safe-top sticky top-0 z-20 border-b backdrop-blur"
           style={{ borderColor: "var(--line)", background: "color-mix(in srgb, var(--background) 88%, transparent)" }}

@@ -13,6 +13,7 @@ import { VERDICT_STYLE } from "./verdict";
 import { CardForm, formFromCard, formToInput } from "./CardForm";
 import type { Acquisition } from "@/lib/acquisitions";
 import { PricePanel } from "./PricePanel";
+import { AddToSubmission } from "./AddToSubmission";
 
 interface Props {
   acquisitions: Acquisition[];
@@ -384,6 +385,15 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
           </p>
         )}
 
+        {/* A card with no price yet has no outlook section to hold this, and
+            can still be put into a batch. */}
+        {!graded && !latest && card.gradingStatus !== "submitted" && (
+          <div className="card-surface flex flex-wrap items-center justify-between gap-2 p-4 text-sm">
+            <span className="text-neutral-500">Sending this in for grading?</span>
+            <AddToSubmission cardId={card.id} />
+          </div>
+        )}
+
         {!graded && latest && (
           <section className="card-surface p-4">
             <div className="flex flex-wrap items-start justify-between gap-2">
@@ -414,10 +424,14 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
                 </button>
               ))}
             </div>
-            {card.gradingStatus === "submitted" && (
+            {card.gradingStatus === "submitted" ? (
               <p className="mt-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
                 When the card comes back, hit <strong>Edit</strong> and enter the grading company and grade; it will then be valued as a graded card.
               </p>
+            ) : (
+              <div className="mt-3">
+                <AddToSubmission cardId={card.id} />
+              </div>
             )}
             {lastOutlook && (
               <div className="my-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
@@ -653,11 +667,11 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
               <table className="w-full text-sm">
                 <thead className="text-left text-xs uppercase tracking-wide text-neutral-500">
                   <tr>
-                    <th className="py-1 pr-3">When</th>
-                    <th className="py-1 pr-3">Ungraded</th>
-                    <th className="py-1 pr-3">Your copy</th>
-                    <th className="py-1 pr-3">PSA 10</th>
-                    <th className="py-1">Source</th>
+                    <th scope="col" className="py-1 pr-3">When</th>
+                    <th scope="col" className="py-1 pr-3">Ungraded</th>
+                    <th scope="col" className="py-1 pr-3">Your copy</th>
+                    <th scope="col" className="py-1 pr-3">PSA 10</th>
+                    <th scope="col" className="py-1">Source</th>
                   </tr>
                 </thead>
                 <tbody>

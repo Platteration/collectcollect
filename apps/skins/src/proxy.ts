@@ -2,8 +2,9 @@ import { auth } from "@/lib/auth";
 import { createProxy } from "@collectcollect/core/proxy";
 
 export const proxy = createProxy(auth, {
-  // Paths that must stay reachable without a session, or the login page cannot load.
-  publicPaths: ["/login", "/api/auth", "/api/health"],
+  // Paths that must stay reachable without a session, or the login page (and
+  // the installed app's shell) cannot load.
+  publicPaths: ["/login", "/api/auth", "/api/health", "/offline", "/manifest.webmanifest", "/icons", "/sw.js"],
   // Steam serves every item image, and only Steam.
   imageHosts: ["https://community.cloudflare.steamstatic.com", "https://steamcommunity-a.akamaihd.net"],
 });

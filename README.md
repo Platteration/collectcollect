@@ -130,6 +130,10 @@ The app is installable. Add it to a home screen and it opens without browser chr
 
 A small service worker makes that work and lets the shell open without a network, showing a plain "no connection" page. It deliberately never caches API responses or page HTML: prices, grades and the collection itself change, and a stale answer about what something is worth would be worse than no answer.
 
+Five destinations fit on the tab bar; the last one is labelled *More* and leads to Settings, where the rest are listed. The skins app is installable in the same way, with its own icon and its own service worker. Because a service worker's scope is an origin and each app's worker clears every cache it does not own, the two apps have to be served from different origins — which two ports are, and which two paths on one host are not.
+
+A page that is not there — a deleted card's, or a mistyped address — is a 404 drawn inside the app, with the header still there to leave by. A page that fails to render says so on the page, with the error, rather than going blank.
+
 ## Project layout
 
 The repository is an npm workspace, so a second collectible can get its own app

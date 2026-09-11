@@ -19,9 +19,16 @@ const KIND_STYLE: Record<AlertKind, string> = {
   graded_data: "bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-100",
 };
 
+/**
+ * The feed. Seeing it is the acknowledgement, and dismissing is optimistic —
+ * but a refusal from the server is said on the page and the row put back,
+ * because an alert that comes back on the next visit reads as the app not
+ * listening.
+ */
 export function AlertList({ alerts: initial, unreadIds }: { alerts: Alert[]; unreadIds: number[] }) {
   const router = useRouter();
   const [alerts, setAlerts] = useState(initial);
+  const [error, setError] = useState<string | null>(null);
   const unread = new Set(unreadIds);
   const marked = useRef(false);
 
@@ -32,16 +39,18 @@ export function AlertList({ alerts: initial, unreadIds }: { alerts: Alert[]; unr
     marked.current = true;
     void api("/api/alerts", { method: "POST" })
       .then(() => router.refresh())
-      .catch(() => undefined);
+      .catch((e: Error) => setError(`Could not mark these read: ${e.message}`));
   }, [unreadIds, router]);
 
-  const dismiss = async (id: number) => {
-    setAlerts((prev) => prev.filter((a) => a.id !== id));
+  const dismiss = async (alert: Alert) => {
+    setError(null);
+    setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
     try {
-      await api(`/api/alerts/${id}`, { method: "DELETE" });
+      await api(`/api/alerts/${alert.id}`, { method: "DELETE" });
       router.refresh();
-    } catch {
-      router.refresh();
+    } catch (e) {
+      setAlerts((prev) => (prev.some((a) => a.id === alert.id) ? prev : [...prev, alert].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)));
+      setError(`Could not dismiss "${alert.title}": ${(e as Error).message}`);
     }
   };
 
@@ -54,6 +63,12 @@ export function AlertList({ alerts: initial, unreadIds }: { alerts: Alert[]; unr
           in Settings, or real graded sales appearing where the app had only an estimate.
         </p>
       </div>
+
+      {error && (
+        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-200" role="alert">
+          {error}
+        </p>
+      )}
 
       {alerts.length === 0 ? (
         <div className="card-surface p-8 text-center text-sm text-neutral-500">
@@ -75,9 +90,13 @@ export function AlertList({ alerts: initial, unreadIds }: { alerts: Alert[]; unr
                   )}
                 </div>
                 <div className="text-sm text-neutral-600 dark:text-neutral-300">{a.body}</div>
-                <div className="text-xs text-neutral-500">{when(a.createdAt)}</div>
+                <div className="text-xs text-neutral-500">
+                  {when(a.createdAt)}
+                  {/* The tint says it; this says it to a screen reader and to print. */}
+                  {unread.has(a.id) && " · unread"}
+                </div>
               </div>
-              <button type="button" className="text-xs text-neutral-500 underline" onClick={() => dismiss(a.id)}>
+              <button type="button" className="text-xs text-neutral-500 underline" onClick={() => dismiss(a)} aria-label={`Dismiss: ${a.title}`}>
                 Dismiss
               </button>
             </li>

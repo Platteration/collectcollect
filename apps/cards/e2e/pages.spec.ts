@@ -33,6 +33,21 @@ test.describe("what every response carries", () => {
   });
 });
 
+test.describe("a page that is not there", () => {
+  test("is a 404 with the app still around it", async ({ page }) => {
+    const response = await page.goto("/no-such-page");
+    expect(response?.status()).toBe(404);
+    await expect(page.getByRole("heading", { name: "Not here" })).toBeVisible();
+    // The header survives, so there is somewhere to go.
+    await expect(page.getByRole("banner").getByRole("link", { name: "Collection" })).toBeVisible();
+    await page.getByRole("link", { name: "Open the collection" }).click();
+    await expect(page).toHaveURL(/\/collection$/);
+    // A card that is not there gets the same page.
+    expect((await page.goto("/cards/999999"))?.status()).toBe(404);
+    await expect(page.getByRole("heading", { name: "Not here" })).toBeVisible();
+  });
+});
+
 test.describe("the pages nothing else visits", () => {
   test("the appraisal report totals what the collection is worth", async ({ page }) => {
     // Its own cards, so the shared collection's other tests cannot move the
@@ -96,8 +111,19 @@ test.describe("the pages nothing else visits", () => {
       // Seeing the list is the acknowledgement, so the badge clears.
       await expect(page.getByRole("navigation").first()).not.toContainText(/Alerts\s*\d/);
 
+      // A dismiss the server refuses puts the row back and says why.
+      await page.route("**/api/alerts/*", (route) =>
+        route.request().method() === "DELETE"
+          ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "disk is full" }) })
+          : route.continue(),
+      );
       const dismiss = alert.getByRole("button", { name: /Dismiss/i }).first();
       await dismiss.click();
+      await expect(page.getByRole("alert").filter({ hasText: /Could not dismiss/ })).toContainText("disk is full");
+      await expect(alert).toBeVisible();
+      await page.unroute("**/api/alerts/*");
+
+      await alert.getByRole("button", { name: /Dismiss/i }).first().click();
       await expect(page.getByText("Alerting Ampharos")).toHaveCount(0);
     } finally {
       await page.request.delete(`/api/cards/${card.id}`);

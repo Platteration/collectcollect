@@ -31,6 +31,10 @@ export default async function InventoryPage({ searchParams }: PageProps<"/invent
   const items = listItems(opts);
   const latest = latestSnapshotsByItem();
   const units = listStorageUnits();
+  // An empty grid means two different things: nothing matched what was asked
+  // for, or there is nothing at all yet. "Clear the filters" is useless advice
+  // for the second, so it is only given for the first.
+  const filtered = Object.values(opts).some((value) => value !== undefined && value !== "");
 
   const total = items.reduce((n, i) => n + (holdingValue(i, latest.get(i.id)) ?? 0), 0);
   const unpriced = items.filter((i) => holdingValue(i, latest.get(i.id)) === null).length;
@@ -114,7 +118,22 @@ export default async function InventoryPage({ searchParams }: PageProps<"/invent
         </FilterRow>
       </nav>
 
-      {items.length === 0 ? (
+      {items.length === 0 && !filtered ? (
+        <section className="card-surface p-6 text-center">
+          <p className="font-display text-lg font-semibold">Nothing here yet</p>
+          <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
+            Bring in a whole inventory from Steam or a spreadsheet, or add one item by hand.
+          </p>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <Link href="/import" className="btn-primary">
+              Import an inventory
+            </Link>
+            <Link href="/add" className="btn-secondary">
+              Add an item
+            </Link>
+          </div>
+        </section>
+      ) : items.length === 0 ? (
         <p className="card-surface p-6 text-center text-sm" style={{ color: "var(--muted)" }}>
           Nothing matches. <Link href="/inventory" className="underline">Clear the filters</Link> to see everything.
         </p>

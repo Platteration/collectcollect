@@ -1,5 +1,30 @@
 import { expect, test } from "@playwright/test";
 
+test.describe("before anything is here", () => {
+  // First in the first spec that writes, so this really is an empty inventory.
+  test("every page says so and points somewhere useful", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByText("Nothing here yet")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Import an inventory" })).toBeVisible();
+    await page.getByRole("link", { name: "Add an item" }).click();
+    await expect(page).toHaveURL(/\/add$/);
+
+    // The inventory with nothing in it is not "nothing matches": there are no
+    // filters to clear.
+    await page.goto("/inventory");
+    await expect(page.getByText("Nothing here yet")).toBeVisible();
+    await expect(page.getByText("Nothing matches.")).toHaveCount(0);
+    await page.goto("/inventory?category=knife");
+    await expect(page.getByText("Nothing matches.")).toBeVisible();
+
+    await page.goto("/spread");
+    await expect(page.getByText("Nothing to compare yet")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Import an inventory" })).toBeVisible();
+    await page.goto("/report");
+    await expect(page.getByText(/nothing to value/)).toBeVisible();
+  });
+});
+
 test.describe("adding an item by hand", () => {
   test("reads the kind, the gun, the wear and StatTrak out of the name", async ({ page }) => {
     await page.goto("/add");

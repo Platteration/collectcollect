@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default function SpreadPage() {
   const view = spreadView();
+  const items = listItems().length;
   const total = view.worthDoing.reduce((n, row) => n + (row.locked ? 0 : row.total), 0);
 
   return (
@@ -22,7 +23,7 @@ export default function SpreadPage() {
         </p>
       </header>
 
-      <RefreshPrices items={listItems().length} />
+      <RefreshPrices items={items} />
 
       {view.worthDoing.length > 0 ? (
         <section className="space-y-3">
@@ -51,12 +52,29 @@ export default function SpreadPage() {
             ))}
           </ul>
         </section>
-      ) : (
+      ) : view.slim.length > 0 ? (
         <p className="card-surface p-6 text-center text-sm" style={{ color: "var(--muted)" }}>
-          {view.slim.length > 0
-            ? "Nothing is far enough apart to be worth moving right now."
-            : "Nothing to compare yet. Refresh prices, and anything two markets both list will show up here."}
+          Nothing is far enough apart to be worth moving right now.
         </p>
+      ) : (
+        <section className="card-surface p-6 text-center">
+          <p className="font-display text-lg font-semibold">Nothing to compare yet</p>
+          <p className="mx-auto mt-1 max-w-md text-sm" style={{ color: "var(--muted)" }}>
+            {items === 0
+              ? "There is nothing in the inventory. Bring one in, price it, and anything two markets both list shows up here."
+              : "Refresh prices, and anything two markets both list will show up here."}
+          </p>
+          {items === 0 && (
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Link href="/import" className="btn-primary">
+                Import an inventory
+              </Link>
+              <Link href="/add" className="btn-secondary">
+                Add an item
+              </Link>
+            </div>
+          )}
+        </section>
       )}
 
       {view.slim.length > 0 && (

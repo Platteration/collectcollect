@@ -234,12 +234,18 @@ export function Portfolio(props: Props) {
       {itemCount === 0 && (
         <section className="card-surface p-6 text-center">
           <p className="font-display text-lg font-semibold">Nothing here yet</p>
-          <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
-            Add an item by hand to start, or bring in a whole inventory once importing is wired up.
+          <p className="mx-auto mt-1 max-w-md text-sm" style={{ color: "var(--muted)" }}>
+            Bring in a whole inventory from Steam or a spreadsheet, or add one item by hand. Once something is here,
+            this page becomes what it is worth, how that moves, and where it would sell for most.
           </p>
-          <Link href="/inventory" className="btn-secondary mt-4">
-            Open the inventory
-          </Link>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <Link href="/import" className="btn-primary">
+              Import an inventory
+            </Link>
+            <Link href="/add" className="btn-secondary">
+              Add an item
+            </Link>
+          </div>
         </section>
       )}
     </div>

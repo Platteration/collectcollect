@@ -97,7 +97,11 @@ export function ImportForm() {
             ))}
           </select>
         </label>
-        {filename && <span className="text-sm text-neutral-500">{filename}</span>}
+        {filename && (
+          <span className="text-sm text-neutral-500" aria-live="polite">
+            {busy && !preview ? `Reading ${filename}…` : filename}
+          </span>
+        )}
       </section>
 
       {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-200">{error}</div>}
@@ -144,12 +148,12 @@ export function ImportForm() {
             <table className="w-full text-sm">
               <thead className="text-left text-xs uppercase tracking-wide text-neutral-500">
                 <tr>
-                  <th className="py-1 pr-3">Line</th>
-                  <th className="py-1 pr-3">Card</th>
-                  <th className="py-1 pr-3">Details</th>
-                  <th className="py-1 pr-3">Copy</th>
-                  <th className="py-1 pr-3 text-right">Qty</th>
-                  <th className="py-1 text-right">Paid</th>
+                  <th scope="col" className="py-1 pr-3">Line</th>
+                  <th scope="col" className="py-1 pr-3">Card</th>
+                  <th scope="col" className="py-1 pr-3">Details</th>
+                  <th scope="col" className="py-1 pr-3">Copy</th>
+                  <th scope="col" className="py-1 pr-3 text-right">Qty</th>
+                  <th scope="col" className="py-1 text-right">Paid</th>
                 </tr>
               </thead>
               <tbody>
