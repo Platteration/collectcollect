@@ -301,7 +301,8 @@ const SERIES = ["var(--chart-series-1)", "var(--chart-series-2)", "var(--chart-s
 function SplitChart({ view }: { view: AllocationView }) {
   return (
     <section>
-      <h2 className="font-display mb-3 text-lg font-semibold uppercase tracking-wide">{view.label}</h2>
+      {/* The label is a noun ("Region"), so the heading reads the way the report's does. */}
+      <h2 className="font-display mb-3 text-lg font-semibold uppercase tracking-wide">By {view.label.toLowerCase()}</h2>
       <ul className="space-y-2">
         {view.rows.map((row, i) => (
           <li key={row.key}>

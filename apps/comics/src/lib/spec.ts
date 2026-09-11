@@ -69,7 +69,7 @@ export const spec: DomainSpec<Comic, ComicSettings, ComicExtras, ComicQuery> = {
   },
   allocations: [
     { id: "publisher", label: "Publisher", keyOf: (c) => c.publisher, unclassifiedNote: "no publisher recorded" },
-    { id: "slabbed", label: "Raw or slabbed", keyOf: (c) => (c.slabbed ? "slabbed" : "raw"), labelOf: (k) => (k === "slabbed" ? "Slabbed" : "Raw") },
+    { id: "slabbed", label: "Format", keyOf: (c) => (c.slabbed ? "slabbed" : "raw"), labelOf: (k) => (k === "slabbed" ? "Slabbed" : "Raw") },
   ],
   pricing: {
     // TODO: an eBay sold-listings aggregation by grade would cover what PriceCharting does not.

@@ -71,7 +71,8 @@ export const spec: DomainSpec<Bottle, BottleSettings, SimpleExtras, BottleQuery>
   },
   hooks: { beforeUpdate: onUpdate },
   excludeFromPortfolio: (b) => !b.sealed,
-  excludedNote: "open bottles are for drinking and are not counted; each keeps the value it had the day it was opened",
+  // Rendered after a count ("1 open and left out of the total…"), so it reads as a phrase, not a sentence.
+  excludedNote: "open and left out of the total; each keeps the value it had the day it was opened",
   valuation: (b, snapshot) => {
     if (!b.sealed) {
       if (b.frozenValue !== null) return { value: b.frozenValue, basis: `Frozen when opened${b.openedAt ? ` on ${b.openedAt}` : ""}` };

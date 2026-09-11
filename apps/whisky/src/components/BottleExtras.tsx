@@ -10,7 +10,8 @@ export function bottleExtras(ctx: ItemPageContext<Bottle, BottleSettings, Simple
   if (item.sealed) {
     return {
       afterPrice: item.quantity > 0 ? <OpenBottle itemId={item.id} quantity={item.quantity} /> : null,
-      handled: ["openedAt", "frozenValue", "fillLevel"],
+      // The badge above already reads "Sealed · Box", so neither belongs in the facts as well.
+      handled: ["openedAt", "frozenValue", "fillLevel", "sealed", "packaging"],
     };
   }
   return {
@@ -28,6 +29,7 @@ export function bottleExtras(ctx: ItemPageContext<Bottle, BottleSettings, Simple
           : "Opened before it was ever valued, so it carries no value. Enter what it was worth on the day it was opened if you want it on the report."}
       </p>
     ),
-    handled: ["openedAt", "frozenValue"],
+    // The badge reads "Open since … · 60% left"; the packaging is still worth a line.
+    handled: ["openedAt", "frozenValue", "sealed"],
   };
 }
