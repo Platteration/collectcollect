@@ -33,6 +33,16 @@ Environment variables (all optional): `__PREFIX___DATA_DIR` (default `./data`), 
 npm test -w @collectcollect/__ID__
 ```
 
+`tests/spec.test.ts` covers the schema, the one-object-or-a-stack rule and a
+value entered by hand. Add a test per price provider against a fake `fetch`
+(see `apps/retro-games/tests/pricecharting.test.ts`) as you wire real ones up.
+
+The pages this app renders come from the shared engine, and they are driven end
+to end by `apps/whisky`, so the portfolio, the collection page, an item, the
+report, adding by hand, importing a spreadsheet and the password gate are
+already covered. Write an end-to-end suite of your own only for what this app
+adds on top of them.
+
 ## Known gaps
 
 TODO.

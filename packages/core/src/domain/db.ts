@@ -175,7 +175,14 @@ export function createDomainDb(spec: Pick<DomainSpec, "id" | "envPrefix" | "fiel
     dbFileName,
     openDatabase,
     building: () => process.env.NEXT_PHASE === "phase-production-build",
-    databaseExists: () => Boolean(state().db) || fs.existsSync(databaseFile()),
+    /**
+     * The database path comes from an environment variable, so the build's
+     * file tracer cannot resolve it and falls back to tracing the whole
+     * project — which packages each app's source, tests and e2e specs into
+     * its standalone server. The path is only ever read at runtime, so the
+     * tracer is told to leave this call alone.
+     */
+    databaseExists: () => Boolean(state().db) || fs.existsSync(/* turbopackIgnore: true */ databaseFile()),
     getDb() {
       const s = state();
       if (s.locked) throw new Error(s.locked);

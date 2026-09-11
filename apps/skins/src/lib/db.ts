@@ -165,7 +165,11 @@ export function building(): boolean {
  * creates it, so anything that only wants to look has to ask first.
  */
 export function databaseExists(): boolean {
-  return Boolean(globalForDb.__skinsDb) || fs.existsSync(databaseFile());
+  // The path comes from an environment variable, so the build's file tracer
+  // cannot resolve it and falls back to tracing the whole project, packaging
+  // this app's source and tests into its standalone server. It is only ever
+  // read at runtime, so the tracer is told to leave the call alone.
+  return Boolean(globalForDb.__skinsDb) || fs.existsSync(/* turbopackIgnore: true */ databaseFile());
 }
 
 export function getDb(): Database.Database {
