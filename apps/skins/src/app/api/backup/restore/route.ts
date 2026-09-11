@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
 import { RESTORE_MAX_BYTES, restoreBackup } from "@/lib/backup";
-import { errorMessage, jsonError } from "@/lib/http";
-import { tooLarge } from "@collectcollect/core/http";
+import { errorMessage, jsonError, tooLarge } from "@collectcollect/core/http";
 
 const TOO_LARGE = `That archive is larger than ${RESTORE_MAX_BYTES / 1024 / 1024} MB. Unpack it into the data directory by hand instead.`;
 
 /**
- * POST multipart/form-data with an `archive` file — replace the collection with
- * the contents of a backup. The collection being replaced is moved aside
- * rather than deleted.
+ * POST multipart/form-data with an `archive` file — replace the inventory with
+ * the contents of a backup. The inventory being replaced is moved aside rather
+ * than deleted.
  */
 export async function POST(request: Request) {
   const refused = tooLarge(request, RESTORE_MAX_BYTES, TOO_LARGE);

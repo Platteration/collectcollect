@@ -3,8 +3,10 @@ import { providerStatuses } from "@/lib/status";
 import { collectionStatus } from "@/lib/markdown/mirror";
 import { dataDir } from "@/lib/db";
 import { authEnabled } from "@/lib/auth";
+import { backupSummary, replacedCollections } from "@/lib/backup";
 import { SettingsForm } from "@/components/SettingsForm";
 import { CollectionFiles } from "@/components/CollectionFiles";
+import { Backup } from "@/components/Backup";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +24,8 @@ export default function SettingsPage() {
       </header>
 
       <SettingsForm initial={getSettings()} providers={providerStatuses()} />
+
+      <Backup summary={backupSummary()} replaced={replacedCollections()} />
 
       <CollectionFiles status={collectionStatus()} />
     </div>

@@ -371,6 +371,119 @@ describe("what a restore takes with it", () => {
   });
 });
 
+describe("putting a replaced collection back", () => {
+  /** A data directory with a card in it and a backup of that state. */
+  async function collectionWithBackup(prefix: string) {
+    const fsm = await import("node:fs");
+    const osm = await import("node:os");
+    const pathm = await import("node:path");
+    const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), prefix));
+    process.env.DATA_DIR = dir;
+    const { setDb, openDatabase, uploadsDir } = await import("@/lib/db");
+    const { createCard } = await import("@/lib/cards");
+    const { buildBackup } = await import("@/lib/backup");
+    setDb(openDatabase(pathm.join(dir, "collectcollect.db")));
+    createCard({ game: "pokemon", name: "Before the restore" });
+    fsm.writeFileSync(pathm.join(uploadsDir(), "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg"), Buffer.from([1]));
+    const { stream } = await buildBackup();
+    const parts: Uint8Array[] = [];
+    for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) parts.push(chunk);
+    return { dir, archive: new Uint8Array(Buffer.concat(parts)), fsm, pathm };
+  }
+
+  it("swaps the replaced collection back in, and moves the current one aside in its turn", async () => {
+    const { dir, archive, fsm, pathm } = await collectionWithBackup("cc-putback-");
+    const { createCard, listCards } = await import("@/lib/cards");
+    const { putBack, replacedCollections, restoreBackup } = await import("@/lib/backup");
+    const { uploadsDir, setDb } = await import("@/lib/db");
+
+    createCard({ game: "mtg", name: "Only in the replaced collection" });
+    const later = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff.jpg";
+    fsm.writeFileSync(pathm.join(uploadsDir(), later), Buffer.from([2]));
+    const restored = await restoreBackup(archive);
+    expect(listCards().map((c) => c.name)).toEqual(["Before the restore"]);
+
+    const listed = replacedCollections();
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ name: pathm.basename(restored.movedAsideTo), cards: 2, photos: 2 });
+    expect(new Date(listed[0].replacedAt).getTime()).toBeGreaterThan(0);
+
+    const result = await putBack(listed[0].name);
+    expect(result).toMatchObject({ cards: 2, photos: 2 });
+    expect(listCards().map((c) => c.name).sort()).toEqual(["Before the restore", "Only in the replaced collection"]);
+    expect(fsm.readdirSync(uploadsDir()).sort()).toEqual(["aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg", later]);
+    // The folder that was put back is consumed; the one that was live is kept.
+    expect(fsm.existsSync(restored.movedAsideTo)).toBe(false);
+    expect(fsm.existsSync(pathm.join(result.movedAsideTo, "collectcollect.db"))).toBe(true);
+    expect(replacedCollections().map((r) => r.name)).toEqual([pathm.basename(result.movedAsideTo)]);
+    // The plain-text copy is the replaced collection's own, not a rebuild.
+    expect(fsm.readdirSync(pathm.join(dir, "collection", "cards")).sort()).toEqual([
+      "0001-before-the-restore.md",
+      "0002-only-in-the-replaced-collection.md",
+    ]);
+
+    delete process.env.DATA_DIR;
+    setDb(undefined);
+    fsm.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("only accepts a folder a restore wrote", async () => {
+    const { dir, fsm } = await collectionWithBackup("cc-putback-names-");
+    const { putBack, replacedCollections } = await import("@/lib/backup");
+    const { setDb } = await import("@/lib/db");
+    fsm.mkdirSync(`${dir}/replaced-by-hand`);
+    fsm.mkdirSync(`${dir}/replaced-2026-01-01T00-00-00-000Z`);
+    expect(replacedCollections().map((r) => [r.name, r.cards])).toEqual([["replaced-2026-01-01T00-00-00-000Z", null]]);
+    for (const bad of ["../elsewhere", "replaced-by-hand", "", "replaced-2026-01-01T00-00-00-000Z/../x", "replaced-2099-01-01T00-00-00-000Z"]) {
+      await expect(putBack(bad), bad).rejects.toThrow(/not one of the collections/);
+    }
+    await expect(putBack("replaced-2026-01-01T00-00-00-000Z")).rejects.toThrow(/no database/);
+    delete process.env.DATA_DIR;
+    setDb(undefined);
+    fsm.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("leaves the collection untouched when the restore fails before the swap", async () => {
+    const { dir, archive, fsm, pathm } = await collectionWithBackup("cc-swap-early-");
+    const { createCard, listCards } = await import("@/lib/cards");
+    const { restoreBackup } = await import("@/lib/backup");
+    const { setDb } = await import("@/lib/db");
+    createCard({ game: "mtg", name: "Still here afterwards" });
+    // Bringing the incoming database beside the live one is the step that can
+    // fail for want of disk; a directory in its way fails it the same way.
+    fsm.mkdirSync(pathm.join(dir, "collectcollect.db.restoring"));
+    await expect(restoreBackup(archive)).rejects.toThrow(/before anything was replaced.*untouched/);
+    expect(listCards().map((c) => c.name).sort()).toEqual(["Before the restore", "Still here afterwards"]);
+    expect(fsm.readdirSync(dir).filter((n) => n.startsWith("replaced-"))).toEqual([]);
+    delete process.env.DATA_DIR;
+    setDb(undefined);
+    fsm.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("keeps the restored database live when the restore fails after the swap, and says where the old one went", async () => {
+    const { dir, archive, fsm, pathm } = await collectionWithBackup("cc-swap-late-");
+    const { createCard, listCards } = await import("@/lib/cards");
+    const { restoreBackup } = await import("@/lib/backup");
+    const { setDb } = await import("@/lib/db");
+    createCard({ game: "mtg", name: "Added after the backup" });
+    // The photos come after the database. A file where the uploads folder
+    // should be fails that step and nothing before it.
+    fsm.rmSync(pathm.join(dir, "uploads"), { recursive: true, force: true });
+    fsm.writeFileSync(pathm.join(dir, "uploads"), "not a folder");
+    const message = await restoreBackup(archive).catch((e: Error) => e.message);
+    expect(message).toMatch(/part way through/);
+    expect(message).toMatch(/replaced-\d{4}/);
+    // The restored database is the live one, not an empty one and not the old one.
+    expect(listCards().map((c) => c.name)).toEqual(["Before the restore"]);
+    const aside = fsm.readdirSync(dir).filter((n) => n.startsWith("replaced-"));
+    expect(aside).toHaveLength(1);
+    expect(fsm.existsSync(pathm.join(dir, aside[0], "collectcollect.db"))).toBe(true);
+    delete process.env.DATA_DIR;
+    setDb(undefined);
+    fsm.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe("upload names", () => {
   it("only accepts the names it writes itself", async () => {
     const { isValidUploadName, uploadPath } = await import("@/lib/images");

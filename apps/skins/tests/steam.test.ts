@@ -362,6 +362,73 @@ describe("bringing an inventory in twice", () => {
     expect(listItems()).toHaveLength(2);
   });
 
+  it("keeps a trade lock it knows about when a public read says nothing", () => {
+    // The owner's own read carries the lock; a public read never does. Absent
+    // has to mean "not known", or every re-import would unlock everything.
+    const locked = description({ owner_descriptions: [{ value: "Tradable After Sep 15, 2026 (07:00:00) GMT" }] });
+    const assets = [{ assetid: "1", classid: "310776560", instanceid: "302028390" }];
+    const [first] = parseInventory(inventory([locked], assets), STEAM_ID).items;
+    const created = syncFromInventory(first);
+    expect(created.item.tradableAfter).toBe(new Date("Sep 15, 2026").toISOString());
+
+    const [again] = parseInventory(inventory([description()], assets), STEAM_ID).items;
+    expect(again.tradableAfter).toBeNull();
+    const outcome = syncFromInventory(again);
+    expect(outcome.result).toBe("updated");
+    expect(getItem(created.item.id)!.tradableAfter).toBe(new Date("Sep 15, 2026").toISOString());
+  });
+
+  it("keeps the stickers, name tag, inspect link, image and rarity a bare re-read leaves out", () => {
+    const rich = description({
+      descriptions: [{ name: "sticker_info", value: "Sticker: Crown (Foil)" }],
+      fraudwarnings: ["Name Tag: ''old faithful''"],
+    });
+    const assets = [{ assetid: "1", classid: "310776560", instanceid: "302028390" }];
+    const [first] = parseInventory(inventory([rich], assets), STEAM_ID).items;
+    const { item } = intakeItem(first);
+    expect(item.stickers).toHaveLength(1);
+    expect(item.nameTag).toBe("old faithful");
+
+    // A description with nothing but its type: no rarity or set tag, no inspect
+    // action, no icon, no blob. The shape of a partial or degraded answer, not
+    // of an object that lost its stickers.
+    const bare = description({
+      tags: [{ category: "Type", internal_name: "CSGO_Type_Rifle", localized_tag_name: "Rifle" }],
+      actions: [],
+      icon_url: undefined,
+      descriptions: [],
+      fraudwarnings: [],
+    });
+    const [again] = parseInventory(inventory([bare], assets), STEAM_ID).items;
+    expect(again.stickers).toEqual([]);
+    expect(again.rarity).toBeNull();
+    const outcome = intakeItem(again);
+    expect(outcome.result).toBe("updated");
+    const kept = getItem(item.id)!;
+    expect(kept.stickers).toEqual(item.stickers);
+    expect(kept.nameTag).toBe("old faithful");
+    expect(kept.inspectLink).toBe(item.inspectLink);
+    expect(kept.imageUrl).toBe(item.imageUrl);
+    expect(kept.rarity).toBe("classified");
+    expect(kept.collection).toBe("The Huntsman Collection");
+  });
+
+  it("still takes a newer lock and a fresh set of stickers", () => {
+    const assets = [{ assetid: "1", classid: "310776560", instanceid: "302028390" }];
+    const [first] = parseInventory(inventory([description()], assets), STEAM_ID).items;
+    const { item } = syncFromInventory(first);
+
+    const changed = description({
+      owner_descriptions: [{ value: "Tradable After Oct 1, 2026 (07:00:00) GMT" }],
+      descriptions: [{ name: "sticker_info", value: "Sticker: Titan | Katowice 2014, Crown (Foil)" }],
+    });
+    const [again] = parseInventory(inventory([changed], assets), STEAM_ID).items;
+    syncFromInventory(again);
+    const now = getItem(item.id)!;
+    expect(now.tradableAfter).toBe(new Date("Oct 1, 2026").toISOString());
+    expect(now.stickers.map((s) => s.name)).toEqual(["Titan | Katowice 2014", "Crown (Foil)"]);
+  });
+
   it("brings nothing in with a purchase price, because Steam does not know one", () => {
     const payload = inventory([description()], [{ assetid: "1", classid: "310776560", instanceid: "302028390" }]);
     const [item] = parseInventory(payload, STEAM_ID).items;

@@ -5,7 +5,7 @@ import { mirrorEnabled, rebuildCollection } from "@/lib/markdown/mirror";
 
 /** POST — rewrite every Markdown file from the database. */
 export async function POST() {
-  if (!mirrorEnabled()) return jsonError("The plain-text copy is switched off (MARKDOWN_MIRROR=off)", 409);
+  if (!mirrorEnabled()) return jsonError("The plain-text copy is switched off (SKINS_MARKDOWN_MIRROR=off)", 409);
   try {
     return NextResponse.json({ result: rebuildCollection(listItems()) });
   } catch (e) {

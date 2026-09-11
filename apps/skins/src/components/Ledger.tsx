@@ -112,7 +112,10 @@ export function Ledger({ item, acquisitions, sales }: { item: ItemRecord; acquis
                           className="text-xs underline"
                           style={{ color: "var(--muted)" }}
                           disabled={busy}
-                          onClick={() => run(() => api(`/api/items/${item.id}/acquisitions/${lot.id}`, { method: "DELETE" }))}
+                          onClick={() => {
+                            if (!confirm(`Remove this purchase of ${lot.quantity} cop${lot.quantity === 1 ? "y" : "ies"}? The copies go with it.`)) return;
+                            void run(() => api(`/api/items/${item.id}/acquisitions/${lot.id}`, { method: "DELETE" }));
+                          }}
                         >
                           Undo
                         </button>
@@ -178,7 +181,10 @@ export function Ledger({ item, acquisitions, sales }: { item: ItemRecord; acquis
                           className="text-xs underline"
                           style={{ color: "var(--muted)" }}
                           disabled={busy}
-                          onClick={() => run(() => api(`/api/sales/${sale.id}`, { method: "DELETE" }))}
+                          onClick={() => {
+                            if (!confirm(`Undo this sale of ${sale.quantity} cop${sale.quantity === 1 ? "y" : "ies"}? The copies come back to the purchases they were sold from.`)) return;
+                            void run(() => api(`/api/sales/${sale.id}`, { method: "DELETE" }));
+                          }}
                         >
                           Undo
                         </button>

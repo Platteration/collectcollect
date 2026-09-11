@@ -13,6 +13,12 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    # The data directory is the volume, whatever .env says: `environment` wins
+    # over `env_file`, so a DATA_DIR meant for a shell install cannot point the
+    # container at its own writable layer, where a collection would vanish with
+    # the container.
+    environment:
+      DATA_DIR: /data
     volumes:
       - collectcollect-data:/data
     restart: unless-stopped
@@ -26,6 +32,8 @@ services:
       - "3001:3000"
     env_file:
       - .env
+    environment:
+      SKINS_DATA_DIR: /data
     volumes:
       - collectcollect-skins-data:/data
     restart: unless-stopped

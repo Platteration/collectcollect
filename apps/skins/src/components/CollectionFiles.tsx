@@ -40,8 +40,20 @@ export function CollectionFiles({ status }: { status: CollectionStatus }) {
     }
   };
 
-  const restore = async (files: FileList | null) => {
+  const restore = async (input: HTMLInputElement) => {
+    const files = input.files;
     if (!files?.length) return;
+    // The file wins for every item it names: its purchases, sales and recorded
+    // prices replace what is held. That is right for recovering an inventory
+    // and wrong for a folder picked by mistake, so it is said before it is done.
+    const what = files.length === 1 ? files[0].name : `${files.length} files`;
+    const ok = confirm(
+      `Read ${what} back into the inventory? For every item those files describe, the purchases, sales and recorded prices held here are replaced by what the file says.`,
+    );
+    if (!ok) {
+      input.value = "";
+      return;
+    }
     setBusy("import");
     setError(null);
     const form = new FormData();
@@ -57,6 +69,7 @@ export function CollectionFiles({ status }: { status: CollectionStatus }) {
       setError((e as Error).message);
     } finally {
       setBusy(null);
+      input.value = "";
     }
   };
 
@@ -88,7 +101,7 @@ export function CollectionFiles({ status }: { status: CollectionStatus }) {
         {!status.enabled && (
           <div className="flex justify-between gap-2">
             <dt style={{ color: "var(--muted)" }}>Writing</dt>
-            <dd style={{ color: "var(--chart-bad-text)" }}>off (MARKDOWN_MIRROR=off)</dd>
+            <dd style={{ color: "var(--chart-bad-text)" }}>off (SKINS_MARKDOWN_MIRROR=off)</dd>
           </div>
         )}
         {status.failures > 0 && (
@@ -122,7 +135,7 @@ export function CollectionFiles({ status }: { status: CollectionStatus }) {
             multiple
             accept=".md,.zip"
             disabled={busy !== null}
-            onChange={(e) => restore(e.target.files)}
+            onChange={(e) => restore(e.target)}
           />
         </label>
       </div>

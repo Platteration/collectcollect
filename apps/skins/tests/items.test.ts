@@ -144,6 +144,20 @@ describe("intake", () => {
     expect(findByAssetId("44112233")!.storageUnit).toBe("Storage Unit 1");
   });
 
+  it("keeps what the owner filled in when the same object is read again", () => {
+    const { item } = intakeItem(redline({ assetId: "44112233" }));
+    updateItem(item.id, { notes: "birthday present", storageUnit: "Storage Unit 1", purchasePrice: 38 });
+    // A parser emits every key it has a slot for; the blanks are what it does
+    // not know, not instructions to forget.
+    const again = intakeItem(redline({ assetId: "44112233", notes: null, storageUnit: null, purchasePrice: null, rarity: null }));
+    expect(again.result).toBe("updated");
+    const kept = getItem(item.id)!;
+    expect(kept.notes).toBe("birthday present");
+    expect(kept.storageUnit).toBe("Storage Unit 1");
+    expect(kept.purchasePrice).toBe(38);
+    expect(kept.rarity).toBe("classified");
+  });
+
   it("keeps the quantity right after a merge", () => {
     seedCase({ quantity: 2 });
     intakeItem(clutchCase({ quantity: 1 }));

@@ -1,7 +1,8 @@
 import { SettingsForm } from "@/components/SettingsForm";
 import { getSettings } from "@/lib/settings";
-import { backupSummary } from "@/lib/backup";
+import { backupSummary, replacedCollections } from "@/lib/backup";
 import { RestoreForm } from "@/components/RestoreForm";
+import { ReplacedCollections } from "@/components/ReplacedCollections";
 import { CollectionFiles } from "@/components/CollectionFiles";
 import { collectionStatus } from "@/lib/markdown/mirror";
 import Link from "next/link";
@@ -81,6 +82,7 @@ export default function SettingsPage() {
           Download backup
         </a>
         <RestoreForm />
+        <ReplacedCollections replaced={replacedCollections()} />
       </section>
 
       <section className="card-surface p-4">

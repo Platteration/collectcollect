@@ -54,10 +54,31 @@ test.describe("money", () => {
     await page.getByRole("button", { name: "Record the sale" }).click();
     await expect(page.getByRole("button", { name: "All sold" })).toBeVisible();
 
+    // Undoing money that changed hands asks first; saying no changes nothing.
+    page.once("dialog", (d) => d.dismiss());
+    await page.getByRole("row", { name: /\$4\.00/ }).getByRole("button", { name: "Undo" }).click();
+    await expect(page.getByRole("button", { name: "All sold" })).toBeVisible();
+
+    page.once("dialog", (d) => d.accept());
     await page.getByRole("row", { name: /\$4\.00/ }).getByRole("button", { name: "Undo" }).click();
     await expect(page.getByRole("button", { name: "Sold some" })).toBeEnabled();
     // Both copies back, still at what they cost.
     await expect(page.getByText(/paid \$2\.50/)).toBeVisible();
+  });
+
+  test("undoing a purchase asks first and takes the copies with it", async ({ page }) => {
+    await add(page, "Prisma Case", { "How many": "1", "Paid, each": "1.00" });
+    await page.getByRole("button", { name: "Bought more" }).click();
+    await page.getByLabel("How many").last().fill("3");
+    await page.getByLabel("Cost each").fill("2.00");
+    await page.getByRole("button", { name: "Record the purchase" }).click();
+    const purchases = page.locator("table").filter({ has: page.getByRole("columnheader", { name: "Left" }) });
+    await expect(purchases.getByRole("cell", { name: "$2.00" })).toBeVisible();
+
+    page.once("dialog", (d) => d.accept());
+    await purchases.getByRole("row", { name: /\$2\.00/ }).getByRole("button", { name: "Undo" }).click();
+    await expect(purchases.getByRole("cell", { name: "$2.00" })).toHaveCount(0);
+    await expect(page.getByText(/paid \$1\.00/)).toBeVisible();
   });
 
   test("will not book a sale with no price", async ({ page }) => {

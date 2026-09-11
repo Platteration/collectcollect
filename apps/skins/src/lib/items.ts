@@ -435,6 +435,52 @@ export function listByMarketHashName(marketHashName: string): ItemRecord[] {
   return rows.map((r) => rowToItem(r, stickers.get(r.id) ?? []));
 }
 
+/**
+ * Fields a reading of an object may leave blank without meaning "there is
+ * nothing here". The public inventory endpoint sends no trade lock, and a
+ * description with no sticker blob has no stickers *that Steam mentioned*;
+ * neither is a reason to forget what this app already knows about the object.
+ */
+const OPTIONAL_ON_REREAD = [
+  "tradableAfter",
+  "stickers",
+  "nameTag",
+  "inspectLink",
+  "imageUrl",
+  "rarity",
+  "collection",
+  "floatValue",
+  "paintSeed",
+  "paintIndex",
+  "exterior",
+  "weapon",
+  "finish",
+  "notes",
+  "storageUnit",
+  "purchasePrice",
+  "manualPrice",
+] as const satisfies ReadonlyArray<keyof ItemInput>;
+
+/**
+ * What a re-read of an object actually knows.
+ *
+ * `updateItem` takes an explicit null as "clear this", which is right for the
+ * edit form and wrong for an import: a parser emits every key it has a slot for,
+ * present and null, and applying that as a patch would wipe a trade lock,
+ * stickers, a name tag and the owner's own notes on every re-import. So a blank
+ * value on any of those fields is dropped from the patch, and a newer lock or a
+ * freshly read set of stickers still comes through.
+ */
+export function knownFields(input: ItemInput): Partial<ItemInput> {
+  const patch: Partial<ItemInput> = { ...input };
+  for (const key of OPTIONAL_ON_REREAD) {
+    const value = patch[key];
+    const blank = value === null || value === undefined || (key === "stickers" && Array.isArray(value) && value.length === 0);
+    if (blank) delete patch[key];
+  }
+  return patch;
+}
+
 export type IntakeOutcome =
   | { result: "created"; item: ItemRecord }
   | { result: "merged"; item: ItemRecord }
@@ -455,7 +501,7 @@ export function intakeItem(input: ItemInput): IntakeOutcome {
   const run = getDb().transaction((): IntakeOutcome => {
     if (clean.assetId) {
       const same = findByAssetId(clean.assetId);
-      if (same) return { result: "updated", item: updateItem(same.id, input)! };
+      if (same) return { result: "updated", item: updateItem(same.id, knownFields(input))! };
     }
     if (clean.stackable) {
       const stack = findStack(clean.marketHashName);
@@ -508,7 +554,7 @@ export function syncFromInventory(input: ItemInput): SyncOutcome {
   const run = getDb().transaction((): SyncOutcome => {
     if (clean.assetId) {
       const same = findByAssetId(clean.assetId);
-      if (same) return { result: "updated", item: updateItem(same.id, input)! };
+      if (same) return { result: "updated", item: updateItem(same.id, knownFields(input))! };
     }
     if (!clean.stackable) return { result: "created", item: createItem(input) };
 

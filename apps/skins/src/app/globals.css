@@ -85,6 +85,15 @@ body {
 .btn-secondary:hover {
   background: var(--surface-raised);
 }
+.btn-danger {
+  @apply btn;
+  border: 1px solid color-mix(in srgb, var(--chart-bad) 45%, transparent);
+  color: var(--chart-bad-text);
+  background: transparent;
+}
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--chart-bad) 12%, transparent);
+}
 .input {
   @apply w-full rounded-lg px-3 py-2 text-sm outline-none;
   border: 1px solid var(--line-strong);

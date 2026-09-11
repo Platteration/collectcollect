@@ -6,7 +6,7 @@ import { addAcquisition, getItem, latestSnapshot, listItems, updateItem } from "
 import { listLots, listSaleLots, verifyLotInvariant } from "@/lib/acquisitions";
 import { listSalesForItem, recordSale } from "@/lib/sales";
 import { itemFileName, itemMarkdown, parseItemMarkdown } from "@/lib/markdown/item";
-import { collectionDir, flushCollection, itemsDir, readItemFiles, rebuildCollection } from "@/lib/markdown/mirror";
+import { collectionDir, flushCollection, itemsDir, mirrorEnabled, readItemFiles, rebuildCollection } from "@/lib/markdown/mirror";
 import { importFromDisk, importItemFiles } from "@/lib/markdown/restore";
 import { parseDocument, readTable } from "@collectcollect/core/markdown/format";
 import { seedCase, seedRedline } from "./helpers";
@@ -286,6 +286,28 @@ describe("rebuilding an inventory from nothing but its files", () => {
     ].join("\n");
     importItemFiles([{ name: "x.md", text }]);
     expect(latestSnapshot(item.id)!.summary.yourCopyValue).toBe(9);
+  });
+});
+
+describe("switching the folder off", () => {
+  it("answers to its own variable and not to the card app's", () => {
+    const before = { own: process.env.SKINS_MARKDOWN_MIRROR, shared: process.env.MARKDOWN_MIRROR };
+    try {
+      // One .env file runs both apps. Turning the card app's copy off must not
+      // quietly turn this one off with it.
+      process.env.MARKDOWN_MIRROR = "off";
+      delete process.env.SKINS_MARKDOWN_MIRROR;
+      expect(mirrorEnabled()).toBe(true);
+      process.env.SKINS_MARKDOWN_MIRROR = "off";
+      expect(mirrorEnabled()).toBe(false);
+      process.env.SKINS_MARKDOWN_MIRROR = "OFF";
+      expect(mirrorEnabled()).toBe(false);
+    } finally {
+      if (before.own === undefined) delete process.env.SKINS_MARKDOWN_MIRROR;
+      else process.env.SKINS_MARKDOWN_MIRROR = before.own;
+      if (before.shared === undefined) delete process.env.MARKDOWN_MIRROR;
+      else process.env.MARKDOWN_MIRROR = before.shared;
+    }
   });
 });
 

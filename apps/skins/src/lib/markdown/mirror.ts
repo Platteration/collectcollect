@@ -33,9 +33,15 @@ export function itemsDir(): string {
   return path.join(collectionDir(), "items");
 }
 
-/** Set MARKDOWN_MIRROR=off for a read-only data volume. */
+/**
+ * Set SKINS_MARKDOWN_MIRROR=off for a read-only data volume.
+ *
+ * Its own variable, like every other setting of this app, and deliberately no
+ * fallback to the card app's `MARKDOWN_MIRROR`: one .env file runs both apps,
+ * and switching the card app's copy off must not silently switch this one off.
+ */
 export function mirrorEnabled(): boolean {
-  return (process.env.MARKDOWN_MIRROR ?? "on").toLowerCase() !== "off";
+  return (process.env.SKINS_MARKDOWN_MIRROR ?? "on").toLowerCase() !== "off";
 }
 
 interface MirrorState {

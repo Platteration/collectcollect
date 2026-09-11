@@ -86,7 +86,7 @@ Sports cards have no free price API; without a PriceCharting token you can still
 
 **Bulk actions.** Tick several cards on the Collection page to refresh their prices, set a grading plan, add them to a draft submission, or delete them in one go.
 
-**Backup and restore.** Settings offers a single zip holding a consistent copy of the database (taken through SQLite's own backup, so it is safe while the app is running) and every photo, and takes one back to restore it. A restore validates the whole archive and opens its database before touching anything, refuses names that would escape the data directory or files the app did not write, and moves the collection being replaced into a dated folder rather than deleting it, so restoring the wrong file can be undone by hand. It holds the archive in memory, so it is capped at 512 MB; a larger collection is restored by unpacking the zip into the data directory with the app stopped.
+**Backup and restore.** Settings offers a single zip holding a consistent copy of the database (taken through SQLite's own backup, so it is safe while the app is running) and every photo, and takes one back to restore it. A restore validates the whole archive and opens its database before touching anything, refuses names that would escape the data directory or files the app did not write, and moves the collection being replaced into a dated folder rather than deleting it. Those folders are listed in Settings, and any of them can be put back with one click — which moves the collection that is live aside in its turn, so that is undoable too. The swap itself is ordered so the app is never left with no database: the incoming one is brought beside the live one first, where a full disk can still fail harmlessly, and the exchange is two renames. It holds the archive in memory, so it is capped at 512 MB; a larger collection is restored by unpacking the zip into the data directory with the app stopped.
 
 **What each copy cost.** Cards get bought more than once, rarely at the same price. Every purchase is recorded as its own lot — when, how many, what each one cost, and where from — so a second copy never overwrites what the first one cost. Adding a copy of a card you already own asks for that copy's price rather than just bumping a number. Selling takes the copies you have held longest first, and the gain is measured against what *those* copies cost, not against an average and not against the newest price. Undoing a sale puts the copies back in the lots they came from.
 
@@ -156,7 +156,8 @@ src/app/                 Next.js App Router pages and API routes
   api/submissions[/id]   Grading batches; PATCH adds/removes cards, marks sent, records grades
   api/alerts[/id]        GET the feed, POST marks all read, DELETE dismisses one
   api/cards/intake       POST — atomic add-or-merge used by scan mode
-  api/backup             GET — the database and photos as one zip; /restore puts one back
+  api/backup             GET — the database and photos as one zip; /restore puts one back;
+                         /replaced lists what restores moved aside and POST puts one back
   api/cards/[id]/acquisitions
                          GET/POST — what each copy cost; POST records another purchase
   api/collection         GET — the collection as Markdown; /rebuild rewrites it, /import reads it back
@@ -248,6 +249,9 @@ you have seen what would arrive:
   running it again on an unchanged inventory changes nothing; a stack that has
   grown gains a purchase of unknown cost, one that has shrunk gives up its
   newest lots, and an object Steam stopped listing is named rather than deleted.
+  What a re-read does not mention, it does not forget: a public read carries no
+  trade lock and a bare description carries no stickers, and neither wipes the
+  lock, the stickers, the name tag, or the notes and price you filled in.
 - **From a spreadsheet**, which is the one that knows what you paid. Steam does
   not, so a file of your own purchases is what turns an inventory into a record.
 - **One at a time**, where pasting the market hash name fills in the kind, the
@@ -308,6 +312,14 @@ that has already changed hands.
 **Taking it elsewhere.** The plain-text mirror works exactly like the card
 app's, under `<data>/collection/items/`, and carries the float, the pattern
 seed, the applied stickers and their wear, every purchase lot and which lots
-each sale took. There is also a CSV export in the columns the importer reads
-back, and a printable valuation at `/report` that lists an unpriced item as
-unpriced rather than counting it as worth nothing.
+each sale took. Its switch is `SKINS_MARKDOWN_MIRROR=off` — its own, so the
+card app's `MARKDOWN_MIRROR` never reaches it. There is also a CSV export in
+the columns the importer reads back, and a printable valuation at `/report`
+that lists an unpriced item as unpriced rather than counting it as worth
+nothing.
+
+**Backup and restore** work as in the card app, minus the photos: one zip of
+the database and its plain-text copy, a restore that moves what it replaces
+into a dated folder, and a list of those folders in Settings from which any
+can be put back. An archive from the card app is refused by name rather than
+unpacked into the wrong place.

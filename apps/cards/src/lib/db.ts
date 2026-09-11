@@ -293,6 +293,20 @@ export function lockDatabase(reason: string): boolean {
   return true;
 }
 
+/**
+ * Close the live connection and forget it, so the file can be replaced on
+ * every platform. Works while the database is locked, which is the only time
+ * it is needed.
+ */
+export function closeDatabase(): void {
+  try {
+    globalForDb.__collectcollectDb?.close();
+  } catch {
+    /* already closed */
+  }
+  globalForDb.__collectcollectDb = undefined;
+}
+
 export function unlockDatabase(): void {
   globalForDb.__collectcollectLocked = undefined;
 }
