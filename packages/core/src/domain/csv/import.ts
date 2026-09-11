@@ -60,8 +60,11 @@ export function readCell(field: FieldSpec, text: string): { value: unknown; warn
       const options = field.options ?? {};
       const byId = Object.keys(options).find((id) => headerKey(id) === key);
       const byLabel = Object.entries(options).find(([, label]) => headerKey(label) === key)?.[0];
-      const alias = field.aliases?.[key];
-      const value = byId ?? byLabel ?? alias ?? null;
+      // Object.hasOwn, not a bare lookup: "constructor" and "toString" sit on
+      // every object's prototype, so a cell reading one of them would otherwise
+      // come back as an alias and be carried on as if it were a real option.
+      const alias = field.aliases && Object.hasOwn(field.aliases, key) ? field.aliases[key] : null;
+      const value = byId ?? byLabel ?? (alias && Object.hasOwn(options, alias) ? alias : null);
       if (value === null) {
         return field.required
           ? { value: undefined, problem: `Unknown ${field.label.toLowerCase()} "${text}"` }

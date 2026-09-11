@@ -81,6 +81,23 @@ describe("an item as a document", () => {
   });
 });
 
+describe("reading a file somebody edited", () => {
+  it("skips a sale whose date is not one, the way it already skips a purchase", () => {
+    const w = engine.repo.createItem({ name: "Gizmo", maker: "Acme", quantity: 2, purchasePrice: 10 });
+    engine.sales.recordSale(w.id, { quantity: 1, unitPrice: 25, fees: 1, venue: "eBay" });
+    engine.mirror.flushCollection();
+    const text = fileFor(w.id);
+    expect(parseItemMarkdown<Widget>(spec, text)!.sales).toHaveLength(1);
+
+    // The same file with the sale's date replaced by something that is not one.
+    const [head, sales] = text.split("## Sales");
+    const broken = `${head}## Sales${sales.replace(/\| \d{4}-\d{2}-\d{2}[^|]*\|/, "| whenever |")}`;
+    const parsed = parseItemMarkdown<Widget>(spec, broken)!;
+    expect(parsed.sales).toEqual([]);
+    expect(parsed.warnings.join(" ")).toMatch(/unreadable sale row/);
+  });
+});
+
 describe("the folder on disk", () => {
   it("writes a file per item and an index that links to them", () => {
     const w = engine.repo.createItem({ name: "Gizmo", maker: "Acme" });

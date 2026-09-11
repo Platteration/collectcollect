@@ -45,7 +45,9 @@ export function createImages(db: DomainDb) {
   }
 
   async function saveUpload(file: File): Promise<{ name: string; bytes: number; color: string | null }> {
-    if (!ALLOWED_IMAGE_TYPES[file.type] && !file.type.startsWith("image/")) {
+    // Object.hasOwn, so a declared type of "constructor" cannot pass the gate
+    // on a prototype member and fail later with a decoder error instead.
+    if (!Object.hasOwn(ALLOWED_IMAGE_TYPES, file.type) && !file.type.startsWith("image/")) {
       throw new Error(`Unsupported file type: ${file.type || "unknown"}`);
     }
     const input = Buffer.from(await file.arrayBuffer());

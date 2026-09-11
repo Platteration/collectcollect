@@ -25,6 +25,17 @@ describe("importing a spreadsheet", () => {
     expect(preview.usable).toBe(2);
   });
 
+  it("does not take a prototype member as an alias for an option", () => {
+    // "constructor" is on every object's prototype, so an unguarded alias
+    // lookup answers with Object itself and carries it on as a real value.
+    const preview = engine.csv.previewImport(csv("name,kind", "Gizmo,constructor", "Gadget,toString"));
+    expect(preview.rows.map((r) => r.problem)).toEqual([null, null]);
+    expect(preview.rows[0].warning).toMatch(/Kind "constructor" was not recognised/);
+    expect(preview.rows[1].warning).toMatch(/not recognised/);
+    expect(preview.rows.map((r) => r.input?.kind)).toEqual([undefined, undefined]);
+    expect(preview.usable).toBe(2);
+  });
+
   it("creates what is new and joins stacks already held", () => {
     engine.csv.applyImport(engine.csv.previewImport(csv("name,maker,qty,cost", "Gadget,Acme,10,0.42")));
     const result = engine.csv.applyImport(engine.csv.previewImport(csv("name,maker,qty,cost", "Gadget,Acme,5,1.15", "Other,Acme,2,0.30")));
