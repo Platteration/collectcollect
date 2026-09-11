@@ -6,6 +6,7 @@ import {
   LOGIN_LOCKOUT_MS,
   LOGIN_MAX_ATTEMPTS,
   clearLoginFailures,
+  clearRateLimit,
   clientKey,
   loginBlocked,
   loginFailureDelay,
@@ -13,7 +14,7 @@ import {
   recordLoginFailure,
   resetLimiters,
 } from "@/lib/rate-limit";
-import { openDatabase, setDb } from "@/lib/db";
+import { openLiveDatabase, setDb } from "@/lib/db";
 import { createCard } from "@/lib/cards";
 import { refreshAll } from "@/lib/pricing/refresh";
 
@@ -124,6 +125,19 @@ describe("login attempt limiter", () => {
     expect(loginFailureDelay(50)).toBeGreaterThanOrEqual(loginFailureDelay(4));
   });
 
+  it("does not push the lockout window out on every further guess", () => {
+    // The blocked state is the one that answers fastest and says the least, so
+    // a caller must be let out of it: rewriting resetAt on every failure let a
+    // guesser who never stops pin themselves inside it for good.
+    const t = 9_000_000;
+    for (let i = 0; i < LOGIN_MAX_ATTEMPTS; i++) recordLoginFailure("203.0.113.5", t);
+    expect(loginBlocked("203.0.113.5", t)).toBe(true);
+    for (let at = t; at < t + LOGIN_LOCKOUT_MS; at += 60_000) recordLoginFailure("203.0.113.5", at);
+    // The window is still the one the eighth failure opened, counted from that
+    // failure rather than from the constant, so the bound is not the code's own.
+    expect(loginBlocked("203.0.113.5", t + LOGIN_LOCKOUT_MS + 1)).toBe(false);
+  });
+
   it("counts each failure and reports the count that sets the cost", () => {
     const t = 8_000_000;
     expect(recordLoginFailure("203.0.113.5", t)).toBe(1);
@@ -132,9 +146,19 @@ describe("login attempt limiter", () => {
   });
 });
 
+describe("a limiter for work that is meant to be done", () => {
+  it("hands the bucket back", () => {
+    const t = 10_000_000;
+    for (let i = 0; i < 2; i++) expect(rateLimit("restore-ish", 2, 60_000, t).ok).toBe(true);
+    expect(rateLimit("restore-ish", 2, 60_000, t).ok).toBe(false);
+    clearRateLimit("restore-ish");
+    expect(rateLimit("restore-ish", 2, 60_000, t).ok).toBe(true);
+  });
+});
+
 describe("collection-wide price refresh", () => {
   beforeEach(() => {
-    setDb(openDatabase(":memory:"));
+    setDb(openLiveDatabase(":memory:"));
     createCard({ game: "pokemon", name: "Charizard", cardNumber: "4/102" });
     createCard({ game: "pokemon", name: "Blastoise", cardNumber: "2/102" });
   });

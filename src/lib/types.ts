@@ -208,9 +208,20 @@ export interface SaleWithCard extends Sale {
 
 export type AlertKind = "ready_to_grade" | "price_move" | "graded_data";
 
+export const ALERT_KINDS: Record<AlertKind, string> = {
+  ready_to_grade: "Ready to grade",
+  price_move: "Price move",
+  graded_data: "Graded data",
+};
+
 export interface Alert {
   id: number;
-  kind: AlertKind;
+  /**
+   * What this app writes is always an AlertKind, but a row read back may not be:
+   * a restored database can hold anything, so the sinks that render it guard it
+   * with has()/label() rather than trusting a cast that was never checked.
+   */
+  kind: AlertKind | (string & {});
   cardId: number | null;
   title: string;
   body: string;

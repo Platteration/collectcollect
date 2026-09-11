@@ -26,11 +26,17 @@ export async function POST(request: Request) {
   // clears it. Comparing first costs two HMACs, which is nothing to spend.
   if (typeof body.password !== "string" || !(await passwordMatches(body.password))) {
     const failures = recordLoginFailure(key);
-    if (loginBlocked(key)) return jsonError("Too many failed attempts. Try again later.", 429);
-    // Otherwise the guess costs wall clock, growing with the bucket. A cost
-    // cannot be turned on someone else, which a refusal can.
+    const blocked = loginBlocked(key);
+    // The wall clock is charged first and charged always. Returning the 429
+    // ahead of the sleep made the throttle vanish exactly when the caller was
+    // over budget: a wrong guess became free, while the right password still
+    // answered 200 — a counter that told an attacker which guess was correct
+    // and cost them nothing to ask. A refusal on top of the cost is fine; a
+    // refusal *instead of* the cost is an oracle.
     await sleep(loginFailureDelay(failures));
-    return jsonError("Wrong password", 401);
+    return blocked
+      ? jsonError("Too many failed attempts. Try again later.", 429)
+      : jsonError("Wrong password", 401);
   }
 
   clearLoginFailures(key);
@@ -50,8 +56,17 @@ export async function DELETE(request: Request) {
   // Clearing the cookie only ends the session in this browser. A copy taken off
   // a shared machine or a plaintext hop keeps working for the rest of its thirty
   // days unless the token itself is retired, which is what signing out is for.
-  await revokeToken(readSessionCookie(request));
-  const response = NextResponse.json({ ok: true });
+  const outcome = await revokeToken(readSessionCookie(request));
+  // Say so when it could not be recorded. Answering ok:true to a revocation
+  // that was never written tells the owner the stolen copy is dead at the one
+  // moment they are acting on the belief that it is.
+  const response =
+    outcome === "failed"
+      ? jsonError(
+          "Signed out in this browser, but this session could not be retired on the server, so a copy of the cookie still works. Change APP_PASSWORD to end every session.",
+          500,
+        )
+      : NextResponse.json({ ok: true });
   response.cookies.set(SESSION_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 });
   return response;
 }

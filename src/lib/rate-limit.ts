@@ -5,7 +5,7 @@
  * which is an accepted cost.
  */
 
-import net from "node:net";
+import { asAddress, forwardedEntry, trustedProxyHops } from "./forwarded";
 
 export interface RateLimitVerdict {
   ok: boolean;
@@ -38,6 +38,15 @@ export function rateLimit(name: string, limit: number, windowMs: number, now = D
   return { ok: true, retryAfter: 0 };
 }
 
+/**
+ * Give a bucket back. For a limiter that guards work whose *point* is to be
+ * done — a restore is how a collection comes back — a call that succeeded is
+ * evidence of use rather than abuse, and should not count against the next one.
+ */
+export function clearRateLimit(name: string): void {
+  buckets.delete(name);
+}
+
 /** How many of each expensive call are allowed per hour. */
 export const HOUR_MS = 3600_000;
 /** Each identification is a vision + reasoning call to a large model: the one that really costs. */
@@ -68,37 +77,12 @@ const loginAttempts = new Map<string, Bucket>();
 let loginGlobal: Bucket = { count: 0, resetAt: 0 };
 
 /**
- * How many reverse proxies in front of this app write `X-Forwarded-For`.
- *
- * Nothing in the App Router exposes the socket address, so the only client
- * identity available is a header — and a header is whatever the client says
- * unless a proxy is known to have written it. Zero means no proxy is trusted,
- * which is the default; TRUST_PROXY means one, the shape of every deployment
- * the README describes.
- */
-export function trustedProxyHops(env: Record<string, string | undefined> = process.env): number {
-  const configured = Number(env.TRUSTED_PROXY_HOPS);
-  if (Number.isInteger(configured) && configured > 0) return configured;
-  return env.TRUST_PROXY ? 1 : 0;
-}
-
-/** An `X-Forwarded-For` entry that really is an address, with any port removed. */
-function asAddress(entry: string): string | null {
-  if (net.isIP(entry)) return entry;
-  // `[::1]:8080` and `198.51.100.9:8080` are both legal in a forwarded chain.
-  const bare = entry.startsWith("[") ? entry.slice(1).split("]")[0] : entry.split(":").length === 2 ? entry.split(":")[0] : entry;
-  return net.isIP(bare) ? bare : null;
-}
-
-/**
  * The client's address, or null when this deployment cannot know it.
  *
- * Both halves matter. Every mainstream proxy *appends* to `X-Forwarded-For`
- * rather than rewriting it — nginx's `$proxy_add_x_forwarded_for`, Caddy's
- * reverse_proxy default — so the leftmost entry is whatever the client typed
- * and the rightmost is what the nearest proxy saw. Reading from the left lets
- * an attacker open a fresh bucket per guess, and lets them name the owner's
- * address to pin the owner into a lockout they cannot clear.
+ * Which entry of the chain may be believed is forwarded.ts's question; reading
+ * from the left would let an attacker open a fresh bucket per guess, and let
+ * them name the owner's address to pin the owner into a lockout they cannot
+ * clear.
  *
  * Falling back to a constant when there is no proxy is no better: every caller
  * then shares one bucket, so eight wrong guesses from a stranger lock the owner
@@ -107,15 +91,7 @@ function asAddress(entry: string): string | null {
  * one.
  */
 export function clientKey(request: Request, env: Record<string, string | undefined> = process.env): string | null {
-  const hops = trustedProxyHops(env);
-  if (hops === 0) return null;
-  const chain = (request.headers.get("x-forwarded-for") ?? "")
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-  // The client is `hops` from the right. A chain shorter than that was not
-  // written by the proxies the operator says are there.
-  const entry = chain.length >= hops ? chain[chain.length - hops] : undefined;
+  const entry = forwardedEntry(request.headers.get("x-forwarded-for"), trustedProxyHops(env));
   return entry ? asAddress(entry) : null;
 }
 
@@ -135,8 +111,14 @@ export function recordLoginFailure(key: string | null, now = Date.now()): number
   if (key === null) return loginGlobal.count;
 
   const record = loginAttempts.get(key);
-  const count = record && now < record.resetAt ? record.count + 1 : 1;
-  loginAttempts.set(key, { count, resetAt: now + LOGIN_LOCKOUT_MS });
+  const live = record && now < record.resetAt ? record : null;
+  const count = live ? live.count + 1 : 1;
+  // A key already over its budget keeps the window it is serving. Pushing
+  // resetAt out on every failure let a caller who never stops guessing hold
+  // themselves in the blocked state for good, which is the state whose answer
+  // says the least — so the wall must be something they can be let out of.
+  const resetAt = live && live.count >= LOGIN_MAX_ATTEMPTS ? live.resetAt : now + LOGIN_LOCKOUT_MS;
+  loginAttempts.set(key, { count, resetAt });
 
   // Rotating keys must not grow the map without bound.
   if (loginAttempts.size > 1000) {

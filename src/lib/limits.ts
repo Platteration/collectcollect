@@ -18,3 +18,22 @@ export const MAX_REQUEST_BYTES = 64 * 1024 * 1024;
 
 /** The same number in the string form next.config.ts takes. */
 export const MAX_REQUEST_SIZE = `${MAX_REQUEST_BYTES / 1024 / 1024}mb`;
+
+/**
+ * Every ceiling a route enforces on a body, in the same file as the buffer they
+ * all sit under, so "at or below the buffer" is a claim a test can check
+ * (tests/backup.test.ts) rather than one each route makes on its own.
+ */
+
+/** Photos per request, and per photo — the app's own client posts one at a time. */
+export const UPLOAD_MAX_FILES = 20;
+export const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+/**
+ * The most a legal upload request can weigh, used to refuse a huge body unread.
+ * Twenty files at the per-file ceiling would be 500 MB, which is past the body
+ * buffer and so would arrive truncated rather than refused.
+ */
+export const UPLOAD_MAX_TOTAL_BYTES = Math.min(UPLOAD_MAX_FILES * UPLOAD_MAX_BYTES, MAX_REQUEST_BYTES);
+
+/** A CSV import arrives as JSON, and is read into memory whole. */
+export const IMPORT_MAX_BYTES = 8 * 1024 * 1024;

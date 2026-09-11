@@ -1,5 +1,6 @@
 import { listCards, parseJson } from "../cards";
 import { getDb } from "../db";
+import { nameKey } from "../name-key";
 import { normalizeNumber } from "../pricing/match";
 import type { CardRecord, Game } from "../types";
 import { setProviderFor } from "./providers";
@@ -58,11 +59,18 @@ export function getChecklist(game: Game, setId: string): (Checklist & { fetchedA
   return rowToChecklist(row);
 }
 
-/** Any stored checklist whose name matches how the owner spells the set. */
+/**
+ * Any stored checklist whose name matches how the owner spells the set.
+ *
+ * Matched in JavaScript rather than with SQLite's `lower(trim(...))`, because
+ * the two fold differently: SQLite's lower() is ASCII-only, so a set whose name
+ * carries an accent never matched the accented name the caller had normalised.
+ * One checklist is stored per set fetched, so there is nothing to index here.
+ */
 function checklistForName(game: Game, setName: string): (Checklist & { fetchedAt: string }) | null {
-  const row = getDb()
-    .prepare("SELECT * FROM set_checklists WHERE game = ? AND lower(trim(set_name)) = ?")
-    .get(game, setName.trim().toLowerCase()) as ChecklistRow | undefined;
+  const wanted = nameKey(setName);
+  const rows = getDb().prepare("SELECT * FROM set_checklists WHERE game = ?").all(game) as ChecklistRow[];
+  const row = rows.find((r) => nameKey(r.set_name) === wanted);
   return row ? rowToChecklist(row) : null;
 }
 

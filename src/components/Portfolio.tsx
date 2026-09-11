@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { RANGES, change, sliceRange, type Allocation, type OutlookPoint, type PortfolioPoint, type Range, type Realized, type Returns, type Verdict } from "@/lib/analytics";
 import { money, when } from "@/lib/format";
-import { GAMES, GRADING_STATUSES, label, type Game, type GradingStatus, type Settings } from "@/lib/types";
+import { GAMES, GRADING_STATUSES, has, label, type Game, type GradingStatus, type Settings } from "@/lib/types";
 import { PortfolioChart } from "./charts/PortfolioChart";
 import { OutlookChart } from "./charts/OutlookChart";
 import { VERDICT_STYLE } from "./verdict";
@@ -68,6 +68,19 @@ const GAME_COLORS: Record<Game, string> = {
   sports: "var(--chart-series-4)",
   other: "var(--chart-series-5)",
 };
+
+/**
+ * The swatch colour for a game, through has() rather than label().
+ *
+ * label() falls back to the raw key, which is right for text — a card the owner
+ * needs to find and delete must render — and wrong here, because this value goes
+ * straight into a style attribute, which React does not escape. cards.ts says
+ * the same thing about accent colours: only a colour may be a colour. An
+ * unknown game gets the neutral series instead of its own id painted as one.
+ */
+export function gameColor(game: string): string {
+  return has(GAME_COLORS, game) ? GAME_COLORS[game] : "var(--chart-muted)";
+}
 
 export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefreshed, opportunities, holdings, returns, allocation, settings, realized, recentSales }: Props) {
   const router = useRouter();
@@ -322,13 +335,13 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
           <div className="card-surface p-4">
             <div className="flex h-3 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800" role="img" aria-label="Share of collection value by game">
               {allocation.map((a) => (
-                <div key={a.game} style={{ width: `${a.share * 100}%`, background: label(GAME_COLORS, a.game), marginRight: 2 }} title={`${label(GAMES, a.game)} ${(a.share * 100).toFixed(0)}%`} />
+                <div key={a.game} style={{ width: `${a.share * 100}%`, background: gameColor(a.game), marginRight: 2 }} title={`${label(GAMES, a.game)} ${(a.share * 100).toFixed(0)}%`} />
               ))}
             </div>
             <ul className="mt-3 grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-3">
               {allocation.map((a) => (
                 <li key={a.game} className="flex items-center gap-2">
-                  <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: label(GAME_COLORS, a.game) }} />
+                  <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: gameColor(a.game) }} />
                   <span className="min-w-0 flex-1 truncate">
                     {label(GAMES, a.game)} <span className="text-neutral-500">· {a.cards}</span>
                   </span>

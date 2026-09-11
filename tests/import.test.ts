@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { headerKey, parseCsv } from "@/lib/csv";
 import { MAX_IMPORT_ROWS, applyImport, previewImport } from "@/lib/import";
 import { createCard, findSimilar, listCards, updateCard } from "@/lib/cards";
-import { getDb, openDatabase, setDb } from "@/lib/db";
+import { getDb, openDatabase, openLiveDatabase, setDb } from "@/lib/db";
 
 describe("csv parsing", () => {
   it("handles quotes, embedded separators and both line endings", () => {
@@ -110,7 +110,7 @@ describe("import preview", () => {
 });
 
 describe("applying an import", () => {
-  beforeEach(() => setDb(openDatabase(":memory:")));
+  beforeEach(() => setDb(openLiveDatabase(":memory:")));
 
   it("creates new cards and merges into ones already owned", () => {
     createCard({ game: "pokemon", name: "Pikachu", setName: "Jungle", cardNumber: "60/64" });
@@ -128,7 +128,7 @@ describe("applying an import", () => {
     createCard({ game: "sports", sport: "baseball", name: "Mike Trout", setName: "Topps Update", cardNumber: "US175", year: 2011, quantity: 2, purchasePrice: 650 });
     const header = "id,game,sport,name,set,set_code,number,year,rarity,variant,language,manufacturer,quantity,condition,grading_company,grade,cert_number,grading_status,purchase_price";
     const row = "1,Sports,baseball,Mike Trout,Topps Update,,US175,2011,,,,,2,NM,,,,undecided,650";
-    setDb(openDatabase(":memory:"));
+    setDb(openLiveDatabase(":memory:"));
     const result = applyImport(previewImport([header, row].join("\r\n")));
     expect(result.created).toBe(1);
     expect(listCards()[0]).toMatchObject({ game: "sports", name: "Mike Trout", cardNumber: "US175", year: 2011, quantity: 2, purchasePrice: 650 });
@@ -145,7 +145,7 @@ describe("applying an import", () => {
  * slower still.
  */
 describe("what one import is allowed to cost", () => {
-  beforeEach(() => setDb(openDatabase(":memory:")));
+  beforeEach(() => setDb(openLiveDatabase(":memory:")));
 
   it("reads no more rows than the cap, and says how many it left", () => {
     const rows = MAX_IMPORT_ROWS + 25;
@@ -191,12 +191,14 @@ describe("what one import is allowed to cost", () => {
     fresh.prepare("INSERT INTO cards (game, name, quantity, condition, grading_status, external_ids, manual_graded, created_at, updated_at) VALUES ('mtg','Ragavan',1,'NM','undecided','{}','{}','t','t')").run();
     fresh.prepare("UPDATE cards SET name_key = NULL").run();
     fresh.close();
-    setDb(openDatabase(file));
+    // Reopened the way the app opens its own database, which is what repairs
+    // rows a previous version wrote.
+    setDb(openLiveDatabase(file));
     expect(findSimilar({ game: "mtg", name: "ragavan" })).toHaveLength(1);
   });
 
   it("commits once for the whole file, not once per row", () => {
-    const db = openDatabase(":memory:");
+    const db = openLiveDatabase(":memory:");
     const real = db.transaction.bind(db);
     let topLevel = 0;
     db.transaction = ((fn: () => unknown) => {

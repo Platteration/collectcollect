@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { nameKey } from "./name-key";
 
 export function dataDir(): string {
   const dir = process.env.DATA_DIR
@@ -125,31 +126,97 @@ const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
 ];
 
 /**
- * Applied after the columns exist, so it can name one of them.
+ * Indexes that name a column a migration adds, so they come after the columns.
  *
- * `name_key` is `lower(trim(name))` stored rather than computed: duplicate
+ * `name_key` is the normalised name stored rather than computed: duplicate
  * detection looks a card up by its normalised name on every add, and an
  * expression in the WHERE clause cannot use an index, so that was a full scan
- * of the cards table per row — over a table an import is itself growing. The
- * backfill covers rows written before the column existed, and createCard and
- * updateCard keep it in step.
+ * of the cards table per row — over a table an import is itself growing.
  */
-const POST_MIGRATIONS = `
-UPDATE cards SET name_key = lower(trim(name)) WHERE name_key IS NULL OR name_key != lower(trim(name));
+const INDEXES = `
 CREATE INDEX IF NOT EXISTS idx_cards_lookup ON cards(game, name_key);
 `;
 
-export function openDatabase(file: string): Database.Database {
-  const db = new Database(file);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+/** Schema and column migrations: DDL only, which fires nothing the file itself defines. */
+function applySchema(db: Database.Database): void {
   db.exec(SCHEMA);
   for (const m of MIGRATIONS) {
     const cols = db.prepare(`PRAGMA table_info(${m.table})`).all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === m.column)) db.exec(m.ddl);
   }
-  db.exec(POST_MIGRATIONS);
+  db.exec(INDEXES);
+}
+
+/**
+ * Fill in `name_key` for rows written before the column existed, or written by
+ * a version that computed it differently.
+ *
+ * This is the one statement in this module that *writes*, and it is deliberately
+ * not part of opening a database. SQLite runs the opened file's own triggers on
+ * an UPDATE, so running this against a database someone else wrote — the staged
+ * copy of an uploaded archive, say — executes whatever that file's author put in
+ * it, before anything has looked at the file at all. It belongs to this app's
+ * own database and nothing else; see openStagedDatabase.
+ */
+function backfillNameKeys(db: Database.Database): void {
+  db.function("cc_name_key", { deterministic: true }, (v: unknown) => nameKey(typeof v === "string" ? v : String(v ?? "")));
+  db.exec("UPDATE cards SET name_key = cc_name_key(name) WHERE name_key IS NOT cc_name_key(name)");
+}
+
+/** Open a database this app owns, bringing its schema up to date. */
+export function openDatabase(file: string): Database.Database {
+  const db = new Database(file);
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  applySchema(db);
   return db;
+}
+
+/** The live database: the schema, plus the row repairs that only ever apply to this app's own file. */
+export function openLiveDatabase(file: string): Database.Database {
+  const db = openDatabase(file);
+  backfillNameKeys(db);
+  return db;
+}
+
+/**
+ * A database that came from outside, opened for inspection and nothing else.
+ *
+ * Read-only at the connection, and `query_only` on top of it, so neither this
+ * app nor anything the file itself defines can write: no schema is applied, no
+ * rows are repaired, and only SELECTs run — which fire no triggers. A restore
+ * is the one place this app is handed a whole database written by someone else,
+ * and every statement it runs against that file before deciding to trust it is
+ * a statement the file's author chose the meaning of.
+ */
+export function openStagedDatabase(file: string): Database.Database {
+  const db = new Database(file, { readonly: true });
+  db.pragma("query_only = 1");
+  return db;
+}
+
+/**
+ * Everything this app's own schema creates, as sqlite_master reports it, plus
+ * each table's columns and which of those a database written by an older
+ * version may legitimately lack. Derived by building the schema in memory
+ * rather than listed by hand, so it cannot drift from SCHEMA and MIGRATIONS.
+ */
+export function ownSchema(): { objects: Map<string, string>; columns: Map<string, Set<string>>; addedLater: Set<string> } {
+  const probe = new Database(":memory:");
+  try {
+    applySchema(probe);
+    const objects = new Map<string, string>();
+    const columns = new Map<string, Set<string>>();
+    for (const row of probe.prepare("SELECT name, type FROM sqlite_master").all() as Array<{ name: string; type: string }>) {
+      objects.set(row.name, row.type);
+      if (row.type !== "table") continue;
+      const cols = probe.prepare(`PRAGMA table_info("${row.name}")`).all() as Array<{ name: string }>;
+      columns.set(row.name, new Set(cols.map((c) => c.name)));
+    }
+    return { objects, columns, addedLater: new Set(MIGRATIONS.map((m) => `${m.table}.${m.column}`)) };
+  } finally {
+    probe.close();
+  }
 }
 
 // Next.js reloads server modules in development; keep one connection per process.
@@ -167,7 +234,7 @@ export function getDb(): Database.Database {
     throw new Error(globalForDb.__collectcollectLocked);
   }
   if (!globalForDb.__collectcollectDb) {
-    globalForDb.__collectcollectDb = openDatabase(databaseFile());
+    globalForDb.__collectcollectDb = openLiveDatabase(databaseFile());
   }
   return globalForDb.__collectcollectDb;
 }

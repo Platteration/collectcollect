@@ -9,14 +9,19 @@ export function getSettings(): Settings {
     .get(KEY) as { value: string } | undefined;
   if (!row) return structuredClone(DEFAULT_SETTINGS);
   try {
-    const stored = JSON.parse(row.value) as Partial<Settings>;
+    const parsed: unknown = JSON.parse(row.value);
+    const stored = (parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}) as Partial<Settings>;
     return {
+      // Read through the same sanitiser the write path uses. A row can arrive
+      // from a restored database rather than from saveSettings, and a
+      // multiplier that is a string rather than a number is a price of NaN
+      // everywhere it is used — a wrong answer with nothing to report it.
       // Grade rows are fully user-managed (they may remove defaults); condition
       // rows must always cover every condition, so defaults fill any gaps.
-      gradeMultipliers: stored.gradeMultipliers ?? { ...DEFAULT_SETTINGS.gradeMultipliers },
+      gradeMultipliers: numberMap(stored.gradeMultipliers) ?? { ...DEFAULT_SETTINGS.gradeMultipliers },
       conditionMultipliers: {
         ...DEFAULT_SETTINGS.conditionMultipliers,
-        ...(stored.conditionMultipliers ?? {}),
+        ...(numberMap(stored.conditionMultipliers) ?? {}),
       },
       gradingFee: Number.isFinite(stored.gradingFee) ? Number(stored.gradingFee) : DEFAULT_SETTINGS.gradingFee,
       readyMinUpside: Number.isFinite(stored.readyMinUpside) ? Number(stored.readyMinUpside) : DEFAULT_SETTINGS.readyMinUpside,
@@ -67,6 +72,12 @@ function webhookUrl(v: unknown): string {
 function nonNegative(v: unknown, fallback: number): number {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+/** A stored map of numbers, or null when it is not a map at all. */
+function numberMap(value: unknown): Record<string, number> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return sanitizeNumbers(value as Record<string, unknown>);
 }
 
 function sanitizeNumbers(input: Record<string, unknown> | undefined) {

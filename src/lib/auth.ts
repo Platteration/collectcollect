@@ -10,6 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { forwardedEntry, trustedProxyHops } from "./forwarded";
 
 export const SESSION_COOKIE = "cc_session";
 /** How long a login lasts before it has to be repeated. */
@@ -64,10 +65,11 @@ function sessionSeed(): string | null {
   }
 }
 
-/** Test hook: forget the seed read from disk. */
+/** Test hook: forget the seed and the revocation list read from disk. */
 export function resetSessionSeed(): void {
   cachedSeed = null;
   cachedRevoked = null;
+  lastComplaint = null;
 }
 
 function revokedFile(): string {
@@ -79,34 +81,74 @@ const MAX_REVOKED = 1000;
 
 let cachedRevoked: { at: number; ids: Set<string> } | null = null;
 
-function readRevoked(): Array<[string, number]> {
+/** Say a thing once rather than on every request, so a broken list is visible but not a flood. */
+let lastComplaint: string | null = null;
+function complain(message: string): void {
+  if (message === lastComplaint) return;
+  lastComplaint = message;
+  console.error(`[auth] ${message}`);
+}
+
+/** Whether a filesystem error means the file simply is not there. */
+const missing = (e: unknown): boolean => (e as NodeJS.ErrnoException)?.code === "ENOENT";
+
+/**
+ * The revocation list, or null when it exists and cannot be read.
+ *
+ * "Nothing has been signed out" and "the record of what was signed out is
+ * unavailable" are different answers, and only the first one is safe to treat
+ * as an empty list. Collapsing them is what made every previously retired
+ * cookie valid again the moment the file could not be read.
+ */
+function readRevoked(): Array<[string, number]> | null {
+  let text: string;
   try {
-    return fs
-      .readFileSync(revokedFile(), "utf8")
-      .split("\n")
-      .map((line) => line.trim().split(" "))
-      .filter((parts) => parts.length === 2 && Number.isFinite(Number(parts[1])))
-      .map((parts) => [parts[0], Number(parts[1])] as [string, number]);
-  } catch {
-    return [];
+    text = fs.readFileSync(revokedFile(), "utf8");
+  } catch (e) {
+    if (missing(e)) return [];
+    complain(`the revocation list could not be read (${(e as Error).message}); every session is refused until it can be`);
+    return null;
   }
+  return text
+    .split("\n")
+    .map((line) => line.trim().split(" "))
+    .filter((parts) => parts.length === 2 && Number.isFinite(Number(parts[1])))
+    .map((parts) => [parts[0], Number(parts[1])] as [string, number]);
 }
 
 /**
- * The identifiers signing out has retired. Read from disk when the file has
- * changed, because the proxy and the route handlers are separate bundles with
- * their own module state: a sign-out in one must be seen by the other.
+ * The identifiers signing out has retired, or null when that cannot be
+ * established. Read from disk when the file has changed, because the proxy and
+ * the route handlers are separate bundles with their own module state: a
+ * sign-out in one must be seen by the other.
+ *
+ * Null fails closed at every caller. A list that cannot be read is the one case
+ * where carrying on means honouring cookies their owner has already retired —
+ * deleting the file would otherwise be all it takes to bring a stolen session
+ * back for the rest of its thirty days.
  */
-function revokedIds(): Set<string> {
+function revokedIds(): Set<string> | null {
   let at: number;
   try {
     at = fs.statSync(revokedFile()).mtimeMs;
-  } catch {
+  } catch (e) {
+    if (!missing(e)) {
+      complain(`the revocation list could not be read (${(e as Error).message}); every session is refused until it can be`);
+      return null;
+    }
+    // Gone, rather than never written: this process has read revocations out of
+    // it, and the file is only ever rewritten with them still in it.
+    if (cachedRevoked && cachedRevoked.ids.size > 0) {
+      complain("the revocation list has disappeared; every session is refused until it is back");
+      return null;
+    }
     cachedRevoked = null;
     return new Set();
   }
   if (cachedRevoked && cachedRevoked.at === at) return cachedRevoked.ids;
-  const ids = new Set(readRevoked().map(([id]) => id));
+  const entries = readRevoked();
+  if (!entries) return null;
+  const ids = new Set(entries.map(([id]) => id));
   cachedRevoked = { at, ids };
   return ids;
 }
@@ -128,17 +170,21 @@ async function secret(): Promise<string> {
  * Whether the session cookie is marked Secure. The scheme in `request.url` is
  * only the truth when this process terminates TLS itself; behind the reverse
  * proxy the README suggests, the origin request arrives over plain HTTP and the
- * flag would silently be dropped. X-Forwarded-Proto is believed only when
- * TRUST_PROXY says a proxy really is in front — the same rule the login limiter
- * uses — and COOKIE_SECURE settles it either way.
+ * flag would silently be dropped.
+ *
+ * X-Forwarded-Proto is read through forwarded.ts, so it is believed exactly
+ * when and how the login limiter believes X-Forwarded-For: only with a declared
+ * proxy in front, and counting from the right, since proxies append. Asking the
+ * question two different ways is how an operator who set TRUSTED_PROXY_HOPS for
+ * a two-proxy deployment — and nothing else, as .env.example told them — got a
+ * working limiter and a session cookie that quietly lost its Secure flag.
+ * COOKIE_SECURE settles it either way.
  */
 export function cookieSecure(request: Request): boolean {
   const configured = process.env.COOKIE_SECURE?.trim().toLowerCase();
   if (configured) return configured !== "0" && configured !== "false";
-  if (process.env.TRUST_PROXY) {
-    const proto = request.headers.get("x-forwarded-proto")?.split(",")[0].trim().toLowerCase();
-    if (proto) return proto === "https";
-  }
+  const proto = forwardedEntry(request.headers.get("x-forwarded-proto"), trustedProxyHops())?.toLowerCase();
+  if (proto) return proto === "https";
   return request.url.startsWith("https://");
 }
 
@@ -198,12 +244,24 @@ export async function verifyToken(token: string | undefined | null, now = Date.n
   if (!token) return false;
   const parsed = splitToken(token);
   if (!parsed || parsed.expires < now) return false;
-  if (revokedIds().has(parsed.id)) return false;
+  const revoked = revokedIds();
+  if (!revoked || revoked.has(parsed.id)) return false;
   return timingSafeEqual(parsed.signature, await hmac(parsed.payload, await secret()));
 }
 
 /**
- * Record that this token is no longer to be accepted, and say whether it was.
+ * What became of a sign-out: the session was retired, there was no session to
+ * retire, or it could not be recorded.
+ *
+ * Three answers rather than two because the caller has to tell the owner the
+ * truth. Reporting success for a revocation that was never written is the worst
+ * of the three: the one moment someone acts on a stolen cookie is the moment
+ * they are told it worked.
+ */
+export type RevokeOutcome = "revoked" | "no-session" | "failed";
+
+/**
+ * Record that this token is no longer to be accepted, and say what happened.
  *
  * Only a token that verifies is written down: signing out is reachable without
  * a session, so anything else would let a stranger grow this file one made-up
@@ -211,22 +269,38 @@ export async function verifyToken(token: string | undefined | null, now = Date.n
  * id is never listed twice, so the file holds at most one line per real sign-in
  * inside a thirty-day window — and MAX_REVOKED bounds it whatever happens.
  *
- * Best effort, like the seed: a data directory that cannot be written to must
- * not make signing out throw.
+ * The write goes to a temporary file and is renamed over the list, which is
+ * atomic on every platform this runs on: a reader sees the whole old list or
+ * the whole new one, never a list truncated by a crash half way through — and a
+ * truncated list is a list that has forgotten a revocation.
  */
-export async function revokeToken(token: string | undefined | null): Promise<boolean> {
+export async function revokeToken(token: string | undefined | null): Promise<RevokeOutcome> {
   const parsed = token ? splitToken(token) : null;
-  if (!parsed || !(await verifyToken(token))) return false;
+  if (!parsed || !(await verifyToken(token))) return "no-session";
   const now = Date.now();
-  const kept = readRevoked().filter(([id, expires]) => expires > now && id !== parsed.id);
+  const existing = readRevoked();
+  // Unreadable: rewriting it now would drop whatever it holds. (verifyToken has
+  // already refused every session in this state, so nothing is being let in.)
+  if (!existing) return "failed";
+  const kept = existing.filter(([id, expires]) => expires > now && id !== parsed.id);
   kept.push([parsed.id, parsed.expires]);
+  const file = revokedFile();
+  const temporary = `${file}.${process.pid}.${Date.now().toString(36)}`;
   try {
-    fs.mkdirSync(path.dirname(revokedFile()), { recursive: true });
+    fs.mkdirSync(path.dirname(file), { recursive: true });
     const lines = kept.slice(-MAX_REVOKED).map(([id, expires]) => `${id} ${expires}`);
-    fs.writeFileSync(revokedFile(), `${lines.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
-  } catch {
-    /* nothing can be kept here; the cookie is still cleared in the browser */
+    fs.writeFileSync(temporary, `${lines.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(temporary, file);
+  } catch (e) {
+    try {
+      fs.unlinkSync(temporary);
+    } catch {
+      /* it was never created */
+    }
+    complain(`a session could not be retired (${(e as Error).message}); it stays valid until it expires or the password changes`);
+    cachedRevoked = null;
+    return "failed";
   }
   cachedRevoked = null;
-  return true;
+  return "revoked";
 }

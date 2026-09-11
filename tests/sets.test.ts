@@ -3,7 +3,7 @@ import { fakeFetch } from "./helpers";
 import { magicSets, pokemonSets, yugiohSets } from "@/lib/sets/providers";
 import { getChecklist, ownedFromChecklist, refreshChecklist, setDetail, setProgress } from "@/lib/sets";
 import { createCard } from "@/lib/cards";
-import { openDatabase, setDb } from "@/lib/db";
+import { openLiveDatabase, setDb } from "@/lib/db";
 import type { Checklist } from "@/lib/sets/types";
 
 const hint = (over = {}) => ({ game: "pokemon" as const, setName: null, setCode: null, externalIds: {}, ...over });
@@ -82,7 +82,7 @@ describe("matching a collection against a checklist", () => {
     ],
   };
 
-  beforeEach(() => setDb(openDatabase(":memory:")));
+  beforeEach(() => setDb(openLiveDatabase(":memory:")));
 
   it("matches on collector number however it is written, then on name", () => {
     const owned = [

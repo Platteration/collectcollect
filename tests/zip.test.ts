@@ -98,9 +98,9 @@ describe("backup archive", () => {
     const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), "cc-backup-"));
     process.env.DATA_DIR = dir;
 
-    const { setDb, openDatabase, uploadsDir } = await import("@/lib/db");
+    const { setDb, openDatabase, openLiveDatabase, uploadsDir } = await import("@/lib/db");
     const { createCard } = await import("@/lib/cards");
-    setDb(openDatabase(pathm.join(dir, "collectcollect.db")));
+    setDb(openLiveDatabase(pathm.join(dir, "collectcollect.db")));
     createCard({ game: "pokemon", name: "Backed-up Charizard", setName: "Base Set" });
     fsm.writeFileSync(pathm.join(uploadsDir(), "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg"), Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
 
@@ -211,10 +211,10 @@ describe("restore", () => {
     const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), "cc-restore-"));
     process.env.DATA_DIR = dir;
 
-    const { setDb, openDatabase, uploadsDir } = await import("@/lib/db");
+    const { setDb, openLiveDatabase, uploadsDir } = await import("@/lib/db");
     const { createCard, listCards } = await import("@/lib/cards");
     const { buildBackup, restoreBackup } = await import("@/lib/backup");
-    setDb(openDatabase(pathm.join(dir, "collectcollect.db")));
+    setDb(openLiveDatabase(pathm.join(dir, "collectcollect.db")));
     createCard({ game: "pokemon", name: "Original Charizard" });
     fsm.writeFileSync(pathm.join(uploadsDir(), "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg"), Buffer.from([9, 9, 9]));
 
@@ -247,10 +247,10 @@ describe("restore", () => {
     process.env.DATA_DIR = dir;
     process.env.DATABASE_FILE = custom;
 
-    const { setDb, openDatabase } = await import("@/lib/db");
+    const { setDb, openLiveDatabase } = await import("@/lib/db");
     const { createCard, listCards } = await import("@/lib/cards");
     const { buildBackup, restoreBackup } = await import("@/lib/backup");
-    setDb(openDatabase(custom));
+    setDb(openLiveDatabase(custom));
     createCard({ game: "pokemon", name: "In The Custom File" });
 
     const { stream } = await buildBackup();
@@ -276,10 +276,10 @@ describe("restore", () => {
     const pathm = await import("node:path");
     const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), "cc-restore-bad-"));
     process.env.DATA_DIR = dir;
-    const { setDb, openDatabase } = await import("@/lib/db");
+    const { setDb, openLiveDatabase } = await import("@/lib/db");
     const { restoreBackup } = await import("@/lib/backup");
     const { zipStream } = await import("@/lib/zip");
-    setDb(openDatabase(pathm.join(dir, "collectcollect.db")));
+    setDb(openLiveDatabase(pathm.join(dir, "collectcollect.db")));
 
     const build = async (name: string, body: Uint8Array) => {
       const parts: Uint8Array[] = [];

@@ -16,7 +16,10 @@ interface AlertRow {
 
 const rowToAlert = (r: AlertRow): Alert => ({
   id: r.id,
-  kind: r.kind as AlertKind,
+  // Not narrowed to an AlertKind and not cast to one either: a restored row can
+  // hold any string, and the list that renders it is the list it has to be
+  // dismissed from, so it must render rather than throw. See ALERT_KINDS.
+  kind: r.kind,
   cardId: r.card_id,
   title: r.title,
   body: r.body,

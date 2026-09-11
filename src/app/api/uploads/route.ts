@@ -1,17 +1,7 @@
 import { NextResponse } from "next/server";
 import { saveUpload } from "@/lib/images";
 import { declaredTooLarge, errorMessage, jsonError } from "@/lib/http";
-import { MAX_REQUEST_BYTES } from "@/lib/limits";
-
-const MAX_FILES = 20;
-const MAX_BYTES = 25 * 1024 * 1024;
-/**
- * The most a legal request can weigh, used to refuse a huge body unread. Twenty
- * files at the per-file ceiling would be 500 MB, which is past the proxy's body
- * buffer and so would arrive truncated rather than refused; the app's own
- * client posts one photo per request, so the request ceiling is the binding one.
- */
-const MAX_TOTAL_BYTES = Math.min(MAX_FILES * MAX_BYTES, MAX_REQUEST_BYTES);
+import { UPLOAD_MAX_BYTES as MAX_BYTES, UPLOAD_MAX_FILES as MAX_FILES, UPLOAD_MAX_TOTAL_BYTES as MAX_TOTAL_BYTES } from "@/lib/limits";
 
 /** POST multipart/form-data with one or more `files`; returns stored upload names. */
 export async function POST(request: Request) {

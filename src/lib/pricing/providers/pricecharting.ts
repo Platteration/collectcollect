@@ -1,4 +1,5 @@
 import type { Game, PriceQuote } from "../../types";
+import { has } from "../../types";
 import type { CardQuery, PriceProvider } from "../types";
 import { ProviderError } from "../types";
 import { numberPart, round2, sameNumber, setSimilarity, tokenOverlap, tokens } from "../match";
@@ -81,7 +82,10 @@ export function scoreProduct(q: CardQuery, p: PcProduct): number {
   if (q.year && (console.includes(String(q.year)) || p["release-date"]?.startsWith(String(q.year)))) score += 1;
   if (q.manufacturer) score += tokenOverlap(q.manufacturer, console);
   const consoleTokens = new Set(tokens(console));
-  if (CATEGORY_HINTS[q.game].some((h) => consoleTokens.has(h) || console.toLowerCase().includes(h))) score += 1;
+  // Own-property lookup: q.game comes off a card row, and a bare index that
+  // lands on Object.prototype hands .some() to a value that has no such method.
+  const hints = has(CATEGORY_HINTS, q.game) ? CATEGORY_HINTS[q.game] : [];
+  if (hints.some((h) => consoleTokens.has(h) || console.toLowerCase().includes(h))) score += 1;
   const v = (q.variant ?? "").toLowerCase();
   const pn = productName.toLowerCase();
   for (const kw of ["reverse", "holo", "1st edition", "shadowless", "refractor", "auto", "foil", "parallel"]) {

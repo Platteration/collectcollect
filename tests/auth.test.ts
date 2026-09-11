@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authEnabled, cookieSecure, createToken, passwordMatches, resetSessionSeed, revokeToken, timingSafeEqual, verifyToken } from "@/lib/auth";
-import { LOGIN_GLOBAL_MAX_ATTEMPTS, LOGIN_MAX_ATTEMPTS, loginBlocked, recordLoginFailure, resetLimiters } from "@/lib/rate-limit";
+import { LOGIN_GLOBAL_MAX_ATTEMPTS, LOGIN_MAX_ATTEMPTS, loginBlocked, loginFailureDelay, recordLoginFailure, resetLimiters } from "@/lib/rate-limit";
 
 let dataDir: string;
 const previousDataDir = process.env.DATA_DIR;
@@ -20,6 +20,7 @@ afterEach(() => {
   delete process.env.APP_SECRET;
   delete process.env.COOKIE_SECURE;
   delete process.env.TRUST_PROXY;
+  delete process.env.TRUSTED_PROXY_HOPS;
   if (previousDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = previousDataDir;
   resetSessionSeed();
@@ -82,7 +83,7 @@ describe("optional password gate", () => {
     const other = await createToken();
     expect(await verifyToken(stolen)).toBe(true);
 
-    expect(await revokeToken(stolen)).toBe(true);
+    expect(await revokeToken(stolen)).toBe("revoked");
     expect(await verifyToken(stolen)).toBe(false);
     // Only that session: signing out of one browser is not signing out of all.
     expect(await verifyToken(other)).toBe(true);
@@ -98,16 +99,114 @@ describe("optional password gate", () => {
     // stranger grow the revocation file one made-up token at a time.
     process.env.APP_PASSWORD = "hunter2";
     const list = path.join(dataDir, "revoked-sessions");
-    expect(await revokeToken(`${Date.now() + 9e9}.deadbeef.notasignature`)).toBe(false);
-    expect(await revokeToken("garbage")).toBe(false);
-    expect(await revokeToken(undefined)).toBe(false);
+    expect(await revokeToken(`${Date.now() + 9e9}.deadbeef.notasignature`)).toBe("no-session");
+    expect(await revokeToken("garbage")).toBe("no-session");
+    expect(await revokeToken(undefined)).toBe("no-session");
     expect(fs.existsSync(list)).toBe(false);
 
     // And a real sign-out is recorded once, however many times it is sent.
     const token = await createToken();
-    expect(await revokeToken(token)).toBe(true);
-    expect(await revokeToken(token)).toBe(false); // it no longer verifies
+    expect(await revokeToken(token)).toBe("revoked");
+    expect(await revokeToken(token)).toBe("no-session"); // it no longer verifies
     expect(fs.readFileSync(list, "utf8").trim().split("\n")).toHaveLength(1);
+  });
+
+  /**
+   * Revocation is the whole point of the token id, and the README promises
+   * signing out "ends that session for good". Every way of not knowing what has
+   * been revoked used to answer "nothing has", which reinstated every cookie
+   * their owner had already retired — and the owner was told the opposite at
+   * the moment they acted.
+   */
+  describe("when the revocation list cannot be read or written", () => {
+    const list = () => path.join(dataDir, "revoked-sessions");
+
+    it("refuses the session rather than letting it back in", async () => {
+      process.env.APP_PASSWORD = "hunter2";
+      const stolen = await createToken();
+      const other = await createToken();
+      expect(await revokeToken(stolen)).toBe("revoked");
+
+      // Unreadable (a directory in its place stands in for EACCES/EIO, which
+      // arrive here the same way): nothing can be established about any token.
+      fs.rmSync(list());
+      fs.mkdirSync(list());
+      resetSessionSeed();
+      expect(await verifyToken(stolen)).toBe(false);
+      expect(await verifyToken(other)).toBe(false);
+    });
+
+    it("refuses them when the list is deleted out from under a running app", async () => {
+      process.env.APP_PASSWORD = "hunter2";
+      const stolen = await createToken();
+      expect(await revokeToken(stolen)).toBe("revoked");
+      expect(await verifyToken(stolen)).toBe(false);
+      // The file is only ever rewritten with its entries still in it, so its
+      // disappearance is not "nothing was ever signed out".
+      fs.rmSync(list());
+      expect(await verifyToken(stolen)).toBe(false);
+    });
+
+    it("says signing out failed rather than reporting success", async () => {
+      process.env.APP_PASSWORD = "hunter2";
+      const token = await createToken();
+      // A data directory that has gone read-only (EROFS here; a deleted volume
+      // or a full disk arrives the same way). The write fails, and the caller
+      // has to be told, because the cookie they are holding still works.
+      const readOnly = () =>
+        vi.spyOn(fs, "renameSync").mockImplementation(() => {
+          throw Object.assign(new Error("EROFS: read-only file system, rename"), { code: "EROFS" });
+        });
+
+      let stop = readOnly();
+      try {
+        expect(await revokeToken(token)).toBe("failed");
+      } finally {
+        stop.mockRestore();
+      }
+      expect(fs.existsSync(list())).toBe(false);
+      expect(await verifyToken(token)).toBe(true); // and it is honest about that
+      // Nothing half-written is left where the list belongs.
+      expect(fs.readdirSync(dataDir).filter((name) => name.startsWith("revoked-sessions"))).toEqual([]);
+
+      const { DELETE } = await import("@/app/api/auth/route");
+      stop = readOnly();
+      let response: Response;
+      try {
+        response = await DELETE(new Request("http://localhost:3000/api/auth", { method: "DELETE", headers: { cookie: `cc_session=${token}` } }));
+      } finally {
+        stop.mockRestore();
+      }
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({ error: expect.stringContaining("could not be retired") });
+      // The browser's copy is still cleared: what failed is retiring the token.
+      expect(response.headers.get("set-cookie")).toMatch(/cc_session=;/);
+    });
+
+    it("replaces the list in one step rather than truncating and rewriting it", async () => {
+      process.env.APP_PASSWORD = "hunter2";
+      expect(await revokeToken(await createToken())).toBe("revoked");
+
+      const writes = vi.spyOn(fs, "writeFileSync");
+      const renames = vi.spyOn(fs, "renameSync");
+      try {
+        expect(await revokeToken(await createToken())).toBe("revoked");
+        const written = writes.mock.calls.map((call) => String(call[0]));
+        // The list itself is never opened for writing. Truncate-then-write
+        // leaves a reader a list with its tail missing if the process dies half
+        // way through, and a missing tail is a forgotten revocation — a
+        // stolen cookie back in service, which is the permissive direction.
+        expect(written).not.toContain(list());
+        expect(written.filter((file) => file.startsWith(list()))).toHaveLength(1);
+        expect(renames.mock.calls.map((call) => String(call[1]))).toContain(list());
+      } finally {
+        writes.mockRestore();
+        renames.mockRestore();
+      }
+      expect(fs.readFileSync(list(), "utf8").trim().split("\n")).toHaveLength(2);
+      // And nothing is left lying about beside it.
+      expect(fs.readdirSync(dataDir).filter((name) => name.startsWith("revoked-sessions."))).toEqual([]);
+    });
   });
 
   it("gives every session its own identity", async () => {
@@ -162,12 +261,30 @@ describe("the Secure flag on the session cookie", () => {
     expect(cookieSecure(request("http://localhost:3000/api/auth"))).toBe(false);
   });
 
-  it("believes X-Forwarded-Proto only when a proxy is declared", () => {
+  it("believes X-Forwarded-Proto only when a proxy is declared, and only the hop that proxy wrote", () => {
     // TLS terminated by Caddy/nginx: the origin request arrives over plain HTTP.
     expect(cookieSecure(request("http://localhost:3000/api/auth", "https"))).toBe(false);
     process.env.TRUST_PROXY = "1";
-    expect(cookieSecure(request("http://localhost:3000/api/auth", "https, http"))).toBe(true);
+    expect(cookieSecure(request("http://localhost:3000/api/auth", "https"))).toBe(true);
     expect(cookieSecure(request("http://localhost:3000/api/auth", "http"))).toBe(false);
+    // A client can put anything in front of what the proxy appends, so the
+    // entry believed is counted from the right — the same rule, and the same
+    // code, as the login limiter's.
+    expect(cookieSecure(request("http://localhost:3000/api/auth", "https, http"))).toBe(false);
+    expect(cookieSecure(request("http://localhost:3000/api/auth", "http, https"))).toBe(true);
+  });
+
+  it("follows TRUSTED_PROXY_HOPS, which is the only thing some deployments set", () => {
+    // .env.example offers TRUSTED_PROXY_HOPS for a two-proxy deployment. When
+    // only the limiter honoured it, an operator who set it and nothing else got
+    // a working limiter and a session cookie that quietly lost its Secure flag,
+    // because this fell through to the plain-HTTP scheme of the origin request.
+    delete process.env.TRUST_PROXY;
+    process.env.TRUSTED_PROXY_HOPS = "2";
+    expect(cookieSecure(request("http://localhost:3000/api/auth", "https, http"))).toBe(true);
+    expect(cookieSecure(request("http://localhost:3000/api/auth", "http, http"))).toBe(false);
+    // Still nothing to believe when the chain is shorter than the declared hops.
+    expect(cookieSecure(request("http://localhost:3000/api/auth", "https"))).toBe(false);
   });
 
   it("can be forced either way", () => {
@@ -219,6 +336,27 @@ describe("the login route", () => {
     );
   };
 
+  /**
+   * Post, recording what the route asked to wait rather than waiting it out.
+   *
+   * The delay is the throttle, so a test of it has to see it: the timer is
+   * intercepted and fired at once, which means "returned without sleeping"
+   * shows up as an empty list instead of as a test that merely runs quickly.
+   */
+  const charged = async (password: unknown, forwarded?: string): Promise<{ response: Response; waited: number[] }> => {
+    const waited: number[] = [];
+    const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation(((handler: TimerHandler, ms?: number) => {
+      waited.push(ms ?? 0);
+      if (typeof handler === "function") handler();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as unknown as typeof setTimeout);
+    try {
+      return { response: await post(password, forwarded), waited };
+    } finally {
+      timer.mockRestore();
+    }
+  };
+
   it("lets the owner in however full the process-wide ceiling is", async () => {
     for (let i = 0; i < LOGIN_GLOBAL_MAX_ATTEMPTS; i++) recordLoginFailure(null);
     expect(loginBlocked(null)).toBe(true); // a wrong guess would be refused
@@ -230,15 +368,45 @@ describe("the login route", () => {
   it("lets the owner in through a bucket filled from their own address", async () => {
     process.env.TRUST_PROXY = "1";
     for (let i = 0; i < LOGIN_MAX_ATTEMPTS; i++) recordLoginFailure("203.0.113.5");
-    expect((await post("wrong", "203.0.113.5")).status).toBe(429);
+    expect((await charged("wrong", "203.0.113.5")).response.status).toBe(429);
     expect((await post("hunter2", "203.0.113.5")).status).toBe(200);
   });
 
   it("charges a wrong guess instead of refusing it when nobody can be told apart", async () => {
     // No proxy, so there is no per-caller bucket to fill and no per-caller
     // refusal to hand anyone; the cost is the throttle.
-    expect((await post("wrong")).status).toBe(401);
+    const first = await charged("wrong");
+    expect(first.response.status).toBe(401);
+    expect(first.waited).toEqual([loginFailureDelay(1)]);
     expect((await post("hunter2")).status).toBe(200);
+  });
+
+  /**
+   * A refusal on top of the cost is fine. A refusal *instead of* the cost is an
+   * oracle: because the password is compared first, a blocked caller who guesses
+   * right still gets 200, so if a wrong guess is free the pair of answers is a
+   * password-guessing machine that runs as fast as the CPU allows — which is
+   * precisely the regime an attacker is in, and the one the wall clock exists
+   * for. Both buckets, because either can be the one that is full.
+   */
+  it("charges a blocked wrong guess the same wall clock as any other", async () => {
+    process.env.TRUST_PROXY = "1";
+    for (let i = 0; i < LOGIN_MAX_ATTEMPTS; i++) recordLoginFailure("203.0.113.5");
+    expect(loginBlocked("203.0.113.5")).toBe(true);
+
+    const blocked = await charged("wrong", "203.0.113.5");
+    expect(blocked.response.status).toBe(429);
+    // Derived from the bucket, not from the constant the route uses: whatever a
+    // ninth failure costs an unblocked caller is what this one paid.
+    expect(blocked.waited).toEqual([loginFailureDelay(LOGIN_MAX_ATTEMPTS + 1)]);
+    expect(blocked.waited[0]).toBeGreaterThan(0);
+  });
+
+  it("charges a wrong guess that hits the process-wide ceiling too", async () => {
+    for (let i = 0; i < LOGIN_GLOBAL_MAX_ATTEMPTS; i++) recordLoginFailure(null);
+    const blocked = await charged("wrong");
+    expect(blocked.response.status).toBe(429);
+    expect(blocked.waited).toEqual([loginFailureDelay(LOGIN_GLOBAL_MAX_ATTEMPTS + 1)]);
   });
 
   it("says so plainly when there is no password to check", async () => {

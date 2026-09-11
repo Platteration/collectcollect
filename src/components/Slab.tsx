@@ -1,4 +1,4 @@
-import { GRADING_COMPANIES } from "@/lib/types";
+import { GRADING_COMPANIES, has } from "@/lib/types";
 
 const COMPANY_CLASS: Record<string, string> = {
   PSA: "slab-psa",
@@ -9,7 +9,10 @@ const COMPANY_CLASS: Record<string, string> = {
 };
 
 export function slabClass(company: string | null | undefined): string {
-  return COMPANY_CLASS[(company ?? "").toUpperCase()] ?? "";
+  // A class name, so has() rather than label(): an unknown company gets no
+  // frame, never its own text spliced into the class list.
+  const key = (company ?? "").toUpperCase();
+  return has(COMPANY_CLASS, key) ? COMPANY_CLASS[key] : "";
 }
 
 export function isKnownCompany(company: string | null | undefined): boolean {

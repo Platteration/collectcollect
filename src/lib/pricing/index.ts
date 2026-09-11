@@ -1,4 +1,5 @@
 import type { CardRecord, PriceQuote, PriceSource, PriceSummary, Settings } from "../types";
+import { has } from "../types";
 import type { CardQuery, PriceProvider } from "./types";
 import { ProviderError } from "./types";
 import { priceChartingProvider } from "./providers/pricecharting";
@@ -158,7 +159,11 @@ export function summarize(
       }
     }
   } else if (ungraded) {
-    const mult = settings.conditionMultipliers[owner.condition] ?? 1;
+    // has(), not a bare index with `?? 1`: `condition` is whatever the row
+    // holds, and a legacy 'constructor' reads off Object.prototype as a
+    // function, which is not nullish — so the fallback never fires and the
+    // multiplication quietly yields NaN rather than a price.
+    const mult = has(settings.conditionMultipliers, owner.condition) ? settings.conditionMultipliers[owner.condition] : 1;
     yourCopyValue = round2(ungraded * mult);
     yourCopyBasis =
       mult === 1

@@ -11,6 +11,11 @@ services:
     volumes:
       - collectcollect-data:/data
     restart: unless-stopped
+    # A request body is buffered whole before a route sees it — up to 64 MB, per
+    # request rather than across them — so a few concurrent uploads or restores
+    # are the app's memory high-water mark, not its idle ~200 MB. Without a
+    # limit here the ceiling is the host's memory.
+    mem_limit: 2g
 
 volumes:
   collectcollect-data:

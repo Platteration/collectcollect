@@ -76,6 +76,26 @@ describe("summarize", () => {
     expect(s.yourCopyValue).toBe(1000);
     expect(s.quotes[0].source).toBe("manual");
   });
+  it("prices a legacy condition at face value rather than at NaN", () => {
+    // `condition` is cast off a card row, so a row written before the
+    // whitelists were tightened can hold anything. A bare index with `?? 1`
+    // reads Object.prototype for a condition of "constructor" — a function,
+    // which is not nullish, so the fallback never fires and the multiplication
+    // produces NaN: a price that is simply wrong, with nothing to report it.
+    for (const condition of ["constructor", "__proto__", "toString", "MINT"]) {
+      const s = summarize([quote({ ungraded: 100 })], [], DEFAULT_SETTINGS, {
+        condition: condition as never,
+        gradingCompany: null,
+        grade: null,
+      });
+      expect(s.yourCopyValue).toBe(100);
+      expect(Number.isFinite(s.yourCopyValue)).toBe(true);
+    }
+    // A condition this app does write still gets its multiplier.
+    const lp = summarize([quote({ ungraded: 100 })], [], DEFAULT_SETTINGS, { condition: "LP", gradingCompany: null, grade: null });
+    expect(lp.yourCopyValue).toBe(100 * DEFAULT_SETTINGS.conditionMultipliers.LP);
+  });
+
   it("reports nothing gracefully", () => {
     const s = summarize([], [{ source: "pokemontcg", message: "down" }], DEFAULT_SETTINGS, { condition: "NM", gradingCompany: null, grade: null });
     expect(s.yourCopyValue).toBeNull();

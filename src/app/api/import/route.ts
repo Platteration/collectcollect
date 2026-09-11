@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { declaredTooLarge, errorMessage, jsonError } from "@/lib/http";
 import { applyImport, previewImport } from "@/lib/import";
+import { IMPORT_MAX_BYTES as MAX_BYTES } from "@/lib/limits";
 import { GAMES, has } from "@/lib/types";
-
-const MAX_BYTES = 8 * 1024 * 1024;
 
 /**
  * POST — read a CSV of cards. Without `apply` it only reports what it found,
@@ -12,7 +11,7 @@ const MAX_BYTES = 8 * 1024 * 1024;
 export async function POST(request: Request) {
   // The JSON envelope is a little larger than the CSV inside it, so anything
   // whose body alone is over the limit cannot hold a CSV that is not.
-  if (declaredTooLarge(request, MAX_BYTES)) return jsonError("That file is larger than 8 MB", 413);
+  if (declaredTooLarge(request, MAX_BYTES)) return jsonError(`That file is larger than ${MAX_BYTES / 1024 / 1024} MB`, 413);
   let body: { csv?: unknown; game?: unknown; apply?: unknown };
   try {
     body = (await request.json()) as typeof body;
@@ -21,7 +20,7 @@ export async function POST(request: Request) {
   }
   if (typeof body.csv !== "string" || !body.csv.trim()) return jsonError("No CSV content");
   // Bytes, not UTF-16 code units: a CSV of accented names is not four times the limit.
-  if (Buffer.byteLength(body.csv, "utf8") > MAX_BYTES) return jsonError("That file is larger than 8 MB", 413);
+  if (Buffer.byteLength(body.csv, "utf8") > MAX_BYTES) return jsonError(`That file is larger than ${MAX_BYTES / 1024 / 1024} MB`, 413);
 
   const game = has(GAMES, body.game) ? body.game : undefined;
   try {

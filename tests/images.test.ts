@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import sharp from "sharp";
-import { openDatabase, setDb, uploadsDir } from "@/lib/db";
+import { openLiveDatabase, setDb, uploadsDir } from "@/lib/db";
 import { createCard } from "@/lib/cards";
 import { saveUpload } from "@/lib/images";
 import { sweepOrphanedUploads } from "@/lib/uploads";
@@ -15,7 +15,7 @@ const previousDataDir = process.env.DATA_DIR;
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "collectcollect-images-"));
   process.env.DATA_DIR = dir;
-  setDb(openDatabase(":memory:"));
+  setDb(openLiveDatabase(":memory:"));
 });
 
 afterEach(() => {

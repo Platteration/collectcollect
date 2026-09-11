@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { alertsForRefresh, createAlert, deleteAlert, listAlerts, markAllRead, unreadCount } from "@/lib/alerts";
-import { openDatabase, setDb } from "@/lib/db";
+import { getDb } from "@/lib/db";
+import { openLiveDatabase, setDb } from "@/lib/db";
 import { DEFAULT_SETTINGS, type CardRecord, type PriceSnapshot, type PriceSummary } from "@/lib/types";
 
 const summary = (over: Partial<PriceSummary>): PriceSummary => ({
@@ -73,7 +74,7 @@ describe("alertsForRefresh", () => {
 });
 
 describe("alert storage", () => {
-  beforeEach(() => setDb(openDatabase(":memory:")));
+  beforeEach(() => setDb(openLiveDatabase(":memory:")));
 
   it("stores, counts, marks read and deletes", () => {
     const a = createAlert({ kind: "price_move", cardId: null, title: "t", body: "b" });
@@ -85,5 +86,34 @@ describe("alert storage", () => {
     expect(deleteAlert(a.id)).toBe(true);
     expect(deleteAlert(a.id)).toBe(false);
     expect(listAlerts()).toHaveLength(1);
+  });
+
+  /**
+   * A kind this app never wrote can only arrive with a restored database, and
+   * the page that lists alerts is the page an alert is dismissed from: if that
+   * page throws, the row cannot be got rid of through the app at all. So the
+   * row reads back as it is, and the badge renders it rather than indexing a
+   * table with it — `KIND_LABEL["__proto__"]` is Object.prototype, which React
+   * refuses as a child.
+   */
+  it("still lists an alert whose kind is a name off Object.prototype", async () => {
+    for (const kind of ["__proto__", "constructor", "toString", "not_a_kind"]) {
+      getDb().prepare("INSERT INTO alerts (kind, card_id, title, body, created_at) VALUES (?, NULL, 't', 'b', 't')").run(kind);
+    }
+    const listed = listAlerts();
+    expect(listed).toHaveLength(4);
+
+    const { alertBadge } = await import("@/components/AlertList");
+    for (const alert of listed) {
+      const badge = alertBadge(alert.kind);
+      // Text, not an object, and a class name from the table rather than one
+      // built out of the row.
+      expect(typeof badge.label).toBe("string");
+      expect(badge.label).toBe(alert.kind);
+      expect(badge.className).not.toContain(alert.kind);
+      expect(badge.className).toMatch(/^[\w\s:-]+$/);
+    }
+    // And a kind this app does write still gets its own label and colour.
+    expect(alertBadge("price_move")).toEqual({ label: "Price move", className: expect.stringContaining("amber") });
   });
 });

@@ -12,6 +12,7 @@ import { CONDITIONS, GAMES, GRADING_STATUSES, has, type GradingStatus } from "./
 import { httpUrl } from "./format";
 import { IdentificationSchema } from "./identify/schema";
 import { isValidUploadName } from "./images";
+import { nameKey } from "./name-key";
 import { normalizeNumber } from "./pricing/match";
 
 interface CardRow {
@@ -197,19 +198,21 @@ export function createCard(input: CardInput): CardRecord {
   const now = new Date().toISOString();
   const result = getDb()
     .prepare(
-      // name_key is written by the same expression findSimilar reads it with, so
-      // the stored value and the old inline `lower(trim(name))` agree exactly.
+      // name_key is bound, not computed in SQL: one function (nameKey) defines
+      // the key for the writers, for findSimilar and for the backfill, so the
+      // stored value and the value looked up cannot fold differently.
       `INSERT INTO cards (game, sport, name, name_key, set_name, set_code, card_number, year, rarity, variant,
         language, manufacturer, quantity, condition, grading_company, grade, cert_number, purchase_price,
         notes, image_path, reference_image_url, accent_color, location, external_ids, identification, manual_ungraded, manual_graded,
         grading_status, created_at, updated_at)
-       VALUES (@game, @sport, @name, lower(trim(@name)), @setName, @setCode, @cardNumber, @year, @rarity, @variant,
+       VALUES (@game, @sport, @name, @nameKey, @setName, @setCode, @cardNumber, @year, @rarity, @variant,
         @language, @manufacturer, @quantity, @condition, @gradingCompany, @grade, @certNumber, @purchasePrice,
         @notes, @imagePath, @referenceImageUrl, @accentColor, @location, @externalIds, @identification, @manualUngraded, @manualGraded,
         @gradingStatus, @now, @now)`,
     )
     .run({
       ...c,
+      nameKey: nameKey(c.name),
       externalIds: JSON.stringify(c.externalIds),
       identification: c.identification ? JSON.stringify(c.identification) : null,
       manualGraded: JSON.stringify(c.manualGraded),
@@ -224,7 +227,7 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
   const merged = normalizeInput({ ...existing, ...patch, game: patch.game ?? existing.game, name: patch.name ?? existing.name });
   getDb()
     .prepare(
-      `UPDATE cards SET game=@game, sport=@sport, name=@name, name_key=lower(trim(@name)), set_name=@setName, set_code=@setCode,
+      `UPDATE cards SET game=@game, sport=@sport, name=@name, name_key=@nameKey, set_name=@setName, set_code=@setCode,
         card_number=@cardNumber, year=@year, rarity=@rarity, variant=@variant, language=@language,
         manufacturer=@manufacturer, quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
         grade=@grade, cert_number=@certNumber, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
@@ -235,6 +238,7 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
     .run({
       ...merged,
       id,
+      nameKey: nameKey(merged.name),
       externalIds: JSON.stringify(merged.externalIds),
       identification: merged.identification ? JSON.stringify(merged.identification) : null,
       manualGraded: JSON.stringify(merged.manualGraded),
@@ -249,14 +253,14 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
  * duplicates when adding.
  */
 export function findSimilar(input: { game: Game; name: string; cardNumber?: string | null; setName?: string | null }): CardRecord[] {
-  const name = input.name.trim().toLowerCase();
-  if (!name) return [];
-  // name_key is the stored form of the same expression, so this is an index
-  // probe rather than a scan of the whole table — which, once per row, is what
-  // made a large CSV import block the process for a minute.
+  const key = nameKey(input.name);
+  if (!key) return [];
+  // name_key is the stored form of exactly this key, so this is an index probe
+  // rather than a scan of the whole table — which, once per row, is what made a
+  // large CSV import block the process for a minute.
   const rows = getDb()
     .prepare("SELECT * FROM cards WHERE game = ? AND name_key = ? ORDER BY updated_at DESC")
-    .all(input.game, name) as CardRow[];
+    .all(input.game, key) as CardRow[];
   const norm = (v: string | null | undefined) => (v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const num = normalizeNumber(input.cardNumber);
   const set = norm(input.setName);

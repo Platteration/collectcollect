@@ -145,6 +145,12 @@ export interface ReadEntry {
 export interface ReadLimits {
   maxTotalBytes: number;
   maxEntries: number;
+  /**
+   * Called once, when the archive has been found to be a zip whose directory
+   * reads and before a single entry is extracted — the point where reading it
+   * starts to cost something. Throwing here abandons the read.
+   */
+  beforeInflate?: () => void;
 }
 
 /**
@@ -159,6 +165,7 @@ export async function readZip(buffer: Uint8Array, limits: ReadLimits): Promise<R
   const count = view.getUint16(eocd + 10, true);
   if (count > limits.maxEntries) throw new Error(`Archive holds ${count} entries, more than the ${limits.maxEntries} allowed`);
   let offset = view.getUint32(eocd + 16, true);
+  limits.beforeInflate?.();
 
   const entries: ReadEntry[] = [];
   let total = 0;

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb, openDatabase, setDb } from "@/lib/db";
+import { getDb, openDatabase, openLiveDatabase, setDb } from "@/lib/db";
 import { addSnapshot, allSnapshots, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { CONDITIONS, DEFAULT_SETTINGS, GAMES, GRADING_STATUSES, SUBMISSION_STATUSES, label, type PriceSummary } from "@/lib/types";
@@ -117,7 +117,7 @@ describe("storage locations", () => {
 });
 
 describe("findSimilar", () => {
-  beforeEach(() => setDb(openDatabase(":memory:")));
+  beforeEach(() => setDb(openLiveDatabase(":memory:")));
   it("matches on game + name with number or set agreement", () => {
     createCard({ game: "pokemon", name: "Pikachu", setName: "Jungle", cardNumber: "60/64" });
     createCard({ game: "pokemon", name: "Pikachu", setName: "Base Set", cardNumber: "58/102" });
@@ -127,6 +127,23 @@ describe("findSimilar", () => {
     expect(findSimilar({ game: "pokemon", name: "Pikachu" })).toHaveLength(2);
     expect(findSimilar({ game: "mtg", name: "Pikachu" })).toHaveLength(0);
   });
+  it("folds a name the way the caller folds it, accents and all", () => {
+    // The key used to be written by SQLite's lower(trim(...)) and looked up with
+    // JavaScript's: SQLite's lower() is ASCII-only and its trim() strips spaces
+    // only, so "ÉLECTRODE" was stored as "Électrode" and searched for as
+    // "électrode". The miss made a duplicate card rather than an error, so
+    // nothing ever reported it. One function now writes and reads the key.
+    createCard({ game: "pokemon", name: "ÉLECTRODE" });
+    createCard({ game: "mtg", name: "\tRagavan\u00a0" });
+    expect(findSimilar({ game: "pokemon", name: "électrode" })).toHaveLength(1);
+    expect(findSimilar({ game: "pokemon", name: " Électrode " })).toHaveLength(1);
+    expect(findSimilar({ game: "mtg", name: "Ragavan" })).toHaveLength(1);
+    // A composed and a decomposed accent are the same name to anyone typing it.
+    expect(findSimilar({ game: "pokemon", name: "e\u0301lectrode".normalize("NFC") })).toHaveLength(1);
+    // And a different name is still a different card.
+    expect(findSimilar({ game: "pokemon", name: "electrode" })).toHaveLength(0);
+  });
+
   it("migrates older databases by adding grading_status", () => {
     const db = openDatabase(":memory:");
     db.exec("ALTER TABLE cards DROP COLUMN grading_status");
@@ -152,6 +169,29 @@ describe("settings", () => {
     expect(s.ownerName).toBe("Ada");
     expect(s.alertMovePercent).toBe(5);
     expect(s.alertWebhookUrl).toBe(""); // only http(s) is stored
+  });
+
+  it("reads a row it did not write through the same sanitiser", () => {
+    // The row can arrive with a restored database rather than from
+    // saveSettings. A multiplier that is a string is a price of NaN wherever it
+    // is used, which is a wrong answer rather than an error.
+    const store = (value: string) =>
+      getDb().prepare("INSERT INTO settings (key, value) VALUES ('settings', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(value);
+
+    store(JSON.stringify({ gradeMultipliers: { "PSA 10": "lots" }, conditionMultipliers: { LP: "some", MP: 0.6 }, gradingFee: "free" }));
+    const s = getSettings();
+    expect(s.gradeMultipliers).toEqual({});
+    expect(s.conditionMultipliers.LP).toBe(DEFAULT_SETTINGS.conditionMultipliers.LP);
+    expect(s.conditionMultipliers.MP).toBe(0.6);
+    expect(s.gradingFee).toBe(DEFAULT_SETTINGS.gradingFee);
+    for (const value of Object.values(s.conditionMultipliers)) expect(Number.isFinite(value)).toBe(true);
+
+    // And a value that is not an object at all falls back rather than spreading
+    // a string into a map of multipliers keyed by character offset.
+    store('"not an object"');
+    expect(getSettings()).toEqual(DEFAULT_SETTINGS);
+    store("[1,2,3]");
+    expect(getSettings()).toEqual(DEFAULT_SETTINGS);
   });
 });
 
