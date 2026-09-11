@@ -139,17 +139,22 @@ export function alertsForRefresh(
  * service the owner controls. Failures are logged, never thrown: a broken
  * webhook must not break a price refresh.
  */
-export async function deliver(alert: Alert, settings: Settings): Promise<void> {
-  if (!settings.alertWebhookUrl) return;
+export async function deliver(alert: Alert, settings: Settings, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  if (!settings.alertWebhookUrl) return false;
   try {
-    const res = await fetch(settings.alertWebhookUrl, {
+    const res = await fetchImpl(settings.alertWebhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind: alert.kind, title: alert.title, body: alert.body, cardId: alert.cardId, createdAt: alert.createdAt }),
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) console.error(`[alerts] webhook returned HTTP ${res.status}`);
+    if (!res.ok) {
+      console.error(`[alerts] webhook returned HTTP ${res.status} for "${alert.title}"`);
+      return false;
+    }
+    return true;
   } catch (e) {
-    console.error("[alerts] webhook failed", e instanceof Error ? e.message : e);
+    console.error(`[alerts] webhook failed for "${alert.title}":`, e instanceof Error ? e.message : e);
+    return false;
   }
 }

@@ -25,6 +25,13 @@ test.describe("password gate", () => {
     expect((await request.post("/api/items", { data: { marketHashName: "Clutch Case" } })).status()).toBe(401);
   });
 
+  test("the health check answers without a session", async ({ request }) => {
+    const res = await request.get("/api/health");
+    expect(res.status()).toBe(200);
+    expect((await res.json()) as object).toMatchObject({ ok: true, app: "collectcollect-skins" });
+    expect(res.headers()["x-content-type-options"]).toBe("nosniff");
+  });
+
   test("a wrong password does not sign anyone in", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("Password").fill("not-it");

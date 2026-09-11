@@ -3,6 +3,7 @@ import { alertsForRefresh, createAlert, deliver } from "../alerts";
 import { getSettings } from "../settings";
 import type { CardRecord, PriceSnapshot, PriceSummary } from "../types";
 import { learnFromQuotes, priceCard } from "./index";
+import { createGate } from "@collectcollect/core/gate";
 
 function hasPrice(s: PriceSummary): boolean {
   return Boolean(s.ungraded || s.yourCopyValue || Object.keys(s.graded).length);
@@ -58,10 +59,28 @@ export function resetRefreshThrottle(): void {
 }
 
 /**
+ * One whole-collection refresh at a time, across the scheduler and every
+ * button press. A second one is refused with a BusyError rather than queued:
+ * the answer it would produce is the one already under way. Kept on globalThis
+ * so a reloaded module in development still sees the pass that is running.
+ */
+const globalForRefresh = globalThis as unknown as { __collectcollectRefreshGate?: ReturnType<typeof createGate> };
+const gate = (globalForRefresh.__collectcollectRefreshGate ??= createGate("A price refresh is already running; wait for it to finish."));
+
+/** Whether a whole-collection refresh is running right now. */
+export function refreshRunning(): boolean {
+  return gate.busy;
+}
+
+/**
  * Refresh every card (or only those neither refreshed nor attempted within
  * `staleHours`). Runs a couple at a time to stay polite to the free APIs.
  */
-export async function refreshAll(opts: { staleHours?: number; concurrency?: number } = {}): Promise<RefreshResult> {
+export function refreshAll(opts: { staleHours?: number; concurrency?: number } = {}): Promise<RefreshResult> {
+  return gate.run(() => refreshEverything(opts));
+}
+
+async function refreshEverything(opts: { staleHours?: number; concurrency?: number }): Promise<RefreshResult> {
   const { staleHours, concurrency = 2 } = opts;
   const latest = latestSnapshotsByCard();
   const cutoff = staleHours === undefined ? null : Date.now() - staleHours * 3600e3;

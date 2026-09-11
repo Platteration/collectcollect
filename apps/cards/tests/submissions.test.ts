@@ -92,6 +92,30 @@ describe("grading submissions", () => {
     expect(getCard(b.id)?.grade).toBe("9");
   });
 
+  it("writes nothing when any result in a batch is refused", () => {
+    const a = pricedCard("Charizard", 100, 900);
+    const b = pricedCard("Blastoise", 80, 500);
+    const sub0 = createSubmission({ company: "PSA" });
+    addCard(sub0.id, a.id);
+    addCard(sub0.id, b.id);
+    markSent(sub0.id);
+    // The second result names a card that is not in the batch. Recording the
+    // first before refusing the second would leave one card valued as graded
+    // while the batch still says it is at the grader.
+    expect(() => recordReturn(sub0.id, [{ cardId: a.id, grade: "10" }, { cardId: 999, grade: "9" }])).toThrow(/not in this submission/);
+    expect(getCard(a.id)!.grade).toBeNull();
+    expect(getSubmission(sub0.id)!.cards.every((c) => c.returnedGrade === null)).toBe(true);
+    expect(getSubmission(sub0.id)!.status).toBe("sent");
+  });
+
+  it("says what is wrong with results that are not a list of cards and grades", () => {
+    const card = pricedCard("Charizard", 100, 900);
+    const sub = addCard(createSubmission({ company: "PSA" }).id, card.id);
+    for (const bad of [{ cardId: card.id }, "10", null, 42, [null], [{ grade: "10" }], [{ cardId: "1", grade: "10" }], [{ cardId: card.id, grade: {} }]]) {
+      expect(() => recordReturn(sub.id, bad), JSON.stringify(bad)).toThrow(/result|card|grade/i);
+    }
+  });
+
   it("rejects grades for cards outside the batch", () => {
     const card = pricedCard("Pikachu", 40, 150);
     const sub = addCard(createSubmission({ company: "PSA" }).id, card.id);

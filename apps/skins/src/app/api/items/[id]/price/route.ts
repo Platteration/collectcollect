@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getItem, updateItem } from "@/lib/items";
-import { errorMessage, jsonError, parseId } from "@collectcollect/core/http";
+import { errorMessage, jsonError, logError, parseId } from "@collectcollect/core/http";
 import { refreshItem } from "@/lib/pricing/refresh";
 import { proceedsByMarket } from "@/lib/pricing/index";
 import { getSettings } from "@/lib/settings";
@@ -18,6 +18,7 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/items/[id]
       proceeds: proceedsByMarket(outcome.snapshot.summary.quotes, getSettings()),
     });
   } catch (e) {
+    logError("items/price", e);
     return jsonError(`Could not price that: ${errorMessage(e)}`, 502);
   }
 }

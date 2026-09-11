@@ -9,8 +9,11 @@ services:
       context: .
       args:
         APP: cards
+    # Bound to this machine only. Neither app speaks TLS and a password is
+    # optional, so exposing a port to the network is a decision, not a default;
+    # put a reverse proxy in front and change the bind address there.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     env_file:
       - .env
     # The data directory is the volume, whatever .env says: `environment` wins
@@ -29,7 +32,7 @@ services:
       args:
         APP: skins
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     env_file:
       - .env
     environment:

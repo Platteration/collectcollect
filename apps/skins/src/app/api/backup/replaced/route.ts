@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { putBack, replacedCollections } from "@/lib/backup";
-import { errorMessage, jsonError } from "@collectcollect/core/http";
+import { errorMessage, jsonError, logError } from "@collectcollect/core/http";
 
 /** GET — the inventories a restore has moved aside, newest first. */
 export async function GET() {
   try {
     return NextResponse.json({ replaced: replacedCollections() });
   } catch (e) {
+    logError("backup/replaced", e);
     return jsonError(errorMessage(e), 500);
   }
 }

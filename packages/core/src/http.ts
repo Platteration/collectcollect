@@ -9,6 +9,16 @@ export function errorMessage(e: unknown): string {
 }
 
 /**
+ * Say what went wrong on the server, where it can be found later.
+ *
+ * Every 5xx passes through here. The response carries a sentence for the
+ * person; the log carries the stack for whoever has to work out why.
+ */
+export function logError(scope: string, e: unknown): void {
+  console.error(`[${scope}]`, e instanceof Error ? (e.stack ?? e.message) : e);
+}
+
+/**
  * A 413 when the request announces a body larger than `max`, or null.
  *
  * Checked before the body is read: an upload that is going to be refused for

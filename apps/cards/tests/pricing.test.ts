@@ -215,6 +215,17 @@ describe("refreshing a whole collection", () => {
     expect(await refreshAll()).toMatchObject({ refreshed: 2, skipped: 0 });
   });
 
+  it("runs one whole-collection pass at a time", async () => {
+    createCard({ game: "other", name: "Only one at once", manualUngraded: 10 });
+    const { BusyError } = await import("@collectcollect/core/gate");
+    const first = refreshAll();
+    // The second caller is told, not queued: the pass it wants is the one running.
+    await expect(refreshAll()).rejects.toBeInstanceOf(BusyError);
+    expect(await first).toMatchObject({ refreshed: 1 });
+    // And the gate opens again once the first is done.
+    expect(await refreshAll()).toMatchObject({ refreshed: 1 });
+  });
+
   it("records the first look even when nothing has a price for the card", async () => {
     const card = createCard({ game: "other", name: "Nothing knows this card" });
     expect(await refreshAll({ staleHours: 24 })).toMatchObject({ refreshed: 1, unpriced: 0 });

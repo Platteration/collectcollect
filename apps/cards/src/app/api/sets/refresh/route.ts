@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { errorMessage, jsonError } from "@/lib/http";
 import { refreshChecklist } from "@/lib/sets";
 import { isGame } from "@/lib/types";
+import { logError } from "@collectcollect/core/http";
 
 /** POST { game, setName } — fetch the published checklist for one of your sets. */
 export async function POST(request: Request) {
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ setName: checklist.setName, cards: checklist.cards.length });
   } catch (e) {
+    logError("sets/refresh", e);
     return jsonError(`Could not fetch that checklist: ${errorMessage(e)}`, 502);
   }
 }

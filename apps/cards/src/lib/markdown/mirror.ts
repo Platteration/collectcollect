@@ -6,6 +6,7 @@ import type { CardRecord, Condition, Game, PriceSnapshot, Sale } from "../types"
 import { CONDITIONS, GAMES } from "../types";
 import { INDEX_HEADERS, cardFileName, cardMarkdown, idFromFileName } from "./card";
 import { money, parseDocument, readMoney, readTable, table } from "@collectcollect/core/markdown/format";
+import { writeFileAtomic } from "@collectcollect/core/atomic-write";
 
 /**
  * A live plain-text copy of the collection.
@@ -62,11 +63,7 @@ function note(e: unknown): void {
 }
 
 /** Write via a temporary file so a crash mid-write cannot leave half a card. */
-function writeAtomic(file: string, contents: string): void {
-  const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, contents, "utf8");
-  fs.renameSync(tmp, file);
-}
+const writeAtomic = writeFileAtomic;
 
 function ensureDirs(): void {
   fs.mkdirSync(cardsDir(), { recursive: true });

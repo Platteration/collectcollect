@@ -80,22 +80,35 @@ export function dismissAlert(id: number): boolean {
   return getDb().prepare("DELETE FROM alerts WHERE id = ?").run(id).changes > 0;
 }
 
+/** How long a webhook gets to answer before the alert is given up as delivered-or-not. */
+export const WEBHOOK_TIMEOUT_MS = 10_000;
+
 /**
  * Post an alert to the owner's webhook, if they set one.
  *
  * Never allowed to fail an operation: this runs after a price refresh has
- * already been recorded, and a webhook that is down must not undo it.
+ * already been recorded, and a webhook that is down must not undo it. Nor is
+ * it allowed to hang one: a webhook that never answers is cut off after ten
+ * seconds. Either way the failure is logged, since an alert that silently
+ * never arrived is the one kind of alert worse than none.
  */
-export async function deliver(alert: Alert, settings: Settings, fetchImpl: typeof fetch = fetch): Promise<void> {
-  if (!settings.alertWebhookUrl) return;
+export async function deliver(alert: Alert, settings: Settings, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  if (!settings.alertWebhookUrl) return false;
   try {
-    await fetchImpl(settings.alertWebhookUrl, {
+    const res = await fetchImpl(settings.alertWebhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind: alert.kind, title: alert.title, body: alert.body, itemId: alert.itemId, at: alert.createdAt }),
+      signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
     });
-  } catch {
-    /* the alert is already recorded; the webhook is a courtesy */
+    if (!res.ok) {
+      console.error(`[alerts] webhook returned HTTP ${res.status} for "${alert.title}"`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error(`[alerts] webhook failed for "${alert.title}":`, e instanceof Error ? e.message : e);
+    return false;
   }
 }
 

@@ -1,12 +1,20 @@
 import { NextResponse } from "next/server";
 import { saveUpload } from "@/lib/images";
 import { errorMessage, jsonError } from "@/lib/http";
+import { tooLarge } from "@collectcollect/core/http";
+import { createThrottle } from "@collectcollect/core/throttle";
 
 const MAX_FILES = 20;
 const MAX_BYTES = 25 * 1024 * 1024;
+/** Every photo is re-encoded through sharp, which is real work; thirty a minute is a busy scan session. */
+export const throttle = createThrottle(30, 60_000, "uploads");
 
 /** POST multipart/form-data with one or more `files`; returns stored upload names. */
 export async function POST(request: Request) {
+  const refused =
+    throttle.check(request) ??
+    tooLarge(request, MAX_FILES * MAX_BYTES, `A request may carry at most ${MAX_FILES} files of ${MAX_BYTES / 1024 / 1024} MB each`);
+  if (refused) return refused;
   let form: FormData;
   try {
     form = await request.formData();

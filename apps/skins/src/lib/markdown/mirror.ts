@@ -6,6 +6,7 @@ import type { Category, Exterior, ItemRecord, PriceSnapshot, Sale } from "../typ
 import { CATEGORIES, EXTERIORS } from "../types";
 import { INDEX_HEADERS, idFromFileName, itemFileName, itemMarkdown } from "./item";
 import { money, parseDocument, readMoney, readTable, table } from "@collectcollect/core/markdown/format";
+import { writeFileAtomic } from "@collectcollect/core/atomic-write";
 
 /**
  * A live plain-text copy of the inventory.
@@ -73,11 +74,7 @@ function note(e: unknown): void {
 }
 
 /** Write via a temporary file so a crash mid-write cannot leave half an item. */
-function writeAtomic(file: string, contents: string): void {
-  const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, contents, "utf8");
-  fs.renameSync(tmp, file);
-}
+const writeAtomic = writeFileAtomic;
 
 function ensureDirs(): void {
   fs.mkdirSync(itemsDir(), { recursive: true });

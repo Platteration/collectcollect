@@ -1,5 +1,5 @@
 import type { PriceQuote } from "../../types";
-import { rateLimit, type RateLimit } from "../limiter";
+import { rateLimit, type RateLimit } from "@collectcollect/core/limiter";
 import { ProviderError, type ItemQuery, type PriceProvider } from "../types";
 
 /**

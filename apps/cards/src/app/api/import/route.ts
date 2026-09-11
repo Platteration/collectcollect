@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { errorMessage, jsonError } from "@/lib/http";
 import { applyImport, previewImport } from "@/lib/import";
 import { isGame } from "@/lib/types";
+import { tooLarge } from "@collectcollect/core/http";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 
@@ -10,6 +11,10 @@ const MAX_BYTES = 8 * 1024 * 1024;
  * so the owner can check the column mapping before anything is written.
  */
 export async function POST(request: Request) {
+  // The CSV travels inside a JSON string, which can double its size; the
+  // declared length is checked against that before the body is read.
+  const refused = tooLarge(request, MAX_BYTES * 2 + 1024, "That file is larger than 8 MB");
+  if (refused) return refused;
   let body: { csv?: unknown; game?: unknown; apply?: unknown };
   try {
     body = (await request.json()) as typeof body;

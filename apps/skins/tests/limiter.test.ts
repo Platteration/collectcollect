@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NO_LIMIT, rateLimit } from "@/lib/pricing/limiter";
+import { NO_LIMIT, rateLimit } from "@collectcollect/core/limiter";
 
 /**
  * A clock the test drives, so a limit measured in minutes can be checked in

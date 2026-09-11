@@ -1,5 +1,5 @@
 import { collectionFiles } from "@/lib/markdown/mirror";
-import { errorMessage, jsonError } from "@collectcollect/core/http";
+import { errorMessage, jsonError, logError } from "@collectcollect/core/http";
 import { assertZippable, fileChunks, zipStream, type ZipEntry } from "@collectcollect/core/zip";
 
 /**
@@ -39,6 +39,7 @@ export async function GET() {
       },
     });
   } catch (e) {
+    logError("collection", e);
     return jsonError(`Could not package the inventory: ${errorMessage(e)}`, 500);
   }
 }

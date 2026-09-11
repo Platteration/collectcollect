@@ -1,6 +1,7 @@
 import { collectionFiles } from "@/lib/markdown/mirror";
 import { errorMessage, jsonError } from "@/lib/http";
 import { assertZippable, fileChunks, zipStream, type ZipEntry } from "@collectcollect/core/zip";
+import { logError } from "@collectcollect/core/http";
 
 /**
  * GET — the plain-text collection as a zip: one Markdown file per card, an
@@ -39,6 +40,7 @@ export async function GET() {
       },
     });
   } catch (e) {
+    logError("collection", e);
     return jsonError(`Could not package the collection: ${errorMessage(e)}`, 500);
   }
 }

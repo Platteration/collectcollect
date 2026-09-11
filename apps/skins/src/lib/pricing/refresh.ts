@@ -3,6 +3,7 @@ import { alertsForRefresh, alertsForTradeLocks, createAlert, deliver } from "../
 import { getSettings } from "../settings";
 import type { ItemRecord, PriceSnapshot, PriceSummary } from "../types";
 import { primeProviders, priceItem } from "./index";
+import { createGate } from "@collectcollect/core/gate";
 
 function hasPrice(summary: PriceSummary): boolean {
   return summary.yourCopyValue !== null || summary.market !== null;
@@ -58,6 +59,20 @@ export function resetRefreshThrottle(): void {
 }
 
 /**
+ * One whole-inventory refresh at a time, across the scheduler and every button
+ * press. A second one is refused with a BusyError rather than queued: the
+ * answer it would produce is the one already under way. Kept on globalThis so
+ * a reloaded module in development still sees the pass that is running.
+ */
+const globalForRefresh = globalThis as unknown as { __skinsRefreshGate?: ReturnType<typeof createGate> };
+const gate = (globalForRefresh.__skinsRefreshGate ??= createGate("A price refresh is already running; wait for it to finish."));
+
+/** Whether a whole-inventory refresh is running right now. */
+export function refreshRunning(): boolean {
+  return gate.busy;
+}
+
+/**
  * Refresh the whole inventory, or only what has gone stale.
  *
  * Catalogues load once, before anything else runs. That is the whole reason for
@@ -70,7 +85,11 @@ export function resetRefreshThrottle(): void {
  * is rate limited across the whole process, so extra concurrency buys nothing
  * and only makes it harder to say what is happening.
  */
-export async function refreshAll(opts: { staleHours?: number; fetchImpl?: typeof fetch } = {}): Promise<RefreshResult> {
+export function refreshAll(opts: { staleHours?: number; fetchImpl?: typeof fetch } = {}): Promise<RefreshResult> {
+  return gate.run(() => refreshEverything(opts));
+}
+
+async function refreshEverything(opts: { staleHours?: number; fetchImpl?: typeof fetch }): Promise<RefreshResult> {
   const { staleHours, fetchImpl } = opts;
   const all = listItems();
   const latest = latestSnapshotsByItem();

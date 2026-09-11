@@ -6,7 +6,7 @@ import { refreshAll, refreshItem, resetRefreshThrottle } from "@/lib/pricing/ref
 import { resetCatalogue, skinport } from "@/lib/pricing/providers/skinport";
 import { parseSteamPrice, parseVolume, setRateLimit as setSteamLimit, steam } from "@/lib/pricing/providers/steam";
 import { csfloat, setRateLimit as setCsFloatLimit } from "@/lib/pricing/providers/csfloat";
-import { NO_LIMIT } from "@/lib/pricing/limiter";
+import { NO_LIMIT } from "@collectcollect/core/limiter";
 import { listAlerts } from "@/lib/alerts";
 import { saveSettings } from "@/lib/settings";
 import { DEFAULT_SETTINGS, type PriceQuote } from "@/lib/types";
@@ -270,6 +270,18 @@ describe("refreshing", () => {
     // A market down for an afternoon must not erase the history.
     expect(latestSnapshot(item.id)!.summary.yourCopyValue).toBe(11.5);
     expect(listSnapshots(item.id)).toHaveLength(1);
+  });
+
+  it("runs one whole-inventory pass at a time", async () => {
+    seedRedline();
+    const { BusyError } = await import("@collectcollect/core/gate");
+    const fetchImpl = routes([["api.skinport.com", SKINPORT_CATALOGUE]]);
+    const first = refreshAll({ fetchImpl });
+    // The second caller is told, not queued: the pass it wants is the one running.
+    await expect(refreshAll({ fetchImpl })).rejects.toBeInstanceOf(BusyError);
+    expect(await first).toMatchObject({ refreshed: 1 });
+    resetCatalogue();
+    expect(await refreshAll({ fetchImpl })).toMatchObject({ refreshed: 1 });
   });
 
   it("loads a catalogue once for a whole inventory", async () => {

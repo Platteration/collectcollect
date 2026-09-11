@@ -1,5 +1,5 @@
 import { buildBackup } from "@/lib/backup";
-import { errorMessage, jsonError } from "@collectcollect/core/http";
+import { errorMessage, jsonError, logError } from "@collectcollect/core/http";
 
 /** GET — download the whole inventory as a zip: the database plus its plain-text copy. */
 export async function GET() {
@@ -13,6 +13,7 @@ export async function GET() {
       },
     });
   } catch (e) {
+    logError("backup", e);
     return jsonError(`Backup failed: ${errorMessage(e)}`, 500);
   }
 }

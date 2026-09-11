@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Barlow_Condensed } from "next/font/google";
+import { headers } from "next/headers";
 import Link from "next/link";
 import "./globals.css";
 import { unreadCount } from "@/lib/alerts";
@@ -55,12 +56,17 @@ const NAV = [
   { href: "/settings", label: "Settings", icon: "⚙" },
 ] as const;
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // The one inline script needs the nonce the proxy minted for this request,
+  // or the content security policy refuses it and the page flashes the wrong
+  // theme. Reading a header also keeps every page dynamic, which a per-request
+  // nonce requires: a page rendered at build time would carry none.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   const unread = unreadCount();
   return (
     <html lang="en" data-theme="light" className={`${display.variable} h-full antialiased`} suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body className="flex min-h-full flex-col">
         <ServiceWorker />

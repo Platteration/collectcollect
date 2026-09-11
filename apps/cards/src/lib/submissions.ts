@@ -1,4 +1,4 @@
-import { getCard, latestSnapshot, updateCard } from "./cards";
+import { discardDeferredMirror, flushDeferredMirror, getCard, latestSnapshot, updateCard } from "./cards";
 import { getDb } from "./db";
 import { gradeKey } from "./pricing";
 import type { Game, Submission, SubmissionCard, SubmissionStatus } from "./types";
@@ -217,29 +217,63 @@ export interface GradeResult {
  * one pass: the batch only closes once every card has one, so a partial entry
  * does not strand the rest at the grader.
  */
-export function recordReturn(submissionId: number, results: GradeResult[], returnedAt?: string): Submission {
+export function recordReturn(submissionId: number, results: unknown, returnedAt?: string): Submission {
   const sub = getSubmission(submissionId);
   if (!sub) throw new Error("Submission not found");
   const when = returnedAt ? new Date(returnedAt) : new Date();
   if (Number.isNaN(when.getTime())) throw new Error("Return date is not a valid date");
+
+  // Everything is checked before anything is written, and the writes are one
+  // transaction: a batch that is half recorded — three cards graded, the
+  // fourth refused — would leave those three valued as graded copies while the
+  // batch still says it is at the grader.
+  if (!Array.isArray(results)) throw new Error("Results have to be a list of cards and their grades");
   const inBatch = new Set(sub.cards.map((c) => c.cardId));
+  const graded: GradeResult[] = [];
   for (const r of results) {
-    if (!inBatch.has(r.cardId)) throw new Error(`Card ${r.cardId} is not in this submission`);
-    const grade = String(r.grade ?? "").trim();
-    if (!grade) continue;
-    const summary = latestSnapshot(r.cardId)?.summary;
-    const key = gradeKey(sub.company, grade);
-    const value = summary && key ? (summary.graded[key] ?? summary.estimatedGraded[key] ?? null) : null;
-    getDb()
-      .prepare("UPDATE submission_cards SET returned_grade = ?, returned_value = ? WHERE submission_id = ? AND card_id = ?")
-      .run(grade, value, submissionId, r.cardId);
-    updateCard(r.cardId, { gradingCompany: sub.company, grade, gradingStatus: "undecided" });
+    if (!r || typeof r !== "object") throw new Error("Each result has to name a card and a grade");
+    const { cardId, grade } = r as { cardId?: unknown; grade?: unknown };
+    if (typeof cardId !== "number" || !Number.isInteger(cardId)) throw new Error("Each result has to name a card by its id");
+    if (!inBatch.has(cardId)) throw new Error(`Card ${cardId} is not in this submission`);
+    if (grade !== undefined && grade !== null && typeof grade !== "string" && typeof grade !== "number") {
+      throw new Error(`The grade for card ${cardId} has to be text`);
+    }
+    const text = String(grade ?? "").trim();
+    if (text) graded.push({ cardId, grade: text });
   }
-  const after = getSubmission(submissionId)!;
-  const complete = after.cards.length > 0 && after.cards.every((c) => c.returnedGrade);
-  getDb()
-    .prepare("UPDATE submissions SET status = ?, returned_at = ?, updated_at = ? WHERE id = ?")
-    .run(complete ? "returned" : "sent", complete ? when.toISOString() : null, new Date().toISOString(), submissionId);
+
+  const db = getDb();
+  const run = db.transaction(() => {
+    for (const r of graded) {
+      const summary = latestSnapshot(r.cardId)?.summary;
+      const key = gradeKey(sub.company, r.grade);
+      const value = summary && key ? (summary.graded[key] ?? summary.estimatedGraded[key] ?? null) : null;
+      db.prepare("UPDATE submission_cards SET returned_grade = ?, returned_value = ? WHERE submission_id = ? AND card_id = ?").run(
+        r.grade,
+        value,
+        submissionId,
+        r.cardId,
+      );
+      updateCard(r.cardId, { gradingCompany: sub.company, grade: r.grade, gradingStatus: "undecided" });
+    }
+    const after = getSubmission(submissionId)!;
+    const complete = after.cards.length > 0 && after.cards.every((c) => c.returnedGrade);
+    db.prepare("UPDATE submissions SET status = ?, returned_at = ?, updated_at = ? WHERE id = ?").run(
+      complete ? "returned" : "sent",
+      complete ? when.toISOString() : null,
+      new Date().toISOString(),
+      submissionId,
+    );
+  });
+  // Card files are mirrored once the transaction commits, never for a batch
+  // that rolled back.
+  try {
+    run();
+    flushDeferredMirror();
+  } catch (e) {
+    discardDeferredMirror();
+    throw e;
+  }
   return getSubmission(submissionId)!;
 }
 

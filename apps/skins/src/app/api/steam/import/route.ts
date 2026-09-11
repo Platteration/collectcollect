@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { itemsMissingFrom, syncFromInventory } from "@/lib/items";
-import { errorMessage, jsonError } from "@collectcollect/core/http";
+import { errorMessage, jsonError, logError } from "@collectcollect/core/http";
 import { SteamInventoryError, fetchInventory, parseInventory } from "@/lib/steam/inventory";
 import type { ItemInput } from "@/lib/types";
+import { createThrottle } from "@collectcollect/core/throttle";
 
 export interface SteamImportResult {
   created: number;
@@ -33,7 +34,12 @@ export interface SteamImportResult {
  * apparent break-even and quietly destroy the one number this app exists to
  * keep.
  */
+/** Steam refuses inventories asked for too often, and a refusal is worse than a wait. */
+export const throttle = createThrottle(6, 60_000, "inventory reads");
+
 export async function POST(request: Request) {
+  const refused = throttle.check(request);
+  if (refused) return refused;
   let body: { steamId?: unknown; preview?: unknown };
   try {
     body = (await request.json()) as { steamId?: unknown; preview?: unknown };
@@ -53,6 +59,7 @@ export async function POST(request: Request) {
     // A private inventory or a rate limit is something the person can act on,
     // so it comes back as a sentence rather than a 500.
     if (e instanceof SteamInventoryError) return jsonError(e.message, 400);
+    logError("steam/import", e);
     return jsonError(`Could not read that inventory: ${errorMessage(e)}`, 502);
   }
 

@@ -83,8 +83,79 @@ describe("alerts over HTTP", () => {
   });
 });
 
-describe("what the lookup routes refuse", () => {
+describe("refreshing prices over HTTP", () => {
+  beforeEach(async () => {
+    setDb(openDatabase(":memory:"));
+    (await import("@/app/api/prices/refresh/route")).throttle.reset();
+  });
+
+  it("refuses a stale window that is not a number of hours", async () => {
+    const { POST } = await import("@/app/api/prices/refresh/route");
+    for (const stale of ["", "abc", "-1", "1e400"]) {
+      const res = await POST(new Request(`http://localhost/api/prices/refresh?stale=${encodeURIComponent(stale)}`, { method: "POST" }));
+      expect(res.status, JSON.stringify(stale)).toBe(400);
+    }
+    expect((await POST(new Request("http://localhost/api/prices/refresh?stale=24", { method: "POST" }))).status).toBe(200);
+    expect((await POST(new Request("http://localhost/api/prices/refresh", { method: "POST" }))).status).toBe(200);
+  });
+
+  it("says a refresh is already running rather than starting another", async () => {
+    const { POST } = await import("@/app/api/prices/refresh/route");
+    createCard({ game: "other", name: "Slow enough", manualUngraded: 1 });
+    const first = POST(new Request("http://localhost/api/prices/refresh", { method: "POST" }));
+    const second = await POST(new Request("http://localhost/api/prices/refresh", { method: "POST" }));
+    expect(second.status).toBe(409);
+    expect((await first).status).toBe(200);
+  });
+
+  it("stops a runaway client after six in a minute", async () => {
+    const { POST } = await import("@/app/api/prices/refresh/route");
+    for (let i = 0; i < 6; i++) await POST(new Request("http://localhost/api/prices/refresh", { method: "POST" }));
+    const seventh = await POST(new Request("http://localhost/api/prices/refresh", { method: "POST" }));
+    expect(seventh.status).toBe(429);
+    expect(seventh.headers.get("Retry-After")).toMatch(/^\d+$/);
+  });
+});
+
+describe("the health check", () => {
+  it("answers without opening a collection", async () => {
+    const { GET } = await import("@/app/api/health/route");
+    const body = await read<{ ok: boolean; app: string; database: boolean; scheduler: { enabled: boolean; running: boolean } }>(await GET());
+    expect(body.ok).toBe(true);
+    expect(body.app).toBe("collectcollect");
+    expect(typeof body.database).toBe("boolean");
+    expect(body.scheduler).toMatchObject({ running: false });
+  });
+});
+
+describe("undoing a sale over HTTP", () => {
   beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("is a 404 for a sale that is not there and a 200 for one that is", async () => {
+    const { DELETE } = await import("@/app/api/sales/[id]/route");
+    expect((await DELETE(new Request("http://localhost/api/sales/9", { method: "DELETE" }), ctx({ id: "9" }) as never)).status).toBe(404);
+    expect((await DELETE(new Request("http://localhost/api/sales/x", { method: "DELETE" }), ctx({ id: "abc" }) as never)).status).toBe(404);
+    const card = createCard({ game: "pokemon", name: "Sold Snorlax", quantity: 1 });
+    const sale = recordSale(card.id, { quantity: 1, unitPrice: 10 });
+    expect((await DELETE(new Request("http://localhost/api/sales/1", { method: "DELETE" }), ctx({ id: String(sale.id) }) as never)).status).toBe(200);
+  });
+});
+
+describe("what the lookup routes refuse", () => {
+  beforeEach(async () => {
+    setDb(openDatabase(":memory:"));
+    (await import("@/app/api/identify/route")).throttle.reset();
+  });
+
+  it("stops a runaway client after ten identifications in a minute", async () => {
+    const { POST } = await import("@/app/api/identify/route");
+    // Each of these is refused for having nothing to identify, and each still
+    // counts: the limit is on asking, not on being answered.
+    for (let i = 0; i < 10; i++) expect((await POST(json("http://localhost/api/identify", "POST", { uploads: [] }))).status).toBe(400);
+    const eleventh = await POST(json("http://localhost/api/identify", "POST", { uploads: [] }));
+    expect(eleventh.status).toBe(429);
+    expect((await read<{ error: string }>(eleventh)).error).toMatch(/Too many identifications/);
+  });
 
   it("will not price a game it does not know or a card with no name", async () => {
     const { POST } = await import("@/app/api/prices/lookup/route");

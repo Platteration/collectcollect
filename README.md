@@ -36,6 +36,12 @@ docker build -t collectcollect-skins --build-arg APP=skins .
 
 > Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
 
+**Behind a proxy.** The login limiter and the per-route limits count attempts per client. Without a proxy every client is one client, and the `X-Forwarded-For` header is ignored — anyone can send one. Set `TRUST_PROXY=1` only when a reverse proxy in front of the app sets that header, and it will be read. Compose binds both apps to `127.0.0.1`; put the proxy in front and change the bind address there, since neither app speaks TLS.
+
+**What every response carries.** A content security policy that allows scripts only from the app itself, plus the one inline script that applies the theme before first paint, which is let through by a nonce minted per request; images from the app, `data:`/`blob:` and (for cards) any https host a price source's reference image might come from; nothing framed, nothing embedded. Alongside it: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, a strict referrer policy, and a permissions policy that refuses the camera except where scan mode uses it. `GET /api/health` answers without a session — `{ ok, dataDir, database, scheduler }` — for a container health check or a proxy.
+
+**Limits on the expensive routes.** Identifying a photo (10 a minute), uploading (30), refreshing every price (6), reading a folder or a Steam inventory back in (6) and restoring a backup (3) each refuse with a 429 and a `Retry-After` past their limit. They are in memory and per process — protection against a runaway client or a double-clicked button, not a public API's defence. Only one whole-collection price refresh runs at a time, whoever asks: a second is told so with a 409, since the answer it wants is already being produced.
+
 ## How pricing works
 
 | Source | Games | Key | What it provides |
@@ -165,6 +171,7 @@ src/app/                 Next.js App Router pages and API routes
   api/locations          GET — storage locations in use, for autocomplete
   api/sets/refresh       POST — fetch and store a set's published checklist
   api/auth               POST signs in, DELETE signs out (only when APP_PASSWORD is set)
+  api/health             GET — is the server up, what is it reading; needs no session
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema
 src/lib/pricing/         Providers, matching heuristics, summary/valuation, refresh pipeline
@@ -300,8 +307,10 @@ localhost would otherwise hand each other their sessions.
 **Keeping history flowing.** The server re-prices anything whose latest price
 is older than `SKINS_AUTO_REFRESH_HOURS` (default 24, set 0 to disable) once an
 hour while it is running, and `/spread` has a button that does the whole
-inventory now. Only one pass runs at a time — a refresh still working through
-four hundred items must not have another started on top of it.
+inventory now. Only one pass runs at a time, whoever starts it — a refresh
+still working through four hundred items must not have another started on top
+of it, so the button answers 409 while the hourly pass is running, and the
+hourly pass simply waits for the next hour while the button's is.
 
 **Selling.** Purchases and sales share one panel on an item's page, because
 they are one ledger read from two ends: a sale takes copies out of the oldest

@@ -2,8 +2,12 @@ import { NextResponse } from "next/server";
 import { RESTORE_MAX_BYTES, restoreBackup } from "@/lib/backup";
 import { errorMessage, jsonError } from "@/lib/http";
 import { tooLarge } from "@collectcollect/core/http";
+import { createThrottle } from "@collectcollect/core/throttle";
 
 const TOO_LARGE = `That archive is larger than ${RESTORE_MAX_BYTES / 1024 / 1024} MB. Unpack it into the data directory by hand instead.`;
+
+/** A restore swaps the whole database out; three a minute is already two more than anyone means. */
+export const throttle = createThrottle(3, 60_000, "restores");
 
 /**
  * POST multipart/form-data with an `archive` file — replace the collection with
@@ -11,7 +15,7 @@ const TOO_LARGE = `That archive is larger than ${RESTORE_MAX_BYTES / 1024 / 1024
  * rather than deleted.
  */
 export async function POST(request: Request) {
-  const refused = tooLarge(request, RESTORE_MAX_BYTES, TOO_LARGE);
+  const refused = throttle.check(request) ?? tooLarge(request, RESTORE_MAX_BYTES, TOO_LARGE);
   if (refused) return refused;
   let form: FormData;
   try {
