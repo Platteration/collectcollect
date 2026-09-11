@@ -35,7 +35,7 @@ test.describe("taking it out as a spreadsheet", () => {
     expect(response.headers()["content-type"]).toContain("text/csv");
     const csv = await response.text();
     const [header, ...rows] = csv.trim().split("\r\n");
-    expect(header.split(",")).toEqual(
+    expect(header?.split(",")).toEqual(
       expect.arrayContaining(["name", "category", "float", "seed", "quantity", "cost", "storage", "tradelock"]),
     );
     expect(rows.some((r) => r.includes("Karambit"))).toBe(true);

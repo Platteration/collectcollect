@@ -61,9 +61,13 @@ export function ValueChart<P extends ValuePoint>({
   const { lo, hi, ticks } = niceTicks(Math.min(...values, 0), Math.max(...values, 1));
   const sx = xScale(times, layout);
   const sy = yScale(lo, hi, layout);
-  const xs = times.map((t) => sx(t));
-  const isEnd = (i: number) => i === times.length - 1 || xs[i] > layout.width - layout.right - 40;
-  const coords: Array<[number, number]> = points.map((p, i) => [xs[i], sy(p.value)]);
+  const coords: Array<[number, number]> = points.map((p) => [sx(new Date(p.t).getTime()), sy(p.value)]);
+  const xs = coords.map(([x]) => x);
+  const labels = points.map((p) => shortDate(p.t));
+  const isEnd = (i: number) => {
+    const x = xs[i];
+    return i === times.length - 1 || (x !== undefined && x > layout.width - layout.right - 40);
+  };
   const { index, onMove, onLeave, onKey, setIndex } = useCrosshair(xs);
   const color = up ? INK.good : INK.bad;
   const baseline = sy(lo);
@@ -75,7 +79,9 @@ export function ValueChart<P extends ValuePoint>({
     onHover?.(index === null ? null : (points[index] ?? null));
   }, [index, points, onHover]);
 
-  if (points.length === 0) {
+  const first = points[0];
+  const last = points.at(-1);
+  if (first === undefined || last === undefined) {
     return (
       <div
         ref={ref}
@@ -88,8 +94,8 @@ export function ValueChart<P extends ValuePoint>({
   }
 
   const active = index !== null ? points[index] : null;
-  const first = points[0];
-  const last = points[points.length - 1];
+  const activeCoord = index !== null ? coords[index] : undefined;
+  const single = points.length === 1 ? coords[0] : undefined;
   // What a screen reader is told. The crosshair is reachable from the keyboard,
   // so what it lands on has to be readable without seeing the tooltip.
   const description =
@@ -136,13 +142,8 @@ export function ValueChart<P extends ValuePoint>({
         ))}
         <path d={areaPath(coords, baseline)} fill={`url(#${gradientId})`} />
         <path d={linePath(coords)} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-        {points.length === 1 && <circle cx={coords[0][0]} cy={coords[0][1]} r={4} fill={color} stroke={INK.surface} strokeWidth={2} />}
-        {timeTicks(
-          times,
-          xs,
-          points.map((p) => shortDate(p.t)),
-          narrow ? 3 : 4,
-        ).map((i) => (
+        {single && <circle cx={single[0]} cy={single[1]} r={4} fill={color} stroke={INK.surface} strokeWidth={2} />}
+        {timeTicks(times, xs, labels, narrow ? 3 : 4).map((i) => (
           <text
             key={i}
             x={xs[i]}
@@ -151,13 +152,13 @@ export function ValueChart<P extends ValuePoint>({
             fill={INK.muted}
             textAnchor={i === 0 ? "start" : isEnd(i) ? "end" : "middle"}
           >
-            {shortDate(points[i].t)}
+            {labels[i]}
           </text>
         ))}
-        {index !== null && (
+        {activeCoord && (
           <g>
-            <line x1={xs[index]} x2={xs[index]} y1={layout.top} y2={layout.height - layout.bottom} stroke={INK.axis} strokeWidth={1} />
-            <circle cx={coords[index][0]} cy={coords[index][1]} r={5} fill={color} stroke={INK.surface} strokeWidth={2} />
+            <line x1={activeCoord[0]} x2={activeCoord[0]} y1={layout.top} y2={layout.height - layout.bottom} stroke={INK.axis} strokeWidth={1} />
+            <circle cx={activeCoord[0]} cy={activeCoord[1]} r={5} fill={color} stroke={INK.surface} strokeWidth={2} />
           </g>
         )}
         {/* Invisible hit areas so keyboard and touch users can land on points. */}
@@ -177,12 +178,12 @@ export function ValueChart<P extends ValuePoint>({
       <p className="sr-only" role="status" aria-live="polite">
         {spoken}
       </p>
-      {active && (
+      {active && activeCoord && (
         <div
           className="tooltip-surface pointer-events-none absolute top-0 rounded-md px-2 py-1 text-xs"
           style={{
-            left: `${(xs[index!] / layout.width) * 100}%`,
-            transform: xs[index!] > layout.width / 2 ? "translateX(-105%)" : "translateX(8px)",
+            left: `${(activeCoord[0] / layout.width) * 100}%`,
+            transform: activeCoord[0] > layout.width / 2 ? "translateX(-105%)" : "translateX(8px)",
           }}
         >
           <div className="font-semibold">{money(active.value)}</div>

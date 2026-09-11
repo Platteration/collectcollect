@@ -92,7 +92,7 @@ describe("summarize", () => {
     expect(s.ungradedSource).toBe("Manual entry");
     expect(s.graded["PSA 10"]).toBe(1000);
     expect(s.yourCopyValue).toBe(1000);
-    expect(s.quotes[0].source).toBe("manual");
+    expect(s.quotes[0]?.source).toBe("manual");
   });
   it("reports nothing gracefully", () => {
     const s = summarize([], [{ source: "pokemontcg", message: "down" }], DEFAULT_SETTINGS, { condition: "NM", gradingCompany: null, grade: null });
@@ -107,7 +107,7 @@ describe("fetchQuotes", () => {
     const { quotes, errors } = await fetchQuotes({ game: "pokemon", name: "Pikachu" }, fetchImpl);
     expect(quotes).toEqual([]);
     expect(errors[0]).toMatchObject({ source: "pokemontcg" });
-    expect(errors[0].message).toMatch(/HTTP 500/);
+    expect(errors[0]?.message).toMatch(/HTTP 500/);
   });
   it("only runs providers for the card's game", async () => {
     const fetchImpl = fakeFetch([["ygoprodeck", { data: [{ id: 1, name: "Kuriboh", card_prices: [{ tcgplayer_price: "0.50" }] }] }]]);
@@ -142,7 +142,7 @@ describe("refreshCard", () => {
       expect(r.stored).toBe(false);
       expect(r.snapshot.summary.errors).toHaveLength(1);
       expect(listSnapshots(card.id)).toHaveLength(1);
-      expect(listSnapshots(card.id)[0].summary.ungraded).toBe(50);
+      expect(listSnapshots(card.id)[0]?.summary.ungraded).toBe(50);
     } finally {
       globalThis.fetch = original;
     }
@@ -232,7 +232,7 @@ describe("refreshing a whole collection", () => {
     // A card with no history at all gets its "we looked, and found nothing"
     // snapshot, which is what the card page explains.
     expect(listSnapshots(card.id)).toHaveLength(1);
-    expect(listSnapshots(card.id)[0].summary.yourCopyValue).toBeNull();
+    expect(listSnapshots(card.id)[0]?.summary.yourCopyValue).toBeNull();
   });
 
   it("waits out the window before trying a card that came back empty", async () => {
@@ -245,7 +245,7 @@ describe("refreshing a whole collection", () => {
     expect(first).toMatchObject({ refreshed: 0, unpriced: 1, skipped: 0 });
     // The card keeps its last known value rather than being zeroed out.
     expect(listSnapshots(card.id)).toHaveLength(1);
-    expect(listSnapshots(card.id)[0].summary.yourCopyValue).toBe(30);
+    expect(listSnapshots(card.id)[0]?.summary.yourCopyValue).toBe(30);
     // Its stored snapshot is still stale, but it was just tried, so it waits.
     expect(await refreshAll({ staleHours: 24 })).toMatchObject({ refreshed: 0, unpriced: 0, skipped: 1 });
   });

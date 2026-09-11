@@ -42,12 +42,19 @@ class Window implements RateLimit {
         if (signal?.aborted) return;
         for (;;) {
           const now = this.now();
-          while (this.recent.length && now - this.recent[0] >= this.windowMs) this.recent.shift();
+          let oldest = this.recent[0];
+          while (oldest !== undefined && now - oldest >= this.windowMs) {
+            this.recent.shift();
+            oldest = this.recent[0];
+          }
           if (this.recent.length < this.max) {
             this.recent.push(now);
             return;
           }
-          const wait = this.windowMs - (now - this.recent[0]);
+          // Only reached with the window full, so `oldest` is set unless `max`
+          // is zero, in which case nothing ever gets through and the caller
+          // simply waits a whole window before asking again.
+          const wait = this.windowMs - (now - (oldest ?? now));
           await this.sleep(Math.max(1, wait));
           if (signal?.aborted) return;
         }

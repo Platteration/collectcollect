@@ -14,7 +14,13 @@ import { parseCardMarkdown } from "@/lib/markdown/card";
 import { parseDocument, readSection, readTable, writeFrontMatter } from "@collectcollect/core/markdown/format";
 import type { PriceSummary } from "@/lib/types";
 
-const summary = (value: number, at: string): PriceSummary => ({
+function at<T>(xs: readonly T[], i: number): T {
+  const x = xs[i];
+  if (x === undefined) throw new Error(`expected an element at ${i}`);
+  return x;
+}
+
+const summary =(value: number, at: string): PriceSummary => ({
   currency: "USD",
   fetchedAt: at,
   ungraded: value,
@@ -101,7 +107,7 @@ describe("a card as a document", () => {
     expect(parsed.sales).toHaveLength(1);
     expect(parsed.sales[0]).toMatchObject({ quantity: 1, unitPrice: 500, fees: 40, venue: "eBay" });
     expect(parsed.snapshots).toHaveLength(2);
-    expect(parsed.snapshots[0].summary).toMatchObject({ yourCopyValue: 420, ungraded: 420, graded: { "PSA 10": 4200, "PSA 9": 1260 } });
+    expect(parsed.snapshots[0]?.summary).toMatchObject({ yourCopyValue: 420, ungraded: 420, graded: { "PSA 10": 4200, "PSA 9": 1260 } });
     expect(parsed.warnings).toEqual([]);
   });
 
@@ -111,7 +117,7 @@ describe("a card as a document", () => {
     const card = createCard({ game: "mtg", name: "Bolt", quantity: 2, purchasePrice: 1.005 });
     const text = fileFor(card.id);
     expect(text).toContain("$1.005");
-    expect(parseCardMarkdown(text)!.acquisitions[0].unitCost).toBe(1.005);
+    expect(parseCardMarkdown(text)!.acquisitions[0]?.unitCost).toBe(1.005);
     // A whole number of cents still reads the way people write money.
     const whole = createCard({ game: "mtg", name: "Counterspell", quantity: 1, purchasePrice: 3 });
     expect(fileFor(whole.id)).toContain("$3.00");
@@ -308,7 +314,7 @@ describe("files written by something other than this app", () => {
     addAcquisition(card.id, { quantity: 1, unitCost: 300 });
     recordSale(card.id, { quantity: 2, unitPrice: 500 });
     const parsed = parseCardMarkdown(fileFor(card.id))!;
-    expect(parsed.sales[0].lots).toMatchObject([
+    expect(parsed.sales[0]?.lots).toMatchObject([
       { quantity: 1, unitCost: 100 },
       { quantity: 1, unitCost: 300 },
     ]);
@@ -377,7 +383,7 @@ describe("files written by something other than this app", () => {
       "",
     ].join("\n");
     const parsed = parseCardMarkdown(text)!;
-    expect(parsed.snapshots[0].summary).toMatchObject({
+    expect(parsed.snapshots[0]?.summary).toMatchObject({
       ungraded: 8,
       ungradedSource: "Scryfall (TCGplayer-derived USD)",
       graded: { "PSA 10": 200 },
@@ -484,7 +490,7 @@ describe("recovering a collection from its files", () => {
 
     setDb(openDatabase(":memory:"));
     importCardFiles([file]);
-    expect(listCards()[0].id).toBe(zapdos.id);
+    expect(listCards()[0]?.id).toBe(zapdos.id);
     expect(fs.readdirSync(cardsDir())).toContain(`000${zapdos.id}-zapdos-base-set.md`);
     // Adopting the id must not leave a file behind under the one it was
     // created with a moment earlier.
@@ -495,7 +501,7 @@ describe("recovering a collection from its files", () => {
     // A file describing an ungraded Charizard...
     createCard({ game: "pokemon", name: "Charizard", setName: "Base Set" });
     flushCollection();
-    const [raw] = readCardFiles();
+    const raw = at(readCardFiles(), 0);
 
     // ...meets a collection where that card came back from the grader, with a
     // sale and a price history behind it.
@@ -515,13 +521,13 @@ describe("recovering a collection from its files", () => {
   it("never overwrites a card that merely shares an id", () => {
     createCard({ game: "pokemon", name: "Somebody Else's Charizard", setName: "Base Set" });
     flushCollection();
-    const [stranger] = readCardFiles();
+    const stranger = at(readCardFiles(), 0);
 
     setDb(openDatabase(":memory:"));
     const mine = createCard({ game: "yugioh", name: "Dark Magician" });
     const result = importCardFiles([stranger]);
     expect(result).toMatchObject({ created: 1, replaced: 0 });
-    expect(result.warnings[0].message).toContain("Dark Magician");
+    expect(result.warnings[0]?.message).toContain("Dark Magician");
     const cards = listCards();
     expect(cards).toHaveLength(2);
     expect(cards.find((c) => c.id === mine.id)!.name).toBe("Dark Magician");
@@ -534,7 +540,7 @@ describe("recovering a collection from its files", () => {
     flushCollection();
     const files = readCardFiles();
     setDb(openDatabase(":memory:"));
-    importCardFiles([files[2]]);
+    importCardFiles([at(files, 2)]);
     const next = createCard({ game: "pokemon", name: "Fourth" });
     expect(next.id).toBeGreaterThan(3);
   });

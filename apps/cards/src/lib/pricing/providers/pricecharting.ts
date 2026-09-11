@@ -143,8 +143,8 @@ export const priceChartingProvider: PriceProvider = {
     }
     const products = body.products ?? [];
     if (products.length === 0) return [];
-    const ranked = products.map((p) => ({ p, s: scoreProduct(q, p) })).sort((a, b) => b.s - a.s);
-    if (ranked[0].s < 1.5) return []; // nothing that plausibly matches
-    return [productToQuote(ranked[0].p)];
+    const top = products.map((p) => ({ p, s: scoreProduct(q, p) })).sort((a, b) => b.s - a.s)[0];
+    if (!top || top.s < 1.5) return []; // nothing that plausibly matches
+    return [productToQuote(top.p)];
   },
 };

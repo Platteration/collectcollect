@@ -158,7 +158,7 @@ function exteriorFor(description: SteamDescription): Exterior | null {
   const name = description.market_hash_name ?? "";
   const match = /\(([^)]+)\)\s*$/.exec(name);
   if (!match) return null;
-  const printed = match[1].toLowerCase().replace(/[^a-z]/g, "");
+  const printed = (match[1] ?? "").toLowerCase().replace(/[^a-z]/g, "");
   return EXTERIOR_IDS.find((id) => id.replace(/_/g, "") === printed) ?? null;
 }
 
@@ -189,7 +189,7 @@ export function stickersFrom(description: SteamDescription): AppliedSticker[] {
   if (!blob) return [];
   const label = /Sticker:\s*([^<]+)/.exec(blob.replace(/<br\s*\/?>/gi, " "));
   if (!label) return [];
-  return label[1]
+  return (label[1] ?? "")
     .split(",")
     .map((name) => name.trim())
     .filter(Boolean)
@@ -200,7 +200,7 @@ export function stickersFrom(description: SteamDescription): AppliedSticker[] {
 export function nameTagFrom(description: SteamDescription): string | null {
   for (const warning of description.fraudwarnings ?? []) {
     const match = /Name Tag:\s*''(.*)''\s*$/.exec(warning);
-    if (match) return match[1].trim() || null;
+    if (match) return (match[1] ?? "").trim() || null;
   }
   return null;
 }
@@ -217,7 +217,7 @@ export function tradableAfterFrom(description: SteamDescription): string | null 
   for (const entry of description.owner_descriptions ?? []) {
     const match = /Tradable After\s+(.+?)(?:\s*\(|$)/.exec(entry.value ?? "");
     if (!match) continue;
-    const when = new Date(match[1].trim());
+    const when = new Date((match[1] ?? "").trim());
     if (!Number.isNaN(when.getTime())) return when.toISOString();
   }
   return null;

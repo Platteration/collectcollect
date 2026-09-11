@@ -29,27 +29,32 @@ export async function fetchQuotes(
   query: CardQuery,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ quotes: PriceQuote[]; errors: PriceSummary["errors"] }> {
-  const results = await Promise.allSettled(
-    providersFor(query.game).map(async (p) => {
+  // Each outcome carries its own provider, so a failure is attributed without
+  // lining results up against the provider list by position.
+  type Outcome = { quotes: PriceQuote[] } | { error: PriceSummary["errors"][number] };
+  const outcomes = await Promise.all(
+    providersFor(query.game).map(async (p): Promise<Outcome> => {
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new ProviderError(p.id, `${p.label} timed out`)), 20_000),
       );
-      return Promise.race([p.lookup(query, fetchImpl), timeout]);
+      try {
+        return { quotes: await Promise.race([p.lookup(query, fetchImpl), timeout]) };
+      } catch (err) {
+        return {
+          error: {
+            source: err instanceof ProviderError ? err.source : p.id,
+            message: err instanceof Error ? err.message : String(err),
+          },
+        };
+      }
     }),
   );
   const quotes: PriceQuote[] = [];
   const errors: PriceSummary["errors"] = [];
-  const active = providersFor(query.game);
-  results.forEach((r, i) => {
-    if (r.status === "fulfilled") quotes.push(...r.value);
-    else {
-      const err = r.reason;
-      errors.push({
-        source: err instanceof ProviderError ? err.source : active[i].id,
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  });
+  for (const o of outcomes) {
+    if ("quotes" in o) quotes.push(...o.quotes);
+    else errors.push(o.error);
+  }
   return { quotes, errors };
 }
 
@@ -148,12 +153,12 @@ export function summarize(
     const keys = gradeLookupKeys(owner.gradingCompany, owner.grade);
     const hit = keys.find((k) => k in graded);
     if (hit) {
-      yourCopyValue = graded[hit];
+      yourCopyValue = graded[hit] ?? null;
       yourCopyBasis = `${hit} price from ${gradedSource}.`;
     } else {
       const est = keys.find((k) => k in estimatedGraded);
       if (est) {
-        yourCopyValue = estimatedGraded[est];
+        yourCopyValue = estimatedGraded[est] ?? null;
         yourCopyBasis = `Estimated: ungraded price × ${settings.gradeMultipliers[est]} (${est} multiplier from Settings).`;
       } else if (ungraded) {
         yourCopyValue = ungraded;

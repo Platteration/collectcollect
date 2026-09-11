@@ -5,6 +5,12 @@ import { costBasis, listLots, listSaleLots, verifyLotInvariant } from "@/lib/acq
 import { deleteSale, listSalesForCard, recordSale } from "@/lib/sales";
 import { realizedReturn } from "@/lib/analytics";
 
+function at<T>(xs: readonly T[], i: number): T {
+  const x = xs[i];
+  if (x === undefined) throw new Error(`expected an element at ${i}`);
+  return x;
+}
+
 const lots = (cardId: number) => listLots(cardId).map((l) => ({ quantity: l.quantity, remaining: l.remaining, unitCost: l.unitCost }));
 
 describe("what each copy cost", () => {
@@ -129,13 +135,13 @@ describe("what each copy cost", () => {
       { quantity: 1, remaining: 0, unitCost: 100 },
       { quantity: 1, remaining: 1, unitCost: 300 },
     ]);
-    expect(listSalesForCard(card.id)[0].unitCost).toBe(100);
+    expect(listSalesForCard(card.id)[0]?.unitCost).toBe(100);
   });
 
   it("refuses to unpick a purchase that has already been sold from", () => {
     const card = createCard({ game: "pokemon", name: "Charizard", purchasePrice: 100 });
     recordSale(card.id, { quantity: 1, unitPrice: 500 });
-    const lot = listLots(card.id)[0];
+    const lot = at(listLots(card.id), 0);
     expect(() => removeAcquisition(lot.id)).toThrow(/already been sold/);
   });
 
@@ -156,7 +162,7 @@ describe("what each copy cost", () => {
     const sale = recordSale(a.id, { quantity: 2, unitPrice: 400 });
     recordSale(b.id, { quantity: 1, unitPrice: 9000 });
     deleteSale(sale.id);
-    removeAcquisition(listLots(b.id)[1].id);
+    removeAcquisition(at(listLots(b.id), 1).id);
     expect(verifyLotInvariant()).toEqual([]);
     expect(listCards().every((c) => c.quantity === listLots(c.id).reduce((n, l) => n + l.remaining, 0))).toBe(true);
   });
@@ -204,7 +210,7 @@ describe("collections that predate lots", () => {
     expect(lots(2)).toEqual([{ quantity: 1, remaining: 1, unitCost: null }]);
     // Sold down to nothing, but the lot still records what was once held.
     expect(lots(3)).toEqual([{ quantity: 2, remaining: 0, unitCost: 50 }]);
-    expect(listLots(1)[0].acquiredAt).toBe(stamp);
+    expect(listLots(1)[0]?.acquiredAt).toBe(stamp);
     expect(verifyLotInvariant()).toEqual([]);
 
     // Reopening does not do it twice.

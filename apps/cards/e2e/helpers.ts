@@ -11,7 +11,8 @@ export async function cardPhoto(page: Page, rgb: [number, number, number]): Prom
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     return canvas.toDataURL("image/jpeg", 0.8);
   }, rgb);
-  return { name: `card-${rgb.join("-")}.jpg`, mimeType: "image/jpeg", buffer: Buffer.from(dataUrl.split(",")[1], "base64") };
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  return { name: `card-${rgb.join("-")}.jpg`, mimeType: "image/jpeg", buffer: Buffer.from(base64, "base64") };
 }
 
 export interface StubCard {
@@ -30,6 +31,7 @@ export async function stubIdentify(page: Page, cards: StubCard[]) {
   let i = 0;
   await page.route("**/api/identify", async (route) => {
     const c = cards[Math.min(i++, cards.length - 1)];
+    if (c === undefined) throw new Error("stubIdentify needs at least one card to answer with");
     await route.fulfill({
       status: 200,
       contentType: "application/json",

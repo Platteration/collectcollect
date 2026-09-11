@@ -20,7 +20,7 @@ describe("sales", () => {
     recordSale(card.id, { unitPrice: 90 });
     const { updateCard } = await import("@/lib/cards");
     updateCard(card.id, { purchasePrice: 999 });
-    expect(listSalesForCard(card.id)[0].unitCost).toBe(50);
+    expect(listSalesForCard(card.id)[0]?.unitCost).toBe(50);
   });
 
   it("refuses to sell more copies than are owned, or nonsense numbers", () => {
@@ -47,7 +47,7 @@ describe("sales", () => {
     recordSale(a.id, { unitPrice: 40 });
     const rows = listSales();
     expect(rows[0]).toMatchObject({ cardName: "Pikachu", game: "pokemon" });
-    expect(rows[0].cardDetail).toBe("Jungle · #60/64 · 1999");
+    expect(rows[0]?.cardDetail).toBe("Jungle · #60/64 · 1999");
   });
 
   it("sums realized gains, netting fees and cost", () => {

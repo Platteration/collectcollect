@@ -266,7 +266,7 @@ describe("the collection routes", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toContain("zip");
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(String.fromCharCode(bytes[0], bytes[1])).toBe("PK");
+    expect(String.fromCharCode(...bytes.subarray(0, 2))).toBe("PK");
   });
 });
 

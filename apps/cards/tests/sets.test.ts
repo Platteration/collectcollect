@@ -65,7 +65,7 @@ describe("checklist providers", () => {
     ]);
     const list = await yugiohSets.checklist(hint({ game: "yugioh", setName: "Legend of Blue Eyes White Dragon" }), fetchImpl);
     expect(list?.cards.map((c) => `${c.number} ${c.name}`)).toEqual(["LOB-001 Blue-Eyes White Dragon", "LOB-005 Dark Magician"]);
-    expect(list?.cards[1].rarity).toBe("Ultra Rare");
+    expect(list?.cards[1]?.rarity).toBe("Ultra Rare");
     expect(await yugiohSets.checklist(hint({ game: "yugioh", setName: "Nope" }), fakeFetch([["cardset=", {}, 400]]))).toBeNull();
   });
 });

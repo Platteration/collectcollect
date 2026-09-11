@@ -45,8 +45,8 @@ describe("finding the inventory when nothing says where it is", () => {
     process.chdir(app);
     expect(dataDir()).toBe(path.join(app, "data"));
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toContain(path.join(root, "data"));
-    expect(warn.mock.calls[0][0]).toContain("SKINS_DATA_DIR");
+    expect(warn.mock.calls[0]?.[0]).toContain(path.join(root, "data"));
+    expect(warn.mock.calls[0]?.[0]).toContain("SKINS_DATA_DIR");
     // Once, not on every request.
     dataDir();
     expect(warn).toHaveBeenCalledTimes(1);

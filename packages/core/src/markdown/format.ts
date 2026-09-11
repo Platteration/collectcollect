@@ -145,15 +145,16 @@ export function readSection(body: string, heading: string, minLevel = 2): string
   const wanted = heading.trim().toLowerCase();
   let start = -1;
   let level = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const match = /^(#{1,6})\s+(.*)$/.exec(lines[i]);
+  for (const [i, line] of lines.entries()) {
+    const match = /^(#{1,6})\s+(.*)$/.exec(line);
     if (!match) continue;
+    const [, hashes = "", title = ""] = match;
     if (start === -1) {
-      if (match[1].length >= minLevel && match[2].trim().toLowerCase() === wanted) {
+      if (hashes.length >= minLevel && title.trim().toLowerCase() === wanted) {
         start = i + 1;
-        level = match[1].length;
+        level = hashes.length;
       }
-    } else if (match[1].length <= level) {
+    } else if (hashes.length <= level) {
       return lines.slice(start, i).join("\n").trim();
     }
   }
@@ -164,8 +165,8 @@ export function readSection(body: string, heading: string, minLevel = 2): string
 export function readFenced(body: string, heading: string, language = "json"): string | null {
   const section = readSection(body, heading);
   if (!section) return null;
-  const match = new RegExp("```" + language + "\\n([\\s\\S]*?)```").exec(section);
-  return match ? match[1].trim() : null;
+  const inner = new RegExp("```" + language + "\\n([\\s\\S]*?)```").exec(section)?.[1];
+  return inner === undefined ? null : inner.trim();
 }
 
 /** File-system-safe, readable stem for a card: `0007-charizard-base-set`. */

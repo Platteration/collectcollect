@@ -17,6 +17,12 @@ const STEAM_ID = "76561198000000001";
 
 beforeEach(() => setDb(openDatabase(":memory:")));
 
+function at<T>(xs: readonly T[], i: number): T {
+  const x = xs[i];
+  if (x === undefined) throw new Error(`expected an element at ${i}`);
+  return x;
+}
+
 /** A fetch stub answering with one recorded body. */
 function answering(body: unknown, status = 200): typeof fetch {
   return vi.fn(async () =>
@@ -118,14 +124,14 @@ describe("parsing an inventory", () => {
       stattrak: false,
       assetId: "44112233",
     });
-    expect(items[0].imageUrl).toContain("IconHash123");
-    expect(items[0].inspectLink).toContain("A44112233");
-    expect(items[0].inspectLink).toContain(STEAM_ID);
+    expect(items[0]?.imageUrl).toContain("IconHash123");
+    expect(items[0]?.inspectLink).toContain("A44112233");
+    expect(items[0]?.inspectLink).toContain(STEAM_ID);
   });
 
   it("leaves the float and the pattern unknown, because Steam does not send them", () => {
     const payload = inventory([description()], [{ assetid: "1", classid: "310776560", instanceid: "302028390", amount: "1" }]);
-    const [item] = parseInventory(payload, STEAM_ID).items;
+    const item = at(parseInventory(payload, STEAM_ID).items, 0);
     // A zero here would read as a pristine Factory New, which is the most
     // valuable thing a skin can be.
     expect(item.floatValue).toBeUndefined();
@@ -155,9 +161,9 @@ describe("parsing an inventory", () => {
     );
     const { items } = parseInventory(payload, STEAM_ID);
     expect(items).toHaveLength(1);
-    expect(items[0].quantity).toBe(3);
+    expect(items[0]?.quantity).toBe(3);
     // Five cases pooled into one row cannot claim one of the five asset ids.
-    expect(items[0].assetId).toBeNull();
+    expect(items[0]?.assetId).toBeNull();
   });
 
   it("keeps two of the same weapon as two objects", () => {
@@ -186,10 +192,7 @@ describe("parsing an inventory", () => {
       ],
     });
     const [item] = parseInventory(inventory([knife], [{ assetid: "9", classid: "33333", instanceid: "302028390" }]), STEAM_ID).items;
-    expect(item.category).toBe("knife");
-    expect(item.rarity).toBe("extraordinary");
-    expect(item.weapon).toBe("Karambit");
-    expect(item.exterior).toBe("factory_new");
+    expect(item).toMatchObject({ category: "knife", rarity: "extraordinary", weapon: "Karambit", exterior: "factory_new" });
   });
 
   it("reads StatTrak and Souvenir from the quality tag or the name", () => {
@@ -227,7 +230,7 @@ describe("parsing an inventory", () => {
   it("falls back to the wear tier printed in the name when there is no tag", () => {
     const noTag = description({ tags: [{ category: "Type", internal_name: "CSGO_Type_Rifle" }] });
     const [item] = parseInventory(inventory([noTag], [{ assetid: "1", classid: "310776560", instanceid: "302028390" }]), STEAM_ID).items;
-    expect(item.exterior).toBe("field_tested");
+    expect(item?.exterior).toBe("field_tested");
   });
 
   it("counts an asset whose description Steam did not send, instead of dropping it silently", () => {
@@ -261,7 +264,7 @@ describe("the details Steam hides in prose", () => {
     // Steam's blob has no wear in it. Zero would say "pristine", which is the
     // most valuable a sticker can be.
     const [sticker] = stickersFrom(description({ descriptions: [{ name: "sticker_info", value: "Sticker: Crown (Foil)" }] }));
-    expect(sticker.wear).toBeNull();
+    expect(sticker?.wear).toBeNull();
   });
 
   it("has no stickers when there is no blob", () => {
@@ -300,21 +303,21 @@ describe("bringing an inventory in twice", () => {
 
   it("does not grow a stack on a second read of the same inventory", () => {
     const payload = casesInventory(2);
-    expect(syncFromInventory(parseInventory(payload, STEAM_ID).items[0]).result).toBe("created");
+    expect(syncFromInventory(at(parseInventory(payload, STEAM_ID).items, 0)).result).toBe("created");
     // The second read says two, not four. Treating an inventory reading as an
     // addition would double every stack, and an import is exactly the thing
     // people run more than once.
-    expect(syncFromInventory(parseInventory(payload, STEAM_ID).items[0]).result).toBe("unchanged");
-    const item = listItems()[0];
+    expect(syncFromInventory(at(parseInventory(payload, STEAM_ID).items, 0)).result).toBe("unchanged");
+    const item = at(listItems(), 0);
     expect(item.quantity).toBe(2);
     expect(listLots(item.id)).toHaveLength(1);
   });
 
   it("records copies that appeared since the last read as a purchase nobody priced", () => {
-    syncFromInventory(parseInventory(casesInventory(2), STEAM_ID).items[0]);
-    const outcome = syncFromInventory(parseInventory(casesInventory(5), STEAM_ID).items[0]);
+    syncFromInventory(at(parseInventory(casesInventory(2), STEAM_ID).items, 0));
+    const outcome = syncFromInventory(at(parseInventory(casesInventory(5), STEAM_ID).items, 0));
     expect(outcome).toMatchObject({ result: "increased", by: 3 });
-    const item = listItems()[0];
+    const item = at(listItems(), 0);
     expect(item.quantity).toBe(5);
     expect(listLots(item.id).map((l) => [l.quantity, l.unitCost])).toEqual([
       [2, null],
@@ -324,19 +327,19 @@ describe("bringing an inventory in twice", () => {
   });
 
   it("follows a stack down when copies left by some route this app never saw", () => {
-    syncFromInventory(parseInventory(casesInventory(5), STEAM_ID).items[0]);
-    const outcome = syncFromInventory(parseInventory(casesInventory(1), STEAM_ID).items[0]);
+    syncFromInventory(at(parseInventory(casesInventory(5), STEAM_ID).items, 0));
+    const outcome = syncFromInventory(at(parseInventory(casesInventory(1), STEAM_ID).items, 0));
     expect(outcome).toMatchObject({ result: "decreased", by: 4 });
-    expect(listItems()[0].quantity).toBe(1);
+    expect(listItems()[0]?.quantity).toBe(1);
     expect(verifyLotInvariant()).toEqual([]);
   });
 
   it("keeps what a stack cost when its count comes back the same", () => {
-    const [first] = parseInventory(casesInventory(2), STEAM_ID).items;
+    const first = at(parseInventory(casesInventory(2), STEAM_ID).items, 0);
     const created = syncFromInventory(first);
     // The owner fills in what they paid; a later import must not wipe it.
     updateItem(created.item.id, { purchasePrice: 1.4 });
-    syncFromInventory(parseInventory(casesInventory(2), STEAM_ID).items[0]);
+    syncFromInventory(at(parseInventory(casesInventory(2), STEAM_ID).items, 0));
     expect(getItem(created.item.id)!.purchasePrice).toBe(1.4);
   });
 
@@ -367,11 +370,11 @@ describe("bringing an inventory in twice", () => {
     // has to mean "not known", or every re-import would unlock everything.
     const locked = description({ owner_descriptions: [{ value: "Tradable After Sep 15, 2026 (07:00:00) GMT" }] });
     const assets = [{ assetid: "1", classid: "310776560", instanceid: "302028390" }];
-    const [first] = parseInventory(inventory([locked], assets), STEAM_ID).items;
+    const first = at(parseInventory(inventory([locked], assets), STEAM_ID).items, 0);
     const created = syncFromInventory(first);
     expect(created.item.tradableAfter).toBe(new Date("Sep 15, 2026").toISOString());
 
-    const [again] = parseInventory(inventory([description()], assets), STEAM_ID).items;
+    const again = at(parseInventory(inventory([description()], assets), STEAM_ID).items, 0);
     expect(again.tradableAfter).toBeNull();
     const outcome = syncFromInventory(again);
     expect(outcome.result).toBe("updated");
@@ -384,7 +387,7 @@ describe("bringing an inventory in twice", () => {
       fraudwarnings: ["Name Tag: ''old faithful''"],
     });
     const assets = [{ assetid: "1", classid: "310776560", instanceid: "302028390" }];
-    const [first] = parseInventory(inventory([rich], assets), STEAM_ID).items;
+    const first = at(parseInventory(inventory([rich], assets), STEAM_ID).items, 0);
     const { item } = intakeItem(first);
     expect(item.stickers).toHaveLength(1);
     expect(item.nameTag).toBe("old faithful");
@@ -399,7 +402,7 @@ describe("bringing an inventory in twice", () => {
       descriptions: [],
       fraudwarnings: [],
     });
-    const [again] = parseInventory(inventory([bare], assets), STEAM_ID).items;
+    const again = at(parseInventory(inventory([bare], assets), STEAM_ID).items, 0);
     expect(again.stickers).toEqual([]);
     expect(again.rarity).toBeNull();
     const outcome = intakeItem(again);
@@ -415,14 +418,14 @@ describe("bringing an inventory in twice", () => {
 
   it("still takes a newer lock and a fresh set of stickers", () => {
     const assets = [{ assetid: "1", classid: "310776560", instanceid: "302028390" }];
-    const [first] = parseInventory(inventory([description()], assets), STEAM_ID).items;
+    const first = at(parseInventory(inventory([description()], assets), STEAM_ID).items, 0);
     const { item } = syncFromInventory(first);
 
     const changed = description({
       owner_descriptions: [{ value: "Tradable After Oct 1, 2026 (07:00:00) GMT" }],
       descriptions: [{ name: "sticker_info", value: "Sticker: Titan | Katowice 2014, Crown (Foil)" }],
     });
-    const [again] = parseInventory(inventory([changed], assets), STEAM_ID).items;
+    const again = at(parseInventory(inventory([changed], assets), STEAM_ID).items, 0);
     syncFromInventory(again);
     const now = getItem(item.id)!;
     expect(now.tradableAfter).toBe(new Date("Oct 1, 2026").toISOString());
@@ -431,7 +434,7 @@ describe("bringing an inventory in twice", () => {
 
   it("brings nothing in with a purchase price, because Steam does not know one", () => {
     const payload = inventory([description()], [{ assetid: "1", classid: "310776560", instanceid: "302028390" }]);
-    const [item] = parseInventory(payload, STEAM_ID).items;
+    const item = at(parseInventory(payload, STEAM_ID).items, 0);
     const outcome = intakeItem(item);
     expect(outcome.result).toBe("created");
     // Filling this in from the market price would make every item look like a

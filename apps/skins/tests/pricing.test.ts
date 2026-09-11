@@ -58,8 +58,8 @@ describe("Skinport", () => {
     await skinport.prime!(fetchImpl);
     const a = await skinport.lookup({ marketHashName: REDLINE }, fetchImpl);
     const b = await skinport.lookup({ marketHashName: "Clutch Case" }, fetchImpl);
-    expect(a[0].price).toBe(11.5);
-    expect(b[0].price).toBe(1.4);
+    expect(a[0]?.price).toBe(11.5);
+    expect(b[0]?.price).toBe(1.4);
     // One request for the whole inventory, which is the point of priming.
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
@@ -68,9 +68,9 @@ describe("Skinport", () => {
     const fetchImpl = routes([["api.skinport.com", SKINPORT_CATALOGUE]]);
     const [quote] = await skinport.lookup({ marketHashName: REDLINE }, fetchImpl);
     // suggested_price is 14.20. A price nobody is offering is not a price.
-    expect(quote.price).toBe(11.5);
-    expect(quote.volume).toBe(120);
-    expect(quote.url).toContain("skinport.com");
+    expect(quote?.price).toBe(11.5);
+    expect(quote?.volume).toBe(120);
+    expect(quote?.url).toContain("skinport.com");
   });
 
   it("has nothing to say about something nobody is selling", async () => {
@@ -94,7 +94,7 @@ describe("Steam", () => {
   it("reads a price overview", async () => {
     const [quote] = await steam.lookup({ marketHashName: REDLINE }, routes([["priceoverview", STEAM_OK]]));
     expect(quote).toMatchObject({ source: "steam", price: 12.34, volume: 1203 });
-    expect(quote.url).toContain("market/listings/730");
+    expect(quote?.url).toContain("market/listings/730");
   });
 
   it("falls back to the median when nobody is listing one, and says so", async () => {
@@ -102,9 +102,9 @@ describe("Steam", () => {
       { marketHashName: REDLINE },
       routes([["priceoverview", { success: true, median_price: "$9.50", volume: "3" }]]),
     );
-    expect(quote.price).toBe(9.5);
+    expect(quote?.price).toBe(9.5);
     // The label has to carry that, or a median reads as an ask.
-    expect(quote.sourceLabel).toMatch(/median/i);
+    expect(quote?.sourceLabel).toMatch(/median/i);
   });
 
   it("treats a name Steam does not list as an ordinary answer", async () => {
@@ -143,8 +143,8 @@ describe("CSFloat", () => {
       routes([["csfloat.com/api", { data: [{ id: "abc", price: 1199, item: { market_hash_name: REDLINE } }] }]]),
     );
     // Their prices are in cents.
-    expect(quote.price).toBe(11.99);
-    expect(quote.url).toContain("abc");
+    expect(quote?.price).toBe(11.99);
+    expect(quote?.url).toContain("abc");
   });
 
   it("says when the key is refused", async () => {
@@ -191,7 +191,7 @@ describe("folding the answers together", () => {
     expect(summary.yourCopyBasis).toBe("Your own price");
     // The market prices are still recorded; they are just not the answer.
     expect(summary.market).toBe(12.34);
-    expect(summary.quotes[0].source).toBe("manual");
+    expect(summary.quotes[0]?.source).toBe("manual");
   });
 
   it("says nothing was found rather than guessing a number", () => {
@@ -227,8 +227,8 @@ describe("what each market would actually pay", () => {
     // still does not appear among the markets that pay in money.
     expect(wallet.map((r) => r.market)).toEqual(["steam"]);
     expect(cash.map((r) => r.market)).toEqual(["csfloat", "skinport"]);
-    expect(cash[0].net).toBe(90.16);
-    expect(wallet[0].cashOut).toBe(false);
+    expect(cash[0]?.net).toBe(90.16);
+    expect(wallet[0]?.cashOut).toBe(false);
   });
 
   it("ignores a price typed in by hand, which is not a market", () => {
@@ -331,9 +331,9 @@ describe("alerts", () => {
     await refreshItem(getItem(item.id)!, routes([["api.skinport.com", dearer]]));
 
     const [alert] = listAlerts().filter((a) => a.kind === "price_move");
-    expect(alert.title).toMatch(/is up 74%/);
-    expect(alert.body).toContain("$11.50");
-    expect(alert.body).toContain("$20.00");
+    expect(alert?.title).toMatch(/is up 74%/);
+    expect(alert?.body).toContain("$11.50");
+    expect(alert?.body).toContain("$20.00");
   });
 
   it("stays quiet about a move too small to act on", async () => {
@@ -362,11 +362,11 @@ describe("alerts", () => {
       ]),
     );
     const [alert] = listAlerts().filter((a) => a.kind === "spread_opened");
-    expect(alert.title).toContain("CSFloat");
+    expect(alert?.title).toContain("CSFloat");
     // 95 × 0.98 = 93.10 against 100 × 0.88 = 88.00.
-    expect(alert.title).toContain("$5.10");
-    expect(alert.body).toContain("$93.10");
-    expect(alert.body).not.toContain("Steam");
+    expect(alert?.title).toContain("$5.10");
+    expect(alert?.body).toContain("$93.10");
+    expect(alert?.body).not.toContain("Steam");
   });
 
   it("says a spread cannot be acted on while the item is locked", async () => {
@@ -380,7 +380,7 @@ describe("alerts", () => {
       ]),
     );
     const [alert] = listAlerts().filter((a) => a.kind === "spread_opened");
-    expect(alert.body).toMatch(/trade locked until/);
+    expect(alert?.body).toMatch(/trade locked until/);
   });
 
   it("says when a lock has ended, once", async () => {

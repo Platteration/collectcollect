@@ -32,8 +32,8 @@ describe("recording a sale", () => {
     addAcquisition(item.id, { quantity: 2, unitCost: 4 });
     const sale = recordSale(item.id, { quantity: 3, unitPrice: 10 });
     expect(listSaleLots(sale.id)).toEqual([
-      { acquisitionId: listLots(item.id)[0].id, quantity: 2, unitCost: 1 },
-      { acquisitionId: listLots(item.id)[1].id, quantity: 1, unitCost: 4 },
+      { acquisitionId: listLots(item.id)[0]?.id, quantity: 2, unitCost: 1 },
+      { acquisitionId: listLots(item.id)[1]?.id, quantity: 1, unitCost: 4 },
     ]);
   });
 
@@ -107,10 +107,10 @@ describe("the sales ledger", () => {
     const item = seedRedline({ purchasePrice: 40, nameTag: "old faithful" });
     recordSale(item.id, { quantity: 1, unitPrice: 65 });
     const [row] = listSales();
-    expect(row.itemName).toBe("AK-47 | Redline (Field-Tested)");
-    expect(row.itemDetail).toContain("Field-Tested");
-    expect(row.itemDetail).toContain("float 0.22");
-    expect(row.itemDetail).toContain("old faithful");
+    expect(row?.itemName).toBe("AK-47 | Redline (Field-Tested)");
+    expect(row?.itemDetail).toContain("Field-Tested");
+    expect(row?.itemDetail).toContain("float 0.22");
+    expect(row?.itemDetail).toContain("old faithful");
   });
 });
 

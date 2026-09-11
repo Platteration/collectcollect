@@ -29,9 +29,9 @@ describe("alertsForRefresh", () => {
     const before = summary({ yourCopyValue: 100 });
     const up = alertsForRefresh(card(), before, summary({ yourCopyValue: 130 }), [], DEFAULT_SETTINGS);
     expect(up.map((a) => a.kind)).toContain("price_move");
-    expect(up[0].title).toMatch(/up 30.0%/);
+    expect(up[0]?.title).toMatch(/up 30.0%/);
     const down = alertsForRefresh(card(), before, summary({ yourCopyValue: 70 }), [], DEFAULT_SETTINGS);
-    expect(down[0].title).toMatch(/down 30.0%/);
+    expect(down[0]?.title).toMatch(/down 30.0%/);
     const small = alertsForRefresh(card(), before, summary({ yourCopyValue: 105 }), [], DEFAULT_SETTINGS);
     expect(small.map((a) => a.kind)).not.toContain("price_move");
   });

@@ -5,6 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { assertZippable, crc32, zipStream } from "@collectcollect/core/zip";
 
+function at<T>(xs: readonly T[], i: number): T {
+  const x = xs[i];
+  if (x === undefined) throw new Error(`expected an element at ${i}`);
+  return x;
+}
+
 async function build(entries: Array<{ name: string; body: Uint8Array; chunkSize?: number }>): Promise<Buffer> {
   const parts: Uint8Array[] = [];
   for await (const chunk of zipStream(
@@ -120,7 +126,7 @@ describe("backup archive", () => {
 
     // The extracted database opens and still holds the card.
     const restored = openDatabase(pathm.join(dir, "out", "collectcollect.db"));
-    expect((restored.prepare("SELECT name FROM cards").all() as Array<{ name: string }>)[0].name).toBe("Backed-up Charizard");
+    expect((restored.prepare("SELECT name FROM cards").all() as Array<{ name: string }>)[0]?.name).toBe("Backed-up Charizard");
 
     delete process.env.DATA_DIR;
     fsm.rmSync(dir, { recursive: true, force: true });
@@ -166,7 +172,7 @@ describe("zip reader", () => {
     // Corrupting a payload byte trips the checksum. The header is 30 bytes and
     // the name 13, so the payload starts at 43.
     const corruptPayload = new Uint8Array(good);
-    corruptPayload[50] ^= 0xff;
+    corruptPayload[50] = (corruptPayload[50] ?? 0) ^ 0xff;
     await expect(readZip(corruptPayload, limits)).rejects.toThrow(/failed its checksum/);
     // Renaming the entry in its local header, but not the directory, is caught.
     const renamed = new Uint8Array(good);
@@ -405,10 +411,11 @@ describe("putting a replaced collection back", () => {
 
     const listed = replacedCollections();
     expect(listed).toHaveLength(1);
-    expect(listed[0]).toMatchObject({ name: pathm.basename(restored.movedAsideTo), cards: 2, photos: 2 });
-    expect(new Date(listed[0].replacedAt).getTime()).toBeGreaterThan(0);
+    const replaced = at(listed, 0);
+    expect(replaced).toMatchObject({ name: pathm.basename(restored.movedAsideTo), cards: 2, photos: 2 });
+    expect(new Date(replaced.replacedAt).getTime()).toBeGreaterThan(0);
 
-    const result = await putBack(listed[0].name);
+    const result = await putBack(replaced.name);
     expect(result).toMatchObject({ cards: 2, photos: 2 });
     expect(listCards().map((c) => c.name).sort()).toEqual(["Before the restore", "Only in the replaced collection"]);
     expect(fsm.readdirSync(uploadsDir()).sort()).toEqual(["aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg", later]);
@@ -477,7 +484,7 @@ describe("putting a replaced collection back", () => {
     expect(listCards().map((c) => c.name)).toEqual(["Before the restore"]);
     const aside = fsm.readdirSync(dir).filter((n) => n.startsWith("replaced-"));
     expect(aside).toHaveLength(1);
-    expect(fsm.existsSync(pathm.join(dir, aside[0], "collectcollect.db"))).toBe(true);
+    expect(fsm.existsSync(pathm.join(dir, at(aside, 0), "collectcollect.db"))).toBe(true);
     delete process.env.DATA_DIR;
     setDb(undefined);
     fsm.rmSync(dir, { recursive: true, force: true });

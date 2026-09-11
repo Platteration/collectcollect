@@ -30,7 +30,7 @@ describe("value over time", () => {
     addSnapshot(rifle.id, priced("2026-03-01T00:00:00.000Z", 55));
     const points = portfolioSeries(listItems(), allSnapshots());
     expect(points.map((p) => p.value)).toEqual([40, 50, 65]);
-    expect(points[2].priced).toBe(2);
+    expect(points[2]?.priced).toBe(2);
   });
 
   it("ignores an item that has since been deleted", () => {
@@ -46,7 +46,7 @@ describe("value over time", () => {
     addSnapshot(b.id, priced("2026-01-01T00:00:00.000Z", 3));
     const points = portfolioSeries(listItems(), allSnapshots());
     expect(points).toHaveLength(1);
-    expect(points[0].value).toBe(5);
+    expect(points[0]?.value).toBe(5);
   });
 });
 
@@ -77,7 +77,7 @@ describe("ranges", () => {
   it("measures change from the start of what is shown", () => {
     expect(change(sliceRange(points, "1W", now))).toMatchObject({ amount: 10, percent: 50 });
     expect(change(sliceRange(points, "1M", now))).toMatchObject({ amount: 20, percent: 200 });
-    expect(change([points[0]])).toMatchObject({ amount: 0, percent: null });
+    expect(change(points.slice(0, 1))).toMatchObject({ amount: 0, percent: null });
   });
 });
 
@@ -124,7 +124,7 @@ describe("allocation", () => {
 
     const byRarity = allocationBy(listItems(), (i) => i.rarity, price);
     expect(byRarity.rows).toHaveLength(1);
-    expect(byRarity.rows[0].share).toBeCloseTo(2 / 3, 10);
+    expect(byRarity.rows[0]?.share).toBeCloseTo(2 / 3, 10);
     expect(byRarity.unclassified).toBe(100);
     expect(byRarity.unclassifiedShare).toBeCloseTo(1 / 3, 10);
 
@@ -139,7 +139,7 @@ describe("allocation", () => {
     addSnapshot(cases.id, priced("2026-01-01T00:00:00.000Z", 2.5));
     const latest = latestSnapshotsByItem();
     const split = allocationBy(listItems(), (i) => i.category, (i) => valueOf(i, latest.get(i.id)).value);
-    expect(split.rows[0].value).toBe(10);
+    expect(split.rows[0]?.value).toBe(10);
   });
 
   it("has nothing to show for an empty inventory", () => {

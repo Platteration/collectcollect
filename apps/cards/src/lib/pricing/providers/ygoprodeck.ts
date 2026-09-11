@@ -38,10 +38,10 @@ export function findSet(card: YgoCard, q: CardQuery) {
     if (byPrefix.length === 1) return byPrefix[0];
   }
   if (q.setName) {
-    const ranked = sets
+    const top = sets
       .map((s) => ({ s, score: tokenOverlap(q.setName, s.set_name) }))
-      .sort((a, b) => b.score - a.score);
-    if (ranked[0]?.score >= 0.5) return ranked[0].s;
+      .sort((a, b) => b.score - a.score)[0];
+    if (top && top.score >= 0.5) return top.s;
   }
   return null;
 }
@@ -65,9 +65,11 @@ export const ygoprodeckProvider: PriceProvider = {
     }
     if (cards.length === 0) return [];
 
-    const best = cards
+    const top = cards
       .map((c) => ({ c, s: (c.name.toLowerCase() === q.name.toLowerCase() ? 3 : 0) + tokenOverlap(q.name, c.name) }))
-      .sort((a, b) => b.s - a.s)[0].c;
+      .sort((a, b) => b.s - a.s)[0];
+    if (!top) return [];
+    const best = top.c;
     const set = findSet(best, q);
     const prices = best.card_prices?.[0] ?? {};
     const variants: Record<string, number> = {};

@@ -68,11 +68,11 @@ describe("an item as a document", () => {
     // $0.035 copy written as $0.04 would come back as a different purchase.
     const item = seedCase({ quantity: 10, purchasePrice: 0.035 });
     const text = itemMarkdown({ item, sales: [], snapshots: [], acquisitions: listLots(item.id) });
-    expect(readTable(text, "Acquisitions")[0][3]).toBe("$0.035");
-    expect(parseItemMarkdown(text)!.acquisitions[0].unitCost).toBe(0.035);
+    expect(readTable(text, "Acquisitions")[0]?.[3]).toBe("$0.035");
+    expect(parseItemMarkdown(text)!.acquisitions[0]?.unitCost).toBe(0.035);
     // A whole number of cents still reads the way people write money.
     const whole = seedCase({ marketHashName: "Chroma Case", quantity: 1, purchasePrice: 1 });
-    expect(readTable(itemMarkdown({ item: whole, sales: [], snapshots: [], acquisitions: listLots(whole.id) }), "Acquisitions")[0][3]).toBe("$1.00");
+    expect(readTable(itemMarkdown({ item: whole, sales: [], snapshots: [], acquisitions: listLots(whole.id) }), "Acquisitions")[0]?.[3]).toBe("$1.00");
   });
 
   it("does not lose float precision on the way through", () => {
@@ -106,12 +106,12 @@ describe("an item as a document", () => {
       itemMarkdown({ item: unknown, sales: [], snapshots: [], acquisitions: listLots(unknown.id) }),
       "Acquisitions",
     )[0];
-    expect(freeRow[3]).toBe("$0.00");
-    expect(unknownRow[3]).toBe("");
-    expect(parseItemMarkdown(itemMarkdown({ item: free, sales: [], snapshots: [], acquisitions: listLots(free.id) }))!.acquisitions[0].unitCost).toBe(0);
+    expect(freeRow?.[3]).toBe("$0.00");
+    expect(unknownRow?.[3]).toBe("");
+    expect(parseItemMarkdown(itemMarkdown({ item: free, sales: [], snapshots: [], acquisitions: listLots(free.id) }))!.acquisitions[0]?.unitCost).toBe(0);
     expect(
       parseItemMarkdown(itemMarkdown({ item: unknown, sales: [], snapshots: [], acquisitions: listLots(unknown.id) }))!.acquisitions[0]
-        .unitCost,
+        ?.unitCost,
     ).toBeNull();
   });
 
@@ -175,11 +175,11 @@ describe("the folder on disk", () => {
     recordSale(item.id, { quantity: 3, unitPrice: 10, venue: "Skinport" });
     const text = fileFor(item.id);
     const [row] = readTable(text, "Sales");
-    expect(row[1]).toBe("3");
-    expect(row[5]).toBe("Skinport");
+    expect(row?.[1]).toBe("3");
+    expect(row?.[5]).toBe("Skinport");
     // The provenance column: two dollar copies and one four-dollar copy.
-    expect(row[7]).toContain("2 @ $1.00");
-    expect(row[7]).toContain("1 @ $4.00");
+    expect(row?.[7]).toContain("2 @ $1.00");
+    expect(row?.[7]).toContain("1 @ $4.00");
   });
 });
 
@@ -348,5 +348,7 @@ describe("rewriting the folder", () => {
 
 /** The id of the one sale an imported item has. */
 function importedSale(itemId: number): number {
-  return listSalesForItem(itemId)[0].id;
+  const sale = listSalesForItem(itemId)[0];
+  if (sale === undefined) throw new Error(`expected a sale on item ${itemId}`);
+  return sale.id;
 }

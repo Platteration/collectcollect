@@ -90,26 +90,31 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
     async (files: File[]) => {
       const images = files.filter((f) => f.type.startsWith("image/"));
       if (images.length === 0) return;
-      const fresh: Item[] = images.map((f) => ({
-        key: nextKey(),
-        uploads: [],
-        previews: [URL.createObjectURL(f)],
-        status: "uploading",
-        error: null,
-        identification: null,
-        form: emptyForm(),
-        price: null,
-        pricing: false,
-        savedId: null,
-        hint: "",
-        accentColor: null,
-        duplicates: null,
+      // Each item keeps hold of its own file, so the upload below never has to
+      // find it again by position.
+      const fresh: Array<{ item: Item; file: File }> = images.map((file) => ({
+        file,
+        item: {
+          key: nextKey(),
+          uploads: [],
+          previews: [URL.createObjectURL(file)],
+          status: "uploading",
+          error: null,
+          identification: null,
+          form: emptyForm(),
+          price: null,
+          pricing: false,
+          savedId: null,
+          hint: "",
+          accentColor: null,
+          duplicates: null,
+        },
       }));
-      setItems((prev) => [...fresh, ...prev]);
+      setItems((prev) => [...fresh.map((f) => f.item), ...prev]);
       await Promise.all(
-        fresh.map(async (item, i) => {
+        fresh.map(async ({ item, file }) => {
           const fd = new FormData();
-          fd.append("files", images[i]);
+          fd.append("files", file);
           try {
             const { uploads } = await api<{ uploads: Array<{ name: string; color: string | null }> }>("/api/uploads", { method: "POST", body: fd });
             const names = uploads.map((u) => u.name);

@@ -147,9 +147,9 @@ export function alertsForRefresh(
   // between cash markets — a Steam listing that pays more in wallet funds is
   // not more money.
   const { cash } = proceedsByMarket(next.quotes, settings);
-  if (cash.length >= 2) {
-    const best = cash[0];
-    const worst = cash[cash.length - 1];
+  const best = cash[0];
+  const worst = cash[cash.length - 1];
+  if (cash.length >= 2 && best && worst) {
     const gap = best.net - worst.net;
     const percent = worst.net > 0 ? (gap / worst.net) * 100 : 0;
     if (gap >= settings.spreadMinAmount && percent >= settings.spreadMinPercent) {

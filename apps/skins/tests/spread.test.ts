@@ -33,10 +33,10 @@ describe("the spread view", () => {
     // Steam lists highest and nets the most, and is still not the answer.
     priced(item.id, 100, [quote("steam", 500), quote("skinport", 100), quote("csfloat", 95)]);
     const [row] = spreadView().worthDoing;
-    expect(row.cash.map((c) => c.market)).toEqual(["csfloat", "skinport"]);
-    expect(row.wallet.map((c) => c.market)).toEqual(["steam"]);
+    expect(row?.cash.map((c) => c.market)).toEqual(["csfloat", "skinport"]);
+    expect(row?.wallet.map((c) => c.market)).toEqual(["steam"]);
     // 95 × 0.98 = 93.10 against 100 × 0.88 = 88.00.
-    expect(row.gap).toBe(5.1);
+    expect(row?.gap).toBe(5.1);
   });
 
   it("has nothing to say when only one market is listing something", () => {
@@ -72,8 +72,8 @@ describe("the spread view", () => {
     const [row] = spreadView().worthDoing;
     // Nine cents each would never clear a dollar; thirty-five of them do, and
     // it is one listing either way.
-    expect(row.gap).toBe(0.09);
-    expect(row.total).toBe(3.15);
+    expect(row?.gap).toBe(0.09);
+    expect(row?.total).toBe(3.15);
   });
 
   it("still refuses a difference too small to be a real signal", () => {
@@ -92,7 +92,7 @@ describe("the spread view", () => {
     priced(locked.id, 100, [quote("skinport", 100), quote("csfloat", 95)]);
     const view = spreadView();
     expect(view.worthDoing).toHaveLength(1);
-    expect(view.worthDoing[0].locked).toBe(true);
+    expect(view.worthDoing[0]?.locked).toBe(true);
     expect(view.lockedCount).toBe(1);
   });
 
@@ -114,7 +114,7 @@ describe("the spread view", () => {
     // The knife is worth five hundred times more per copy, and moving it is
     // worth $51; moving the cases is worth $100.
     const [first, second] = spreadView().worthDoing;
-    expect(first.item.id).toBe(cases.id);
-    expect(second.item.id).toBe(knife.id);
+    expect(first?.item.id).toBe(cases.id);
+    expect(second?.item.id).toBe(knife.id);
   });
 });

@@ -45,7 +45,7 @@ export function pickVariantKey(variant: string | null | undefined, available: st
   if (v.includes("holo") || v.includes("foil")) prefer.push("holofoil", "unlimitedHolofoil");
   prefer.push("normal", "holofoil", "reverseHolofoil", "unlimitedHolofoil", "1stEditionNormal", "1stEditionHolofoil");
   for (const key of prefer) if (available.includes(key)) return key;
-  return available[0];
+  return available[0] ?? null;
 }
 
 function escapeQuery(s: string): string {
@@ -106,16 +106,24 @@ export const pokemonTcgProvider: PriceProvider = {
     }
     if (cards.length === 0) return [];
 
-    const best = cards.map((c) => ({ c, s: scoreCandidate(q, c) })).sort((a, b) => b.s - a.s)[0].c;
+    const top = cards.map((c) => ({ c, s: scoreCandidate(q, c) })).sort((a, b) => b.s - a.s)[0];
+    if (!top) return [];
+    const best = top.c;
     const fetchedAt = new Date().toISOString();
     const quotes: PriceQuote[] = [];
     const detail = `${best.set.name} · #${best.number}${best.rarity ? ` · ${best.rarity}` : ""}`;
 
     const prices = best.tcgplayer?.prices ?? {};
-    const keys = Object.keys(prices).filter((k) => toNumber(prices[k]?.market));
+    const market: Record<string, number> = {};
+    for (const [k, p] of Object.entries(prices)) {
+      const m = toNumber(p?.market);
+      if (m) market[k] = m;
+    }
+    const keys = Object.keys(market);
     const chosen = pickVariantKey(q.variant, keys);
+    const chosenMarket = chosen === null ? undefined : market[chosen];
     const variants: Record<string, number> = {};
-    for (const k of keys) variants[lookup(VARIANT_LABELS, k) ?? k] = round2(prices[k].market!);
+    for (const [k, m] of Object.entries(market)) variants[lookup(VARIANT_LABELS, k) ?? k] = round2(m);
     quotes.push({
       source: "pokemontcg",
       sourceLabel: "TCGplayer market (via Pokémon TCG API)",
@@ -123,7 +131,7 @@ export const pokemonTcgProvider: PriceProvider = {
       url: best.tcgplayer?.url ?? null,
       matchedName: best.name,
       matchedDetail: chosen ? `${detail} · ${lookup(VARIANT_LABELS, chosen) ?? chosen}` : detail,
-      ungraded: chosen ? round2(prices[chosen].market!) : null,
+      ungraded: chosenMarket === undefined ? null : round2(chosenMarket),
       ungradedVariants: variants,
       graded: {},
       fetchedAt,

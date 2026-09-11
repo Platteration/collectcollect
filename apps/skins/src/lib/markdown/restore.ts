@@ -201,7 +201,7 @@ function elsewhere(input: ItemInput): ItemRecord | null {
     if (byAsset) return byAsset;
   }
   const candidates = listByMarketHashName(input.marketHashName).filter((i) => isSameItem(i, input));
-  return candidates.length === 1 ? candidates[0] : null;
+  return candidates.length === 1 ? (candidates[0] ?? null) : null;
 }
 
 function eq(a: number | null | undefined, b: number | null | undefined): boolean {

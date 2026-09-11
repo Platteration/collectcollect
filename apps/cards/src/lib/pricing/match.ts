@@ -22,7 +22,7 @@ export function tokenOverlap(needle: string | null | undefined, haystack: string
 export function numberPart(cardNumber: string | null | undefined): string | null {
   if (!cardNumber) return null;
   const trimmed = cardNumber.trim().replace(/^#/, "");
-  const slash = trimmed.split("/")[0].trim();
+  const slash = (trimmed.split("/")[0] ?? "").trim();
   const dash = slash.includes("-") ? slash.split("-").pop()!.trim() : slash;
   return dash || null;
 }
@@ -32,7 +32,9 @@ export function normalizeNumber(n: string | null | undefined): string | null {
   const part = numberPart(n);
   if (!part) return null;
   const m = part.match(/^0*(\d+)([a-z]*)$/i);
-  return m ? `${m[1]}${m[2].toLowerCase()}` : part.toLowerCase();
+  if (!m) return part.toLowerCase();
+  const [, digits = "", suffix = ""] = m;
+  return `${digits}${suffix.toLowerCase()}`;
 }
 
 export function sameNumber(a: string | null | undefined, b: string | null | undefined): boolean {

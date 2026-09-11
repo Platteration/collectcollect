@@ -46,7 +46,8 @@ export function CollectionFiles({ status }: { status: CollectionStatus }) {
     // The file wins for every item it names: its purchases, sales and recorded
     // prices replace what is held. That is right for recovering an inventory
     // and wrong for a folder picked by mistake, so it is said before it is done.
-    const what = files.length === 1 ? files[0].name : `${files.length} files`;
+    const only = files.length === 1 ? files[0] : undefined;
+    const what = only ? only.name : `${files.length} files`;
     const ok = confirm(
       `Read ${what} back into the inventory? For every item those files describe, the purchases, sales and recorded prices held here are replaced by what the file says.`,
     );

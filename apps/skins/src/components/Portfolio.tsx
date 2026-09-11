@@ -53,7 +53,7 @@ export function Portfolio(props: Props) {
 
   const shown = useMemo(() => sliceRange(points, range), [points, range]);
   const delta = useMemo(() => change(shown), [shown]);
-  const latest = points.length ? points[points.length - 1].value : 0;
+  const latest = points[points.length - 1]?.value ?? 0;
   const headline = hover ? hover.value : latest;
   const up = delta.amount >= 0;
 

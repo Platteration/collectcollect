@@ -8,6 +8,12 @@ beforeEach(() => setDb(openDatabase(":memory:")));
 
 const csv = (...lines: string[]) => lines.join("\n");
 
+function at<T>(xs: readonly T[], i: number): T {
+  const x = xs[i];
+  if (x === undefined) throw new Error(`expected an element at ${i}`);
+  return x;
+}
+
 describe("reading a name", () => {
   it("knows what kind of item it is from how Steam names it", () => {
     expect(guessCategory("★ Karambit | Doppler (Factory New)")).toBe("knife");
@@ -44,7 +50,7 @@ describe("previewing a file", () => {
 
   it("fills in from the name what the file does not spell out", () => {
     const [row] = previewImport(csv("name", "StatTrak™ AK-47 | Redline (Field-Tested)")).rows;
-    expect(row.input).toMatchObject({
+    expect(row?.input).toMatchObject({
       category: "weapon",
       weapon: "AK-47",
       finish: "Redline",
@@ -58,16 +64,16 @@ describe("previewing a file", () => {
     // The tier in a name is derived from the float, so a file claiming both is
     // describing an object that cannot exist.
     const [row] = previewImport(csv("name,wear,float", "AK-47 | Redline (Field-Tested),Factory New,0.5")).rows;
-    expect(row.input!.exterior).toBe("battle_scarred");
-    expect(row.input!.floatValue).toBe(0.5);
+    expect(row?.input?.exterior).toBe("battle_scarred");
+    expect(row?.input?.floatValue).toBe(0.5);
   });
 
   it("drops a float that is not a wear value, and says it did", () => {
     const [row] = previewImport(csv("name,float", "AK-47 | Redline (Field-Tested),1.4")).rows;
-    expect(row.input!.floatValue).toBeNull();
-    expect(row.warning).toMatch(/not a wear value/);
+    expect(row?.input?.floatValue).toBeNull();
+    expect(row?.warning).toMatch(/not a wear value/);
     // The tier printed in the name still stands.
-    expect(row.input!.exterior).toBe("field_tested");
+    expect(row?.input?.exterior).toBe("field_tested");
   });
 
   it("takes a wear column in any of the forms people write it", () => {
@@ -79,7 +85,7 @@ describe("previewing a file", () => {
       ["Battle-Scarred", "battle_scarred"],
     ] as const) {
       const [row] = previewImport(csv("name,wear", `Glock-18 | Fade,${written}`)).rows;
-      expect(row.input!.exterior, written).toBe(expected);
+      expect(row?.input?.exterior, written).toBe(expected);
     }
   });
 
@@ -87,22 +93,22 @@ describe("previewing a file", () => {
     // The name alone says nothing here, but only weapons, knives and gloves
     // have wear at all — and a knife or a glove would carry a star.
     const [row] = previewImport(csv("name,float", "Glock-18 | Fade,0.01")).rows;
-    expect(row.input!.category).toBe("weapon");
-    expect(row.warning).toMatch(/taken as a weapon/);
+    expect(row?.input?.category).toBe("weapon");
+    expect(row?.warning).toMatch(/taken as a weapon/);
   });
 
   it("still has no answer for a row with nothing to go on", () => {
     const [row] = previewImport(csv("name,cost", "Mystery Object,5")).rows;
-    expect(row.input).toBeNull();
-    expect(row.problem).toMatch(/what kind of item/);
+    expect(row?.input).toBeNull();
+    expect(row?.problem).toMatch(/what kind of item/);
   });
 
   it("says which row it could not read instead of dropping it", () => {
     const preview = previewImport(csv("name,paid", "AK-47 | Redline (Field-Tested),42", ",13", "Mystery Object,5"));
     expect(preview.total).toBe(3);
     expect(preview.usable).toBe(1);
-    expect(preview.rows[1].problem).toMatch(/No item name/);
-    expect(preview.rows[2].problem).toMatch(/what kind of item/);
+    expect(preview.rows[1]?.problem).toMatch(/No item name/);
+    expect(preview.rows[2]?.problem).toMatch(/what kind of item/);
     // Line numbers point back at the file, counting the header as line 1.
     expect(preview.rows.map((r) => r.line)).toEqual([2, 3, 4]);
   });
@@ -110,18 +116,18 @@ describe("previewing a file", () => {
   it("takes a chosen kind for the rows that do not say", () => {
     const preview = previewImport(csv("name", "Mystery Object"), { category: "other" });
     expect(preview.usable).toBe(1);
-    expect(preview.rows[0].input!.category).toBe("other");
+    expect(preview.rows[0]?.input?.category).toBe("other");
   });
 
   it("does not let a prototype property pass as a kind of item", () => {
     // Through the column, and through the chosen default: neither is a category.
     const column = previewImport(csv("name,category", "Mystery Object,constructor"));
-    expect(column.rows[0].input).toBeNull();
-    expect(column.rows[0].problem).toMatch(/Unknown kind of item "constructor"/);
+    expect(column.rows[0]?.input).toBeNull();
+    expect(column.rows[0]?.problem).toMatch(/Unknown kind of item "constructor"/);
     const chosen = previewImport(csv("name", "Mystery Object"), { category: "constructor" as never });
     const applied = applyImport(chosen);
     expect(applied.created).toBe(0);
-    expect(applied.skipped[0].reason).toMatch(/category/i);
+    expect(applied.skipped[0]?.reason).toMatch(/category/i);
     expect(listItems()).toHaveLength(0);
   });
 
@@ -178,18 +184,19 @@ describe("applying a file", () => {
     applyImport(
       previewImport(csv("name,storage,tradelock", "★ Karambit | Doppler (Factory New),Backpack,2026-09-15")),
     );
-    const item = listItems()[0];
-    expect(item.storageUnit).toBe("Backpack");
-    expect(item.tradableAfter).toBe(new Date("2026-09-15").toISOString());
-    expect(item.category).toBe("knife");
-    expect(item.rarity).toBeNull();
+    expect(listItems()[0]).toMatchObject({
+      storageUnit: "Backpack",
+      tradableAfter: new Date("2026-09-15").toISOString(),
+      category: "knife",
+      rarity: null,
+    });
   });
 
   it("leaves a cost nobody wrote down as unknown rather than zero", () => {
     applyImport(previewImport(csv("name,qty", "Clutch Case,3")));
-    const item = listItems()[0];
+    const item = at(listItems(), 0);
     expect(item.purchasePrice).toBeNull();
-    expect(listLots(item.id)[0].unitCost).toBeNull();
+    expect(listLots(item.id)[0]?.unitCost).toBeNull();
     expect(getItem(item.id)!.quantity).toBe(3);
   });
 });

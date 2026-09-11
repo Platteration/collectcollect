@@ -31,7 +31,7 @@ export const EXTERIOR_ALIASES: Record<string, Exterior> = {
 export function exteriorFromName(name: string): Exterior | null {
   const match = /\(([^)]+)\)\s*$/.exec(name);
   if (!match) return null;
-  const printed = match[1].toLowerCase().replace(/[^a-z]/g, "");
+  const printed = (match[1] ?? "").toLowerCase().replace(/[^a-z]/g, "");
   return lookup(EXTERIOR_ALIASES, printed) ?? EXTERIOR_IDS.find((id) => id.replace(/_/g, "") === printed) ?? null;
 }
 

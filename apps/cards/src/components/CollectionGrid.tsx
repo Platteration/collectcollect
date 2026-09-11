@@ -58,7 +58,8 @@ export function CollectionGrid({
     }
     setBusy(false);
     setProgress(failures.length ? `${done - failures.length} of ${done} succeeded.` : `${label} ${done} card${done === 1 ? "" : "s"}.`);
-    if (failures.length) setError(failures[0]);
+    const firstFailure = failures[0];
+    if (firstFailure !== undefined) setError(firstFailure);
     setSelected(new Set());
     router.refresh();
   };

@@ -233,6 +233,12 @@ merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
 grading submission from draft to booked outcome, and the password gate. Both
 suites plus lint, typecheck and build run in CI on every push.
 
+The type checker runs strict, with `noUncheckedIndexedAccess` on in every
+workspace: an element read out of an array or a table is `undefined` until the
+code has said what happens when it is not there. Every such read is narrowed
+rather than asserted — a `!` that turned out to be wrong is exactly the kind
+of silent wrong number this app exists to avoid.
+
 ## The skins app
 
 `apps/skins` is the same engine — value over time, purchase lots, sales, the

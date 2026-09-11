@@ -272,8 +272,9 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
     // directly. With several it is an average of them, so the edit is ignored
     // and the recompute below puts the average back.
     const lots = listLots(id);
-    if (lots.length === 1) {
-      getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, lots[0].id);
+    const only = lots.length === 1 ? lots[0] : undefined;
+    if (only) {
+      getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, only.id);
     }
   }
   recomputePurchasePrice(id);
@@ -393,8 +394,8 @@ export function intakeCard(input: CardInput): IntakeOutcome {
     if (candidates.length > 0 && interchangeable.length !== 1) {
       return { result: "ambiguous", candidates };
     }
-    if (interchangeable.length === 1) {
-      const existing = interchangeable[0];
+    const existing = interchangeable.length === 1 ? interchangeable[0] : undefined;
+    if (existing) {
       const copies = clean.quantity || 1;
       // The copies being merged in are their own purchase at their own price;
       // folding them into the existing row's price would lose what they cost.

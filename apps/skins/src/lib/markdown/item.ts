@@ -143,7 +143,7 @@ const SOURCE_RE = /^(.*?)\s*\((.*)\)\s*$/;
 function splitSource(text: string): { rest: string; source: string | null } {
   const match = SOURCE_RE.exec(text.trim());
   if (!match) return { rest: text.trim(), source: null };
-  return { rest: match[1].trim(), source: match[2].trim() || null };
+  return { rest: (match[1] ?? "").trim(), source: (match[2] ?? "").trim() || null };
 }
 
 function escapeProse(text: string): string {
@@ -167,7 +167,8 @@ function unescapeProse(text: string): string {
  */
 export function itemMarkdown(bundle: ItemBundle): string {
   const { item, sales, snapshots, acquisitions, saleLots } = bundle;
-  const latest = snapshots.length ? snapshots[0].summary : null;
+  const newest = snapshots[0];
+  const latest = newest?.summary ?? null;
 
   const front = writeFrontMatter({
     id: item.id,
@@ -219,14 +220,14 @@ export function itemMarkdown(bundle: ItemBundle): string {
   const value = latest?.yourCopyValue ?? null;
   if (value !== null || item.purchasePrice !== null) {
     const bits: string[] = [];
-    if (value !== null) {
+    if (newest && value !== null) {
       bits.push(
         `Last valued at **${money(value)}**${item.quantity > 1 ? ` per copy (${money(value * item.quantity)} in total)` : ""}.`,
       );
       // The basis is a phrase, not a sentence, so it needs a stop of its own
       // before the next one starts.
       if (latest?.yourCopyBasis) bits.push(/[.!?]$/.test(latest.yourCopyBasis) ? latest.yourCopyBasis : `${latest.yourCopyBasis}.`);
-      bits.push(`Priced ${snapshots[0].fetchedAt.slice(0, 10)}.`);
+      bits.push(`Priced ${newest.fetchedAt.slice(0, 10)}.`);
     }
     if (item.purchasePrice !== null) bits.push(`Paid ${money(item.purchasePrice)}${item.quantity > 1 ? " per copy" : ""}.`);
     blocks.push(bits.join(" "));
@@ -419,7 +420,7 @@ export function parseItemMarkdown(text: string): ParsedItem | null {
   const sales: ParsedItem["sales"] = [];
   for (const row of readTable(body, "Sales")) {
     const [soldAt, copies, each, fees, cost, venue, notes] = row;
-    const unitPrice = readMoney(each);
+    const unitPrice = readMoney(each ?? "");
     const quantitySold = num(copies);
     if (!soldAt || unitPrice === null || quantitySold === null || quantitySold < 1) {
       warnings.push(`Skipped an unreadable sale row: ${row.join(" | ")}`);
@@ -428,8 +429,8 @@ export function parseItemMarkdown(text: string): ParsedItem | null {
     sales.push({
       quantity: Math.round(quantitySold),
       unitPrice,
-      fees: readMoney(fees) ?? 0,
-      unitCost: readMoney(cost),
+      fees: readMoney(fees ?? "") ?? 0,
+      unitCost: readMoney(cost ?? ""),
       soldAt,
       venue: venue || null,
       notes: notes || null,

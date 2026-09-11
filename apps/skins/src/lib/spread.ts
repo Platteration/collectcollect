@@ -69,6 +69,10 @@ export function spreadView(settings = getSettings()): SpreadView {
     }
     const best = cash[0];
     const worst = cash[cash.length - 1];
+    if (!best || !worst) {
+      noComparison++;
+      continue;
+    }
     const gap = Math.round((best.net - worst.net) * 100) / 100;
     const locked = item.tradableAfter !== null && new Date(item.tradableAfter) > now;
     rows.push({

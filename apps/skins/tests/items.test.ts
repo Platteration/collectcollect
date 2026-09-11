@@ -18,6 +18,12 @@ import { clutchCase, redline, seedCase, seedRedline } from "./helpers";
 
 beforeEach(() => setDb(openDatabase(":memory:")));
 
+function at<T>(xs: readonly T[], i: number): T {
+  const x = xs[i];
+  if (x === undefined) throw new Error(`expected an element at ${i}`);
+  return x;
+}
+
 describe("normalizing what a client sends", () => {
   it("insists on a market hash name", () => {
     expect(() => normalizeInput({ marketHashName: "   " })).toThrow(/market hash name/i);
@@ -83,7 +89,7 @@ describe("normalizing what a client sends", () => {
       ],
     });
     expect(item.stickers.map((s) => s.slot)).toEqual([0, 2]);
-    expect(item.stickers[0].name).toContain("iBUYPOWER");
+    expect(item.stickers[0]?.name).toContain("iBUYPOWER");
   });
 });
 
@@ -98,7 +104,7 @@ describe("creating an item", () => {
 
   it("records a copy with no price as unknown rather than free", () => {
     const item = seedCase();
-    expect(listLots(item.id)[0].unitCost).toBeNull();
+    expect(listLots(item.id)[0]?.unitCost).toBeNull();
     expect(item.purchasePrice).toBeNull();
   });
 
@@ -118,7 +124,7 @@ describe("intake", () => {
     const outcome = intakeItem(clutchCase({ quantity: 3, purchasePrice: 1.5 }));
     expect(outcome.result).toBe("merged");
     expect(listItems()).toHaveLength(1);
-    const item = listItems()[0];
+    const item = at(listItems(), 0);
     expect(item.quantity).toBe(5);
     // Two purchases at two prices, kept apart.
     expect(listLots(item.id).map((l) => l.unitCost)).toEqual([0.5, 1.5]);
@@ -242,7 +248,7 @@ describe("listing", () => {
     seedCase({ tradableAfter: past });
     const locked = listItems({ lockedOnly: true });
     expect(locked).toHaveLength(1);
-    expect(isTradeLocked(locked[0])).toBe(true);
+    expect(isTradeLocked(at(locked, 0))).toBe(true);
   });
 });
 

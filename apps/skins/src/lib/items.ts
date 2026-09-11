@@ -350,8 +350,9 @@ export function updateItem(id: number, patch: Partial<ItemInput>): ItemRecord | 
     // directly. With several it is an average of them, so the edit is ignored
     // and the recompute below puts the average back.
     const lots = listLots(id);
-    if (lots.length === 1) {
-      getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, lots[0].id);
+    const only = lots.length === 1 ? lots[0] : undefined;
+    if (only) {
+      getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, only.id);
     }
   }
   recomputePurchasePrice(id);

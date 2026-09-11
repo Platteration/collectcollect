@@ -112,6 +112,8 @@ export default function SpreadPage() {
 function Row({ row }: { row: SpreadRow }) {
   const best = row.cash[0];
   const worst = row.cash[row.cash.length - 1];
+  const wallet = row.wallet[0];
+  if (!best || !worst) return null;
   return (
     <li className="card-surface p-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -134,10 +136,10 @@ function Row({ row }: { row: SpreadRow }) {
       </div>
       <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
         {best.label} nets {money(best.net)} · {worst.label} nets {money(worst.net)}
-        {row.wallet.length > 0 && (
+        {wallet && (
           <>
             {" "}
-            · {row.wallet[0].label} would show {money(row.wallet[0].net)} in wallet funds
+            · {wallet.label} would show {money(wallet.net)} in wallet funds
           </>
         )}
       </p>

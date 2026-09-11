@@ -59,7 +59,7 @@ describe("the archive", () => {
     expect(JSON.parse(fs.readFileSync(path.join(out, "manifest.json"), "utf8")).app).toBe("collectcollect-skins");
     expect(fs.readdirSync(path.join(out, "collection", "items"))).toHaveLength(1);
     const copy = openDatabase(path.join(out, "collectcollect-skins.db"));
-    expect((copy.prepare("SELECT market_hash_name FROM items").all() as Array<{ market_hash_name: string }>)[0].market_hash_name).toBe(
+    expect((copy.prepare("SELECT market_hash_name FROM items").all() as Array<{ market_hash_name: string }>)[0]?.market_hash_name).toBe(
       "AK-47 | Redline (Field-Tested)",
     );
     copy.close();
@@ -124,7 +124,7 @@ describe("restore", () => {
     expect(listed).toHaveLength(1);
     expect(listed[0]).toMatchObject({ name: path.basename(restored.movedAsideTo), items: 2 });
 
-    const back = await putBack(listed[0].name);
+    const back = await putBack(path.basename(restored.movedAsideTo));
     expect(back.items).toBe(2);
     expect(listItems()).toHaveLength(2);
     expect(fs.existsSync(restored.movedAsideTo)).toBe(false);

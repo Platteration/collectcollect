@@ -46,9 +46,9 @@ export function linePath(points: Array<[number, number]>): string {
 }
 
 export function areaPath(points: Array<[number, number]>, baseline: number): string {
-  if (points.length === 0) return "";
   const first = points[0];
-  const last = points[points.length - 1];
+  const last = points.at(-1);
+  if (first === undefined || last === undefined) return "";
   return `${linePath(points)} L${last[0].toFixed(1)},${baseline.toFixed(1)} L${first[0].toFixed(1)},${baseline.toFixed(1)} Z`;
 }
 
@@ -95,8 +95,12 @@ export function timeTicks(times: number[], xs: number[], labels: string[], count
         best = i;
       }
     });
-    const prev = chosen[chosen.length - 1];
-    if (prev !== undefined && (best === prev || xs[best] - xs[prev] < minGap || labels[best] === labels[prev])) continue;
+    const prev = chosen.at(-1);
+    if (prev !== undefined) {
+      // A missing x (xs shorter than times) makes the gap NaN, which never trips the minimum.
+      const gap = (xs[best] ?? NaN) - (xs[prev] ?? NaN);
+      if (best === prev || gap < minGap || labels[best] === labels[prev]) continue;
+    }
     chosen.push(best);
   }
   return chosen;

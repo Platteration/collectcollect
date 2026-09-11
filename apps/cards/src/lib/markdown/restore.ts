@@ -192,7 +192,7 @@ function elsewhere(parsed: { input: CardInput }): CardRecord | null {
     cardNumber: parsed.input.cardNumber ?? null,
     setName: parsed.input.setName ?? null,
   }).filter((c) => isSameCard(c, parsed.input));
-  return candidates.length === 1 ? candidates[0] : null;
+  return candidates.length === 1 ? (candidates[0] ?? null) : null;
 }
 
 function norm(value: string | null | undefined): string {

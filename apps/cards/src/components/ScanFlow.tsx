@@ -91,6 +91,7 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
         fd.append("files", item.file);
         const { uploads } = await api<{ uploads: Array<{ name: string; color: string | null }> }>("/api/uploads", { method: "POST", body: fd });
         const upload = uploads[0];
+        if (upload === undefined) throw new Error("The photo was not stored.");
         patch(item.key, { upload: upload.name, accentColor: upload.color });
 
         if (!claudeConfigured) {
@@ -143,12 +144,12 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
         });
 
         if (outcome.result === "ambiguous") {
+          const only = outcome.candidates.length === 1 ? outcome.candidates[0] : undefined;
           patch(item.key, {
             status: "review",
-            message:
-              outcome.candidates.length === 1
-                ? `You already have a ${outcome.candidates[0].grade ? `${outcome.candidates[0].gradingCompany ?? "graded"} ${outcome.candidates[0].grade}` : "raw"} copy; this one looks different.`
-                : `${outcome.candidates.length} cards in your collection look like this one.`,
+            message: only
+              ? `You already have a ${only.grade ? `${only.gradingCompany ?? "graded"} ${only.grade}` : "raw"} copy; this one looks different.`
+              : `${outcome.candidates.length} cards in your collection look like this one.`,
           });
           return;
         }

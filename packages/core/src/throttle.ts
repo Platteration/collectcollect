@@ -39,7 +39,7 @@ export function createThrottle(max: number, windowMs: number, what = "requests")
 
   const prune = (now: number) => {
     for (const [key, stamps] of seen) {
-      while (stamps.length && now - stamps[0] >= windowMs) stamps.shift();
+      for (let oldest = stamps[0]; oldest !== undefined && now - oldest >= windowMs; oldest = stamps[0]) stamps.shift();
       if (!stamps.length) seen.delete(key);
     }
   };
@@ -55,8 +55,10 @@ export function createThrottle(max: number, windowMs: number, what = "requests")
         stamps = [];
         seen.set(key, stamps);
       }
+      const oldest = stamps[0];
       if (stamps.length >= max) {
-        const retryAfter = Math.max(1, Math.ceil((windowMs - (now - stamps[0])) / 1000));
+        // With `max` zero there is no oldest stamp and the answer is simply "a whole window".
+        const retryAfter = Math.max(1, Math.ceil((windowMs - (now - (oldest ?? now))) / 1000));
         const response = jsonError(`Too many ${what}; try again in ${retryAfter}s`, 429);
         response.headers.set("Retry-After", String(retryAfter));
         return response;

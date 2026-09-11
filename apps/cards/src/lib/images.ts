@@ -38,7 +38,8 @@ export async function dominantColor(buffer: Buffer): Promise<string | null> {
     if (!width || !height) return null;
     const inset = { left: Math.round(width * 0.2), top: Math.round(height * 0.2), width: Math.round(width * 0.6), height: Math.round(height * 0.6) };
     const { data } = await img.extract(inset).resize(1, 1, { fit: "fill" }).raw().toBuffer({ resolveWithObject: true });
-    const [r, g, b] = [data[0], data[1], data[2]];
+    const [r, g, b] = data;
+    if (r === undefined || g === undefined || b === undefined) return null;
     const max = Math.max(r, g, b) || 1;
     // Scale so very dark art still yields a visible tint.
     const scale = Math.min(255 / max, 1.9);

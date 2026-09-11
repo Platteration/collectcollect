@@ -124,16 +124,19 @@ export function previewImport(text: string, defaults: { category?: Category } = 
   const numbered = parseCsv(text)
     .map((cells, i) => ({ cells, line: i + 1 }))
     .filter((r) => r.cells.some((cell) => cell.trim() !== ""));
-  if (numbered.length === 0) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0 };
+  const head = numbered[0];
+  if (!head) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0 };
 
-  const headers = numbered[0].cells.map((h) => h.trim());
+  const headers = head.cells.map((h) => h.trim());
   const keys = headers.map(headerKey);
   const mapping: Record<string, string> = {};
   const index: Record<string, number> = {};
   for (const [field, aliases] of Object.entries(COLUMNS)) {
     const at = keys.findIndex((k) => aliases.includes(k));
-    if (at !== -1) {
-      mapping[field] = headers[at];
+    // A miss is -1, and there is no header at -1.
+    const header = headers[at];
+    if (header !== undefined) {
+      mapping[field] = header;
       index[field] = at;
     }
   }

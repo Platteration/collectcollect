@@ -21,7 +21,8 @@ const CRC_TABLE = (() => {
 
 export function crc32(buf: Uint8Array, seed = 0): number {
   let c = (seed ^ 0xffffffff) >>> 0;
-  for (let i = 0; i < buf.length; i++) c = (CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8)) >>> 0;
+  // The index is masked to 0..255, so the table lookup can never miss.
+  for (const byte of buf) c = ((CRC_TABLE[(c ^ byte) & 0xff] ?? 0) ^ (c >>> 8)) >>> 0;
   return (c ^ 0xffffffff) >>> 0;
 }
 

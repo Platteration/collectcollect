@@ -167,7 +167,8 @@ const SOURCE_RE = /^(.*?)\s*\((.*)\)\s*$/;
 function splitSource(text: string): { rest: string; source: string | null } {
   const match = SOURCE_RE.exec(text.trim());
   if (!match) return { rest: text.trim(), source: null };
-  return { rest: match[1].trim(), source: match[2].trim() || null };
+  const [, rest = "", source = ""] = match;
+  return { rest: rest.trim(), source: source.trim() || null };
 }
 
 /** Turn `PSA 10 $5,000 · PSA 9 $1,400` back into a map. */
@@ -176,9 +177,10 @@ function parseGraded(text: string): Record<string, number> {
   for (const part of text.split("·")) {
     const match = /^\s*(.+?)\s+([$-]?[\d,.]+)\s*$/.exec(part);
     if (!match) continue;
-    const value = readMoney(match[2]);
+    const [, key = "", amount = ""] = match;
+    const value = readMoney(amount);
     if (value === null) continue;
-    out[match[1].trim()] = value;
+    out[key.trim()] = value;
   }
   return out;
 }
@@ -204,7 +206,8 @@ function unescapeProse(text: string): string {
  */
 export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: string) => string } = {}): string {
   const { card, sales, snapshots, acquisitions, saleLots } = bundle;
-  const latest = snapshots.length ? snapshots[0].summary : null;
+  const newest = snapshots[0];
+  const latest = newest?.summary ?? null;
   const photoHref = opts.photoHref ?? ((name: string) => `../uploads/${name}`);
 
   const front = writeFrontMatter({
@@ -258,10 +261,10 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
   const value = latest?.yourCopyValue ?? null;
   if (value !== null || card.purchasePrice !== null) {
     const bits: string[] = [];
-    if (value !== null) {
+    if (newest && value !== null) {
       bits.push(`Last valued at **${money(value)}** per copy${card.quantity > 1 ? ` (${money(value * card.quantity)} in total)` : ""}.`);
       if (latest?.yourCopyBasis) bits.push(latest.yourCopyBasis);
-      bits.push(`Priced ${snapshots[0].fetchedAt.slice(0, 10)}.`);
+      bits.push(`Priced ${newest.fetchedAt.slice(0, 10)}.`);
     }
     if (card.purchasePrice !== null) bits.push(`Paid ${money(card.purchasePrice)} per copy.`);
     blocks.push(bits.join(" "));
@@ -457,7 +460,7 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
   const sales: ParsedCard["sales"] = [];
   for (const row of readTable(body, "Sales")) {
     const [soldAt, copies, each, fees, cost, venue, notes] = row;
-    const unitPrice = readMoney(each);
+    const unitPrice = readMoney(each ?? "");
     const quantitySold = num(copies);
     if (!soldAt || unitPrice === null || quantitySold === null || quantitySold < 1) {
       warnings.push(`Skipped an unreadable sale row: ${row.join(" | ")}`);
@@ -466,8 +469,8 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
     sales.push({
       quantity: Math.round(quantitySold),
       unitPrice,
-      fees: readMoney(fees) ?? 0,
-      unitCost: readMoney(cost),
+      fees: readMoney(fees ?? "") ?? 0,
+      unitCost: readMoney(cost ?? ""),
       soldAt,
       venue: venue || null,
       notes: notes || null,

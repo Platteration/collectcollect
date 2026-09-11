@@ -34,7 +34,7 @@ describe("import preview", () => {
     const preview = previewImport(csv);
     expect(preview.mapping).toMatchObject({ name: "Card Name", setName: "Edition", cardNumber: "Card Number", quantity: "Qty", purchasePrice: "Price Paid" });
     expect(preview.unmapped).toEqual(["Sleeve"]);
-    expect(preview.rows[0].input).toMatchObject({
+    expect(preview.rows[0]?.input).toMatchObject({
       game: "pokemon",
       name: "Charizard",
       setName: "Base Set",
@@ -64,45 +64,45 @@ describe("import preview", () => {
         "E,pokemon,BGS,9.5",
       ].join("\n"),
     ).rows;
-    expect(rows[0].input).toMatchObject({ gradingCompany: "PSA", grade: "9" });
-    expect(rows[1].input).toMatchObject({ gradingCompany: null, grade: null, condition: "NM" });
+    expect(rows[0]?.input).toMatchObject({ gradingCompany: "PSA", grade: "9" });
+    expect(rows[1]?.input).toMatchObject({ gradingCompany: null, grade: null, condition: "NM" });
     // A company embedded in the grade cell is recognised rather than dropped.
-    expect(rows[2].input).toMatchObject({ gradingCompany: "PSA", grade: "10" });
+    expect(rows[2]?.input).toMatchObject({ gradingCompany: "PSA", grade: "10" });
     // No company named, but the grade is still a grade, not a condition.
-    expect(rows[3].input).toMatchObject({ gradingCompany: null, grade: "9.5" });
-    expect(rows[4].input).toMatchObject({ gradingCompany: "BGS", grade: "9.5" });
+    expect(rows[3]?.input).toMatchObject({ gradingCompany: null, grade: "9.5" });
+    expect(rows[4]?.input).toMatchObject({ gradingCompany: "BGS", grade: "9.5" });
   });
 
   it("warns rather than silently calling an unknown condition near mint", () => {
     const [known, unknown] = previewImport(["name,game,condition", "A,pokemon,LP", "B,pokemon,Played"].join("\n")).rows;
     expect(known).toMatchObject({ warning: null });
-    expect(known.input?.condition).toBe("LP");
-    expect(unknown.input?.condition).toBe("NM");
-    expect(unknown.warning).toMatch(/"Played" was not recognised/);
+    expect(known?.input?.condition).toBe("LP");
+    expect(unknown?.input?.condition).toBe("NM");
+    expect(unknown?.warning).toMatch(/"Played" was not recognised/);
   });
 
   it("reports the line each row came from, even after blank ones", () => {
     const preview = previewImport(["name,game", "A,pokemon", "", "", "B,pokemon", ",pokemon"].join("\n"));
     expect(preview.rows.map((r) => r.line)).toEqual([2, 5, 6]);
-    expect(preview.rows[2].problem).toMatch(/No card name/);
+    expect(preview.rows[2]?.problem).toMatch(/No card name/);
   });
 
   it("explains rows it cannot use", () => {
     const preview = previewImport(["name,game", ",pokemon", "Ok,pokemon", "NoGame,"].join("\n"));
     expect(preview.total).toBe(3);
     expect(preview.usable).toBe(1);
-    expect(preview.rows[0].problem).toMatch(/No card name/);
-    expect(preview.rows[2].problem).toMatch(/No game column/);
+    expect(preview.rows[0]?.problem).toMatch(/No card name/);
+    expect(preview.rows[2]?.problem).toMatch(/No game column/);
   });
 
   it("maps the column names people use for where a card is kept", () => {
     const rows = previewImport(["name,game,Storage Box", "A,pokemon,Binder 2"].join("\n")).rows;
-    expect(rows[0].input?.location).toBe("Binder 2");
+    expect(rows[0]?.input?.location).toBe("Binder 2");
   });
 
   it("applies a chosen game when the file has no game column", () => {
     const preview = previewImport(["name,set", "Pikachu,Jungle"].join("\n"), { game: "pokemon" });
-    expect(preview.rows[0].input).toMatchObject({ game: "pokemon", setName: "Jungle" });
+    expect(preview.rows[0]?.input).toMatchObject({ game: "pokemon", setName: "Jungle" });
   });
 });
 
@@ -142,9 +142,9 @@ describe("spreadsheets from older tools", () => {
 
   it("does not read a currency symbol on its own as a price of zero", () => {
     const preview = previewImport("name,purchase price\nCharizard,$", { game: "pokemon" });
-    expect(preview.rows[0].input?.purchasePrice).toBeNull();
+    expect(preview.rows[0]?.input?.purchasePrice).toBeNull();
     const withPrice = previewImport("name,purchase price\nCharizard,$12.50", { game: "pokemon" });
-    expect(withPrice.rows[0].input?.purchasePrice).toBe(12.5);
+    expect(withPrice.rows[0]?.input?.purchasePrice).toBe(12.5);
   });
 });
 
