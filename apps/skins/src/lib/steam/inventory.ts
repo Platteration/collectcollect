@@ -1,5 +1,6 @@
 import type { AppliedSticker, Category, Exterior, ItemInput, Rarity } from "../types";
 import { EXTERIOR_IDS, isStackable } from "../types";
+import { lookup } from "@collectcollect/core/lookup";
 
 /**
  * Reading a CS2 inventory out of Steam's public endpoint.
@@ -125,7 +126,7 @@ export function imageUrlFor(iconUrl: string | undefined): string | null {
 
 function categoryFor(description: SteamDescription): Category {
   const internal = lower(tag(description, "Type")?.internal_name);
-  const known = TYPE_TO_CATEGORY[internal];
+  const known = lookup(TYPE_TO_CATEGORY, internal);
   if (known) return known;
   // A knife with no usable Type tag still announces itself: every one of them
   // is named with a star.
@@ -146,12 +147,13 @@ function rarityFor(description: SteamDescription, category: Category): Rarity | 
   // says, and calling one Covert would file it with the red rifles.
   if (category === "knife" || category === "glove") return "extraordinary";
   const internal = lower(tag(description, "Rarity")?.internal_name);
-  return RARITY_TAGS[internal] ?? null;
+  return lookup(RARITY_TAGS, internal) ?? null;
 }
 
 function exteriorFor(description: SteamDescription): Exterior | null {
   const internal = lower(tag(description, "Exterior")?.internal_name);
-  if (WEAR_TAGS[internal]) return WEAR_TAGS[internal];
+  const tagged = lookup(WEAR_TAGS, internal);
+  if (tagged) return tagged;
   // Fall back to the tier printed in the name, which is where it comes from.
   const name = description.market_hash_name ?? "";
   const match = /\(([^)]+)\)\s*$/.exec(name);

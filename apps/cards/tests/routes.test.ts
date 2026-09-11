@@ -93,6 +93,31 @@ describe("what the lookup routes refuse", () => {
     expect((await POST(notJson("http://localhost/api/prices/lookup", "POST"))).status).toBe(400);
   });
 
+  it("does not let a prototype property pass as a game or a condition", async () => {
+    // "constructor" is `in` every object. Let through, it would reach a price
+    // lookup as a game, and `function Object() { [native code] }` would be
+    // what the provider was asked about.
+    const lookup = await import("@/app/api/prices/lookup/route");
+    for (const game of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      const res = await lookup.POST(json("http://localhost/api/prices/lookup", "POST", { game, name: "X" }));
+      expect(res.status, game).toBe(400);
+      expect(await res.text()).not.toContain("native code");
+    }
+    const condition = await lookup.POST(json("http://localhost/api/prices/lookup", "POST", { game: "pokemon", name: "X", condition: "constructor" }));
+    expect(condition.status).toBe(400);
+    expect((await read<{ error: string }>(condition)).error).toMatch(/condition/i);
+
+    const cards = await import("@/app/api/cards/route");
+    expect((await cards.GET(new Request("http://localhost/api/cards?game=constructor"))).status).toBe(400);
+    expect((await cards.GET(new Request("http://localhost/api/cards?similar=1&game=constructor&name=X"))).status).toBe(400);
+
+    const sets = await import("@/app/api/sets/refresh/route");
+    expect((await sets.POST(json("http://localhost/api/sets/refresh", "POST", { game: "constructor", setName: "Base" }))).status).toBe(400);
+
+    const csv = await import("@/app/api/import/route");
+    expect((await csv.POST(json("http://localhost/api/import", "POST", { csv: "name\nX", game: "constructor" }))).status).toBe(400);
+  });
+
   it("will not fetch a checklist for a game it does not know or a set with no name", async () => {
     const { POST } = await import("@/app/api/sets/refresh/route");
     expect((await POST(json("http://localhost/api/sets/refresh", "POST", { game: "wizards", setName: "Base" }))).status).toBe(400);

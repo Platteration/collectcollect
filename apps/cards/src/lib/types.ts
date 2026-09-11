@@ -15,6 +15,15 @@ export const GAME_IDS = Object.keys(GAMES) as Game[];
 /** Raw (ungraded) condition scale used by most marketplaces. */
 export type Condition = "NM" | "LP" | "MP" | "HP" | "DMG";
 
+/**
+ * Whether a string names a game. `Object.hasOwn`, never `in`: "constructor"
+ * and "toString" are on every object's prototype, and would otherwise pass as
+ * games all the way to a price lookup.
+ */
+export function isGame(value: unknown): value is Game {
+  return typeof value === "string" && Object.hasOwn(GAMES, value);
+}
+
 export const CONDITIONS: Record<Condition, string> = {
   NM: "Near Mint",
   LP: "Lightly Played",
@@ -22,6 +31,10 @@ export const CONDITIONS: Record<Condition, string> = {
   HP: "Heavily Played",
   DMG: "Damaged",
 };
+
+export function isCondition(value: unknown): value is Condition {
+  return typeof value === "string" && Object.hasOwn(CONDITIONS, value);
+}
 
 export const GRADING_COMPANIES = ["PSA", "BGS", "CGC", "SGC", "TAG", "Other"] as const;
 

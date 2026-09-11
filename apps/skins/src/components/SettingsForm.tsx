@@ -180,6 +180,8 @@ export function SettingsForm({ initial, providers }: { initial: Settings; provid
             <input
               id="webhook"
               className="input"
+              type="url"
+              inputMode="url"
               value={settings.alertWebhookUrl}
               onChange={(e) => patch({ alertWebhookUrl: e.target.value })}
               placeholder="https://…"

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { latestSnapshotsByCard, listCards, listLocations } from "@/lib/cards";
 import { money } from "@/lib/format";
-import { GAMES, GAME_IDS, type Game } from "@/lib/types";
+import { GAMES, GAME_IDS, isGame } from "@/lib/types";
 import { CollectionGrid } from "@/components/CollectionGrid";
 import { listSubmissions } from "@/lib/submissions";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function CollectionPage({ searchParams }: PageProps<"/collection">) {
   const sp = await searchParams;
-  const gameParam = typeof sp.game === "string" && sp.game in GAMES ? (sp.game as Game) : undefined;
+  const gameParam = isGame(sp.game) ? sp.game : undefined;
   const q = typeof sp.q === "string" ? sp.q : "";
   // "none" selects cards with no location recorded, which is how you find what
   // still needs putting away.

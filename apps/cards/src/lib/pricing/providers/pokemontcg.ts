@@ -2,6 +2,7 @@ import type { PriceQuote } from "../../types";
 import type { CardQuery, PriceProvider } from "../types";
 import { ProviderError } from "../types";
 import { numberPart, round2, sameNumber, setSimilarity, toNumber, tokenOverlap } from "../match";
+import { lookup } from "@collectcollect/core/lookup";
 
 /**
  * Pokémon TCG API (https://pokemontcg.io). Free; an API key raises rate limits.
@@ -114,14 +115,14 @@ export const pokemonTcgProvider: PriceProvider = {
     const keys = Object.keys(prices).filter((k) => toNumber(prices[k]?.market));
     const chosen = pickVariantKey(q.variant, keys);
     const variants: Record<string, number> = {};
-    for (const k of keys) variants[VARIANT_LABELS[k] ?? k] = round2(prices[k].market!);
+    for (const k of keys) variants[lookup(VARIANT_LABELS, k) ?? k] = round2(prices[k].market!);
     quotes.push({
       source: "pokemontcg",
       sourceLabel: "TCGplayer market (via Pokémon TCG API)",
       currency: "USD",
       url: best.tcgplayer?.url ?? null,
       matchedName: best.name,
-      matchedDetail: chosen ? `${detail} · ${VARIANT_LABELS[chosen] ?? chosen}` : detail,
+      matchedDetail: chosen ? `${detail} · ${lookup(VARIANT_LABELS, chosen) ?? chosen}` : detail,
       ungraded: chosen ? round2(prices[chosen].market!) : null,
       ungradedVariants: variants,
       graded: {},

@@ -44,6 +44,29 @@ describe("saving settings", () => {
     expect(getSettings().conditionMultipliers).toMatchObject({ NM: 1.1, HP: 0.42 });
   });
 
+  it("refuses a webhook that is not a URL rather than quietly switching alerts off", async () => {
+    saveSettings({ ...DEFAULT_SETTINGS, alertWebhookUrl: "https://hooks.example/abc" });
+    for (const bad of ["not a url", "ftp://hooks.example/x", "javascript:alert(1)", 42, null]) {
+      const res = await put({ alertWebhookUrl: bad });
+      expect(res.status, String(bad)).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/webhook/i);
+      expect(getSettings().alertWebhookUrl).toBe("https://hooks.example/abc");
+    }
+    // Blank is how it is switched off on purpose.
+    expect((await put({ alertWebhookUrl: "  " })).status).toBe(200);
+    expect(getSettings().alertWebhookUrl).toBe("");
+    expect((await put({ alertWebhookUrl: " http://hooks.example/x " })).status).toBe(200);
+    expect(getSettings().alertWebhookUrl).toBe("http://hooks.example/x");
+  });
+
+  it("refuses an owner name that is not text", async () => {
+    saveSettings({ ...DEFAULT_SETTINGS, ownerName: "Ada" });
+    const res = await put({ ownerName: { first: "A" } });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/owner name/);
+    expect(getSettings().ownerName).toBe("Ada");
+  });
+
   it("lets a grade multiplier be removed", async () => {
     saveSettings({ ...DEFAULT_SETTINGS, gradeMultipliers: { "PSA 10": 3, "PSA 9": 1.4 } });
     const res = await put({ gradeMultipliers: { "PSA 10": 3 } });

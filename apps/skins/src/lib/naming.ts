@@ -1,4 +1,5 @@
 import { EXTERIOR_IDS, type Category, type Exterior } from "./types";
+import { lookup } from "@collectcollect/core/lookup";
 
 /**
  * What a market hash name tells you on its own.
@@ -31,7 +32,7 @@ export function exteriorFromName(name: string): Exterior | null {
   const match = /\(([^)]+)\)\s*$/.exec(name);
   if (!match) return null;
   const printed = match[1].toLowerCase().replace(/[^a-z]/g, "");
-  return EXTERIOR_ALIASES[printed] ?? EXTERIOR_IDS.find((id) => id.replace(/_/g, "") === printed) ?? null;
+  return lookup(EXTERIOR_ALIASES, printed) ?? EXTERIOR_IDS.find((id) => id.replace(/_/g, "") === printed) ?? null;
 }
 
 /**

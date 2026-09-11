@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { jsonError } from "@collectcollect/core/http";
+import { isWebhookUrl, jsonError } from "@collectcollect/core/http";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { providerStatuses } from "@/lib/status";
 import type { Settings } from "@/lib/types";
@@ -19,7 +19,9 @@ export async function PUT(request: Request) {
 
   // Anything the browser could not turn into a number arrives as null, since
   // that is what JSON does with NaN. Saving around it would drop the field back
-  // to a default and still answer "saved", so say what is wrong instead.
+  // to a default and still answer "saved", so say what is wrong instead. The
+  // same goes for a webhook that is not a URL: saving it as blank would switch
+  // alerts off while reporting success.
   const problems: string[] = [];
   const number = (label: string, value: unknown, fallback: number, below = Infinity): number => {
     if (value === undefined) return fallback;
@@ -43,6 +45,14 @@ export async function PUT(request: Request) {
     }
     return out;
   };
+  const text = (label: string, value: unknown, fallback: string): string => {
+    if (value === undefined) return fallback;
+    if (typeof value !== "string") {
+      problems.push(label);
+      return fallback;
+    }
+    return value;
+  };
 
   const exteriorMultipliers = numbers("wear multipliers", body.exteriorMultipliers, current.exteriorMultipliers);
   // A fee is a fraction of the price, so 1 or more would mean a sale that pays
@@ -53,9 +63,12 @@ export async function PUT(request: Request) {
   const alertMovePercent = number("price-move alert percentage", body.alertMovePercent, current.alertMovePercent);
   const spreadMinAmount = number("spread amount", body.spreadMinAmount, current.spreadMinAmount);
   const spreadMinPercent = number("spread percentage", body.spreadMinPercent, current.spreadMinPercent);
+  const ownerName = text("owner name", body.ownerName, current.ownerName);
+  const alertWebhookUrl = text("webhook URL", body.alertWebhookUrl, current.alertWebhookUrl).trim();
+  if (alertWebhookUrl && !isWebhookUrl(alertWebhookUrl)) problems.push("webhook URL (it has to start with http:// or https://)");
 
   if (problems.length) {
-    return jsonError(`These have to be numbers, and none of your settings were changed: ${problems.join(", ")}.`);
+    return jsonError(`These are not right, and none of your settings were changed: ${problems.join(", ")}.`);
   }
 
   const settings = saveSettings({
@@ -65,11 +78,11 @@ export async function PUT(request: Request) {
     marketFees: { ...current.marketFees, ...marketFees } as Settings["marketFees"],
     stattrakMultiplier,
     souvenirMultiplier,
-    ownerName: body.ownerName ?? current.ownerName,
+    ownerName,
     alertMovePercent,
     spreadMinAmount,
     spreadMinPercent,
-    alertWebhookUrl: body.alertWebhookUrl ?? current.alertWebhookUrl,
+    alertWebhookUrl,
   });
   return NextResponse.json({ settings, providers: providerStatuses() });
 }

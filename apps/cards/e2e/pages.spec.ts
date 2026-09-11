@@ -78,7 +78,7 @@ test.describe("the pages nothing else visits", () => {
     try {
       await lp.fill("abc");
       await page.getByRole("button", { name: /^Save settings$/ }).click();
-      await expect(page.getByText(/have to be numbers/)).toBeVisible();
+      await expect(page.getByRole("alert").filter({ hasText: /none of your settings were changed/ })).toBeVisible();
       // Nothing was saved, so the stored value is still the old one.
       await page.reload();
       await expect(page.getByLabel("Lightly Played")).toHaveValue(before);

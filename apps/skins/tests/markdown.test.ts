@@ -63,6 +63,18 @@ describe("an item as a document", () => {
     expect(parsed.input.stickers).toEqual(item.stickers);
   });
 
+  it("does not round money on the way through", () => {
+    // Cases trade for fractions of a cent, and the file is the record: a
+    // $0.035 copy written as $0.04 would come back as a different purchase.
+    const item = seedCase({ quantity: 10, purchasePrice: 0.035 });
+    const text = itemMarkdown({ item, sales: [], snapshots: [], acquisitions: listLots(item.id) });
+    expect(readTable(text, "Acquisitions")[0][3]).toBe("$0.035");
+    expect(parseItemMarkdown(text)!.acquisitions[0].unitCost).toBe(0.035);
+    // A whole number of cents still reads the way people write money.
+    const whole = seedCase({ marketHashName: "Chroma Case", quantity: 1, purchasePrice: 1 });
+    expect(readTable(itemMarkdown({ item: whole, sales: [], snapshots: [], acquisitions: listLots(whole.id) }), "Acquisitions")[0][3]).toBe("$1.00");
+  });
+
   it("does not lose float precision on the way through", () => {
     const value = 0.1234567891;
     const item = seedRedline({ floatValue: value });

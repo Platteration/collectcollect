@@ -4,33 +4,62 @@ import { useState } from "react";
 import { api } from "@/lib/api-client";
 import { CONDITIONS, type Condition, type Settings } from "@/lib/types";
 
+/**
+ * The numbers the app does arithmetic with, and who is allowed to set them.
+ *
+ * Everything here is saved or nothing is: a form that reports "Saved" while
+ * quietly dropping a field back to a default is worse than one that refuses,
+ * because the owner has no way to tell it happened. So a refusal is shown as
+ * one, and what the server actually stored is read back into the boxes.
+ */
 export function SettingsForm({ initial }: { initial: Settings }) {
-  const [grades, setGrades] = useState<Array<[string, string]>>(Object.entries(initial.gradeMultipliers).map(([k, v]) => [k, String(v)]));
-  const [conditions, setConditions] = useState<Record<Condition, string>>(
-    Object.fromEntries(Object.entries(initial.conditionMultipliers).map(([k, v]) => [k, String(v)])) as Record<Condition, string>,
-  );
+  const [grades, setGrades] = useState<Array<[string, string]>>(gradeRows(initial));
+  const [conditions, setConditions] = useState<Record<Condition, string>>(conditionRows(initial));
   const [gradingFee, setGradingFee] = useState(String(initial.gradingFee));
   const [readyMinUpside, setReadyMinUpside] = useState(String(initial.readyMinUpside));
   const [readyMinUpsidePercent, setReadyMinUpsidePercent] = useState(String(initial.readyMinUpsidePercent));
   const [ownerName, setOwnerName] = useState(initial.ownerName);
   const [alertMovePercent, setAlertMovePercent] = useState(String(initial.alertMovePercent));
   const [alertWebhookUrl, setAlertWebhookUrl] = useState(initial.alertWebhookUrl);
-  const [status, setStatus] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [error, setError] = useState<string | null>(null);
 
   const save = async () => {
-    setSaving(true);
-    setStatus(null);
+    setStatus("saving");
+    setError(null);
     try {
       const gradeMultipliers: Record<string, number> = {};
-      for (const [k, v] of grades) if (k.trim() && v.trim() !== "") gradeMultipliers[k.trim()] = Number(v);
-      const conditionMultipliers = Object.fromEntries(Object.entries(conditions).map(([k, v]) => [k, Number(v)])) as Settings["conditionMultipliers"];
-      await api("/api/settings", { method: "PUT", body: JSON.stringify({ gradeMultipliers, conditionMultipliers, gradingFee: Number(gradingFee), readyMinUpside: Number(readyMinUpside), readyMinUpsidePercent: Number(readyMinUpsidePercent), ownerName, alertMovePercent: Number(alertMovePercent), alertWebhookUrl }) });
-      setStatus("Saved. New multipliers apply the next time a card's prices are refreshed.");
+      for (const [k, v] of grades) if (k.trim() && v.trim() !== "") gradeMultipliers[k.trim()] = numberOrNaN(v);
+      const conditionMultipliers = Object.fromEntries(
+        Object.entries(conditions).map(([k, v]) => [k, numberOrNaN(v)]),
+      ) as Settings["conditionMultipliers"];
+      const body = await api<{ settings: Settings }>("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          gradeMultipliers,
+          conditionMultipliers,
+          gradingFee: numberOrNaN(gradingFee),
+          readyMinUpside: numberOrNaN(readyMinUpside),
+          readyMinUpsidePercent: numberOrNaN(readyMinUpsidePercent),
+          ownerName,
+          alertMovePercent: numberOrNaN(alertMovePercent),
+          alertWebhookUrl,
+        }),
+      });
+      // What was stored, not what was typed: the server trims and normalises.
+      const saved = body.settings;
+      setGrades(gradeRows(saved));
+      setConditions(conditionRows(saved));
+      setGradingFee(String(saved.gradingFee));
+      setReadyMinUpside(String(saved.readyMinUpside));
+      setReadyMinUpsidePercent(String(saved.readyMinUpsidePercent));
+      setOwnerName(saved.ownerName);
+      setAlertMovePercent(String(saved.alertMovePercent));
+      setAlertWebhookUrl(saved.alertWebhookUrl);
+      setStatus("saved");
     } catch (e) {
-      setStatus((e as Error).message);
-    } finally {
-      setSaving(false);
+      setError((e as Error).message);
+      setStatus("idle");
     }
   };
 
@@ -46,9 +75,26 @@ export function SettingsForm({ initial }: { initial: Settings }) {
         <div className="mt-3 space-y-2">
           {grades.map(([k, v], i) => (
             <div key={i} className="flex gap-2">
-              <input className="input max-w-[12rem]" value={k} onChange={(e) => setGrades((g) => g.map((row, j) => (j === i ? [e.target.value, row[1]] : row)))} placeholder="PSA 10" />
-              <input className="input max-w-[8rem]" value={v} onChange={(e) => setGrades((g) => g.map((row, j) => (j === i ? [row[0], e.target.value] : row)))} inputMode="decimal" />
-              <button type="button" className="btn-secondary" onClick={() => setGrades((g) => g.filter((_, j) => j !== i))}>
+              <input
+                className="input max-w-[12rem]"
+                value={k}
+                aria-label={`Grade ${i + 1}`}
+                onChange={(e) => setGrades((g) => g.map((row, j) => (j === i ? [e.target.value, row[1]] : row)))}
+                placeholder="PSA 10"
+              />
+              <input
+                className="input max-w-[8rem]"
+                value={v}
+                aria-label={`Multiplier for ${k.trim() || `grade ${i + 1}`}`}
+                onChange={(e) => setGrades((g) => g.map((row, j) => (j === i ? [row[0], e.target.value] : row)))}
+                inputMode="decimal"
+              />
+              <button
+                type="button"
+                className="btn-secondary"
+                aria-label={`Remove ${k.trim() || `grade ${i + 1}`}`}
+                onClick={() => setGrades((g) => g.filter((_, j) => j !== i))}
+              >
                 Remove
               </button>
             </div>
@@ -107,7 +153,14 @@ export function SettingsForm({ initial }: { initial: Settings }) {
           </label>
           <label className="block sm:col-span-2">
             <span className="label">Webhook URL (optional)</span>
-            <input className="input" value={alertWebhookUrl} onChange={(e) => setAlertWebhookUrl(e.target.value)} placeholder="https://…" />
+            <input
+              className="input"
+              type="url"
+              inputMode="url"
+              value={alertWebhookUrl}
+              onChange={(e) => setAlertWebhookUrl(e.target.value)}
+              placeholder="https://…"
+            />
           </label>
         </div>
       </section>
@@ -123,12 +176,37 @@ export function SettingsForm({ initial }: { initial: Settings }) {
         </label>
       </section>
 
+      {error && (
+        <p className="card-surface p-3 text-sm text-red-700 dark:text-red-300" role="alert">
+          {error}
+        </p>
+      )}
+
       <div className="flex items-center gap-3">
-        <button type="button" className="btn-primary" onClick={save} disabled={saving}>
-          {saving ? "Saving…" : "Save settings"}
+        <button type="button" className="btn-primary" onClick={save} disabled={status === "saving"}>
+          {status === "saving" ? "Saving…" : "Save settings"}
         </button>
-        {status && <span className="text-sm text-neutral-600 dark:text-neutral-300">{status}</span>}
+        {status === "saved" && (
+          <span className="text-sm text-green-800 dark:text-green-300">Saved. New multipliers apply the next time a card&rsquo;s prices are refreshed.</span>
+        )}
       </div>
     </div>
   );
+}
+
+function gradeRows(settings: Settings): Array<[string, string]> {
+  return Object.entries(settings.gradeMultipliers).map(([k, v]) => [k, String(v)]);
+}
+
+function conditionRows(settings: Settings): Record<Condition, string> {
+  return Object.fromEntries(Object.entries(settings.conditionMultipliers).map(([k, v]) => [k, String(v)])) as Record<Condition, string>;
+}
+
+/**
+ * An empty or unparseable box becomes NaN, which JSON sends as null and the
+ * server refuses by name. Coercing it to zero here would silently rewrite a
+ * fee, and the owner would never know.
+ */
+function numberOrNaN(text: string): number {
+  return text.trim() === "" ? Number.NaN : Number(text);
 }

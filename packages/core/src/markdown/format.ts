@@ -179,10 +179,17 @@ export function slug(text: string, max = 60): string {
   return cleaned.slice(0, max).replace(/-+$/g, "");
 }
 
-/** Money for a human, without a currency symbol the file cannot promise. */
+/**
+ * Money as written into a file that is also the record.
+ *
+ * Two decimals as a minimum, so a whole dollar still reads "$1.00" — but never
+ * a maximum of two. A case bought at $0.035 or a fee of $1.005 would round on
+ * the way out and come back changed on the way in, and the file is meant to be
+ * read back as what was recorded, not as an approximation of it.
+ */
 export function money(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
-  return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  return value.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 6 });
 }
 
 /** Read a number back out of a cell like "$1,234.50" or "1234.5". */

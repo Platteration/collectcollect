@@ -1,6 +1,7 @@
 import { intakeCard } from "./cards";
 import { headerKey, parseCsv } from "@collectcollect/core/csv";
-import { CONDITIONS, GAMES, type CardInput, type Condition, type Game } from "./types";
+import { isCondition, isGame, type CardInput, type Condition, type Game } from "./types";
+import { lookup } from "@collectcollect/core/lookup";
 
 /**
  * Column aliases, so an export from another collection tool usually lands
@@ -134,7 +135,7 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
     if (!name) return { line, input: null, problem: "No card name in this row", warning: null };
 
     const rawGame = headerKey(value(row, "game"));
-    const game = GAME_ALIASES[rawGame] ?? defaults.game ?? (rawGame && rawGame in GAMES ? (rawGame as Game) : null);
+    const game = lookup(GAME_ALIASES, rawGame) ?? defaults.game ?? (isGame(rawGame) ? rawGame : null);
     if (!game) {
       return {
         line,
@@ -147,7 +148,8 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
     const quantity = Number(value(row, "quantity") || "1");
     const { grade, company, asCondition } = readGrade(value(row, "grade"), value(row, "gradingCompany"));
     const conditionText = headerKey(value(row, "condition") || asCondition || "");
-    const condition = CONDITION_ALIASES[conditionText] ?? (conditionText.toUpperCase() in CONDITIONS ? (conditionText.toUpperCase() as Condition) : null);
+    const upper = conditionText.toUpperCase();
+    const condition = lookup(CONDITION_ALIASES, conditionText) ?? (isCondition(upper) ? upper : null);
 
     const warnings: string[] = [];
     if (conditionText && !condition) warnings.push(`Condition "${value(row, "condition") || asCondition}" was not recognised, so Near Mint was assumed`);

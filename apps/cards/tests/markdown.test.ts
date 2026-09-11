@@ -105,6 +105,18 @@ describe("a card as a document", () => {
     expect(parsed.warnings).toEqual([]);
   });
 
+  it("does not round money on the way through", () => {
+    // A cost that is not a whole number of cents is still what was paid, and
+    // the file is the record: $1.005 written as $1.01 would come back changed.
+    const card = createCard({ game: "mtg", name: "Bolt", quantity: 2, purchasePrice: 1.005 });
+    const text = fileFor(card.id);
+    expect(text).toContain("$1.005");
+    expect(parseCardMarkdown(text)!.acquisitions[0].unitCost).toBe(1.005);
+    // A whole number of cents still reads the way people write money.
+    const whole = createCard({ game: "mtg", name: "Counterspell", quantity: 1, purchasePrice: 3 });
+    expect(fileFor(whole.id)).toContain("$3.00");
+  });
+
   it("mirrors every column the cards table has", () => {
     const card = createCard({
       game: "sports",

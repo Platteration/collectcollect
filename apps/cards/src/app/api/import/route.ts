@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { errorMessage, jsonError } from "@/lib/http";
 import { applyImport, previewImport } from "@/lib/import";
-import { GAMES, type Game } from "@/lib/types";
+import { isGame } from "@/lib/types";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 
@@ -19,7 +19,8 @@ export async function POST(request: Request) {
   if (typeof body.csv !== "string" || !body.csv.trim()) return jsonError("No CSV content");
   if (body.csv.length > MAX_BYTES) return jsonError("That file is larger than 8 MB", 413);
 
-  const game = typeof body.game === "string" && body.game in GAMES ? (body.game as Game) : undefined;
+  if (body.game !== undefined && body.game !== null && body.game !== "" && !isGame(body.game)) return jsonError("Unknown game");
+  const game = isGame(body.game) ? body.game : undefined;
   try {
     const preview = previewImport(body.csv, { game });
     if (!body.apply) return NextResponse.json({ preview });

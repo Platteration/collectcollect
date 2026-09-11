@@ -113,6 +113,18 @@ describe("previewing a file", () => {
     expect(preview.rows[0].input!.category).toBe("other");
   });
 
+  it("does not let a prototype property pass as a kind of item", () => {
+    // Through the column, and through the chosen default: neither is a category.
+    const column = previewImport(csv("name,category", "Mystery Object,constructor"));
+    expect(column.rows[0].input).toBeNull();
+    expect(column.rows[0].problem).toMatch(/Unknown kind of item "constructor"/);
+    const chosen = previewImport(csv("name", "Mystery Object"), { category: "constructor" as never });
+    const applied = applyImport(chosen);
+    expect(applied.created).toBe(0);
+    expect(applied.skipped[0].reason).toMatch(/category/i);
+    expect(listItems()).toHaveLength(0);
+  });
+
   it("keeps the line numbers right when the file has blank rows", () => {
     const preview = previewImport(csv("name", "", "Clutch Case", "", "Chroma Case"));
     expect(preview.rows.map((r) => r.line)).toEqual([3, 5]);

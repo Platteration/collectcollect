@@ -20,7 +20,23 @@ export function tooLarge(request: Request, max: number, message: string) {
   return null;
 }
 
+/** Whether a string is somewhere the server may POST to on its own: an http(s) URL. */
+export function isWebhookUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A route parameter as a row id, or null.
+ *
+ * Only the digits of a positive integer: `Number()` would take "1e3", " 1",
+ * "0x10" and "1.0" as ids, and an id that reaches the database in more than one
+ * spelling is an id that can be reached in more than one way.
+ */
 export function parseId(raw: string): number | null {
-  const n = Number(raw);
-  return Number.isInteger(n) && n > 0 ? n : null;
+  return /^[1-9]\d{0,9}$/.test(raw) ? Number(raw) : null;
 }

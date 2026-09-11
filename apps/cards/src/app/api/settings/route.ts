@@ -3,6 +3,7 @@ import { jsonError } from "@/lib/http";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { providerStatuses } from "@/lib/status";
 import type { Settings } from "@/lib/types";
+import { isWebhookUrl } from "@collectcollect/core/http";
 
 export async function GET() {
   return NextResponse.json({ settings: getSettings(), providers: providerStatuses() });
@@ -20,6 +21,8 @@ export async function PUT(request: Request) {
   // Anything the browser could not turn into a number arrives as null, since
   // that is what JSON does with NaN. Saving around it would drop the field
   // back to a default and still answer "saved", so say what is wrong instead.
+  // The same goes for a webhook that is not a URL: saving it as blank would
+  // switch alerts off while reporting success.
   const problems: string[] = [];
   const number = (label: string, value: unknown, fallback: number): number => {
     if (value === undefined) return fallback;
@@ -43,6 +46,14 @@ export async function PUT(request: Request) {
     }
     return out;
   };
+  const text = (label: string, value: unknown, fallback: string): string => {
+    if (value === undefined) return fallback;
+    if (typeof value !== "string") {
+      problems.push(label);
+      return fallback;
+    }
+    return value;
+  };
 
   const gradeMultipliers = numbers("grade multipliers", body.gradeMultipliers, current.gradeMultipliers);
   const conditionMultipliers = numbers("condition multipliers", body.conditionMultipliers, current.conditionMultipliers);
@@ -50,9 +61,12 @@ export async function PUT(request: Request) {
   const readyMinUpside = number("ready-to-grade amount", body.readyMinUpside, current.readyMinUpside);
   const readyMinUpsidePercent = number("ready-to-grade percentage", body.readyMinUpsidePercent, current.readyMinUpsidePercent);
   const alertMovePercent = number("price-move alert percentage", body.alertMovePercent, current.alertMovePercent);
+  const ownerName = text("owner name", body.ownerName, current.ownerName);
+  const alertWebhookUrl = text("webhook URL", body.alertWebhookUrl, current.alertWebhookUrl).trim();
+  if (alertWebhookUrl && !isWebhookUrl(alertWebhookUrl)) problems.push("webhook URL (it has to start with http:// or https://)");
 
   if (problems.length) {
-    return jsonError(`These have to be numbers, and none of your settings were changed: ${problems.join(", ")}.`);
+    return jsonError(`These are not right, and none of your settings were changed: ${problems.join(", ")}.`);
   }
 
   const settings = saveSettings({
@@ -63,9 +77,9 @@ export async function PUT(request: Request) {
     gradingFee,
     readyMinUpside,
     readyMinUpsidePercent,
-    ownerName: body.ownerName ?? current.ownerName,
+    ownerName,
     alertMovePercent,
-    alertWebhookUrl: body.alertWebhookUrl ?? current.alertWebhookUrl,
+    alertWebhookUrl,
   });
   return NextResponse.json({ settings, providers: providerStatuses() });
 }

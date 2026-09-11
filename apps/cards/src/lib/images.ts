@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { uploadsDir } from "./db";
+import { lookup } from "@collectcollect/core/lookup";
 
 export const ALLOWED_IMAGE_TYPES: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -47,7 +48,7 @@ export async function dominantColor(buffer: Buffer): Promise<string | null> {
 }
 
 export async function saveUpload(file: File): Promise<{ name: string; bytes: number; color: string | null }> {
-  if (!ALLOWED_IMAGE_TYPES[file.type] && !file.type.startsWith("image/")) {
+  if (!lookup(ALLOWED_IMAGE_TYPES, file.type) && !file.type.startsWith("image/")) {
     throw new Error(`Unsupported file type: ${file.type || "unknown"}`);
   }
   const input = Buffer.from(await file.arrayBuffer());

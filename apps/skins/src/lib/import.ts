@@ -2,6 +2,7 @@ import { intakeItem } from "./items";
 import { headerKey, parseCsv } from "@collectcollect/core/csv";
 import { CATEGORIES, EXTERIORS, RARITIES, exteriorForFloat, type Category, type Exterior, type ItemInput, type Rarity } from "./types";
 import { EXTERIOR_ALIASES, exteriorFromName, guessCategory, isSouvenirName, isStatTrakName, splitName } from "./naming";
+import { lookup } from "@collectcollect/core/lookup";
 
 // Re-exported so the import preview and the add form agree on what a name says.
 export { exteriorFromName, guessCategory };
@@ -158,13 +159,13 @@ export function previewImport(text: string, defaults: { category?: Category } = 
     if (floatValue !== null) {
       exterior = exteriorForFloat(floatValue);
     } else if (rawExterior) {
-      exterior = EXTERIOR_ALIASES[rawExterior] ?? (Object.hasOwn(EXTERIORS, rawExterior) ? (rawExterior as Exterior) : null);
+      exterior = lookup(EXTERIOR_ALIASES, rawExterior) ?? (Object.hasOwn(EXTERIORS, rawExterior) ? (rawExterior as Exterior) : null);
       if (!exterior) warnings.push(`Wear "${value(row, "exterior")}" was not recognised, so it was read from the name instead`);
     }
     exterior ??= exteriorFromName(name);
 
     const rawCategory = headerKey(value(row, "category"));
-    const stated = CATEGORY_ALIASES[rawCategory] ?? (rawCategory && Object.hasOwn(CATEGORIES, rawCategory) ? (rawCategory as Category) : null);
+    const stated = lookup(CATEGORY_ALIASES, rawCategory) ?? (rawCategory && Object.hasOwn(CATEGORIES, rawCategory) ? (rawCategory as Category) : null);
     let category = stated ?? guessCategory(name);
     if (!category && (exterior !== null || floatValue !== null)) {
       // Only a weapon, a knife or a pair of gloves has wear at all, so a wear
@@ -191,7 +192,7 @@ export function previewImport(text: string, defaults: { category?: Category } = 
     const rawRarity = headerKey(value(row, "rarity"));
     let rarity: Rarity | null = null;
     if (rawRarity) {
-      rarity = RARITY_ALIASES[rawRarity] ?? (Object.hasOwn(RARITIES, rawRarity) ? (rawRarity as Rarity) : null);
+      rarity = lookup(RARITY_ALIASES, rawRarity) ?? (Object.hasOwn(RARITIES, rawRarity) ? (rawRarity as Rarity) : null);
       if (!rarity) warnings.push(`Rarity "${value(row, "rarity")}" was not recognised, so it was left out`);
     }
 
