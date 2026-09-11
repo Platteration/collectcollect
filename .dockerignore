@@ -4,7 +4,7 @@
 **/.next
 **/data
 .git
-*.md
+**/*.md
 .env*
 !.env.example
 **/tests

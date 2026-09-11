@@ -2,6 +2,7 @@ import { createAlert } from "../src/lib/alerts";
 import { addAcquisition, addSnapshot, createItem } from "../src/lib/items";
 import { flushCollection } from "../src/lib/markdown/mirror";
 import { recordSale } from "../src/lib/sales";
+import { clutchCase, redline } from "../tests/fixtures";
 import { READ_DATA_DIR } from "./data-dir";
 
 /**
@@ -84,16 +85,7 @@ export default async function seed() {
   // Two of the same skin at the same wear tier: different objects, and the app
   // must never treat them as one.
   const clean = createItem({
-    marketHashName: "AK-47 | Redline (Field-Tested)",
-    category: "weapon",
-    weapon: "AK-47",
-    finish: "Redline",
-    rarity: "classified",
-    collection: "The Huntsman Collection",
-    floatValue: 0.1601,
-    paintSeed: 412,
-    purchasePrice: 42,
-    notes: "First one I ever bought.",
+    ...redline({ floatValue: 0.1601, purchasePrice: 42, notes: "First one I ever bought." }),
     stickers: [
       { slot: 0, name: "iBUYPOWER | Katowice 2014", marketHashName: "Sticker | iBUYPOWER | Katowice 2014", wear: 0 },
       { slot: 1, name: "Titan | Katowice 2014", marketHashName: null, wear: 0.35 },
@@ -102,20 +94,11 @@ export default async function seed() {
   // Only one market listing it, so there is nothing to compare.
   price(clean.id, "2026-06-01T00:00:00.000Z", 51, { skinport: 51 });
 
-  const rough = createItem({
-    marketHashName: "AK-47 | Redline (Field-Tested)",
-    category: "weapon",
-    weapon: "AK-47",
-    finish: "Redline",
-    rarity: "classified",
-    floatValue: 0.3702,
-    paintSeed: 88,
-    purchasePrice: 31,
-  });
+  const rough = createItem(redline({ collection: null, floatValue: 0.3702, paintSeed: 88, purchasePrice: 31 }));
   // Worth moving, and nothing stopping it.
   price(rough.id, "2026-06-01T00:00:00.000Z", 34, { skinport: 34, csfloat: 33 });
 
-  const cases = createItem({ marketHashName: "Clutch Case", category: "case", quantity: 20, purchasePrice: 0.42 });
+  const cases = createItem(clutchCase({ quantity: 20, purchasePrice: 0.42 }));
   addAcquisition(cases.id, { quantity: 15, unitCost: 1.15 });
   // Pennies apart per copy, across thirty-five copies.
   price(cases.id, "2026-06-01T00:00:00.000Z", 1.4, { skinport: 1.4, csfloat: 1.35 });

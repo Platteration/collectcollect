@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "npm run dev -w @collectcollect/cards",
     "start": "npm run start -w @collectcollect/cards",
+    "start:skins": "npm run start -w @collectcollect/skins",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
@@ -16,5 +17,8 @@
     "e2e": "npm run e2e --workspaces --if-present",
     "cards": "npm run dev -w @collectcollect/cards",
     "skins": "npm run dev -w @collectcollect/skins"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

@@ -11,7 +11,7 @@ import path from "node:path";
  * The paths come from the pid, so the config and the seed agree without a file
  * to coordinate through, and two runs on one machine do not collide.
  */
-const ROOT = path.join(os.tmpdir(), `collectcollect-skins-e2e-${process.pid}`);
+export const ROOT = path.join(os.tmpdir(), `collectcollect-skins-e2e-${process.pid}`);
 
 /** Seeded, and never written to: the inventory the reading specs measure. */
 export const READ_DATA_DIR = path.join(ROOT, "read");

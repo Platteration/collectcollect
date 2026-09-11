@@ -5,47 +5,124 @@ on:
     branches: ["**"]
   pull_request:
 
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
+# A new push to the same branch supersedes the run in progress.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Fast and whole: every workspace's lint, types and unit tests in one job.
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
 
-      - name: Install dependencies
-        run: npm ci
-
-      # The root scripts fan out across every workspace under apps/ and packages/.
-      - name: Lint
-        run: npm run lint
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Unit tests
-        run: npm test
-
-      - name: Build
-        run: npm run build
-
-      # The e2e suite boots the built app, so it runs after the build step.
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-
-      - name: End-to-end tests
-        run: npm run e2e
-
-      - name: Upload failure artifacts
+  # Each app boots its own servers from a real build, so they run apart and in
+  # parallel. Only the browser binary and Next's build cache are worth keeping
+  # between runs; a stale build output is not.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [cards, skins]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Cache the Next build
+        uses: actions/cache@v4
+        with:
+          path: apps/${{ matrix.app }}/.next/cache
+          key: next-${{ matrix.app }}-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('apps/**/*.ts', 'apps/**/*.tsx', 'packages/**/*.ts', 'packages/**/*.tsx') }}
+          restore-keys: |
+            next-${{ matrix.app }}-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+      - run: npm run build -w @collectcollect/${{ matrix.app }}
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e -w @collectcollect/${{ matrix.app }}
+      - name: Upload the report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-${{ matrix.app }}
           path: |
-            apps/*/playwright-report/
-            apps/*/test-results/
+            apps/${{ matrix.app }}/playwright-report/
+            apps/${{ matrix.app }}/test-results/
           retention-days: 7
+
+  # The image is the thing people run, so it is built for both apps and the
+  # running container is asked whether it is well.
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [cards, skins]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: APP=${{ matrix.app }}
+          tags: collectcollect-${{ matrix.app }}:ci
+          load: true
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,scope=${{ matrix.app }},mode=max
+      - name: Boot the container and ask it how it is
+        run: |
+          docker run -d --name app -p 3000:3000 collectcollect-${{ matrix.app }}:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/api/health; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "the container never answered"; docker logs app; exit 1
+      - name: The image's own health check agrees
+        run: |
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' app)
+            echo "health: $status"
+            [ "$status" = healthy ] && exit 0
+            sleep 2
+          done
+          docker logs app; exit 1
+      - if: always()
+        run: docker rm -f app
+
+  # Advisory: a known vulnerability in a dependency is worth seeing on every
+  # run, but not worth blocking a fix for something else.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high

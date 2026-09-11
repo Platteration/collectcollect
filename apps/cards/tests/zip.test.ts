@@ -488,7 +488,9 @@ describe("upload names", () => {
   it("only accepts the names it writes itself", async () => {
     const { isValidUploadName, uploadPath } = await import("@/lib/images");
     expect(isValidUploadName("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg")).toBe(true);
-    expect(isValidUploadName("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.png")).toBe(true);
+    // Every upload is re-encoded to JPEG, so nothing else is a name this app wrote.
+    expect(isValidUploadName("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.png")).toBe(false);
+    expect(isValidUploadName("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.webp")).toBe(false);
     expect(isValidUploadName("../../etc/passwd")).toBe(false);
     expect(isValidUploadName("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.exe")).toBe(false);
     expect(isValidUploadName("AAAAAAAA-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg")).toBe(false);

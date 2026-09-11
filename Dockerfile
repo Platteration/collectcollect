@@ -43,6 +43,10 @@ COPY --from=build --chown=node:node /app/apps/${APP}/public ./apps/${APP}/public
 USER node
 VOLUME ["/data"]
 EXPOSE 3000
+# The image has no curl; node asks the health route itself. A container that
+# stops answering is reported as unhealthy rather than merely running.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 # Shell form, so the app chosen at build time is read from the environment;
 # CMD cannot see a build argument directly.
 CMD node ${APP_DIR}/server.js

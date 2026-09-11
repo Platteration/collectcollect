@@ -13,7 +13,9 @@ export const ALLOWED_IMAGE_TYPES: Record<string, string> = {
   "image/heif": "heif",
 };
 
-const NAME_RE = /^[a-f0-9-]{36}\.(jpg|png|webp)$/;
+// Only what saveUpload writes: every upload is re-encoded to JPEG under a
+// UUID, so a .png or .webp under a UUID is a file somebody else put there.
+const NAME_RE = /^[a-f0-9-]{36}\.jpg$/;
 
 export function isValidUploadName(name: string): boolean {
   return NAME_RE.test(name);

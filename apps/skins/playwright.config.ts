@@ -21,11 +21,14 @@ export default defineConfig({
   testDir: "./e2e",
   testMatch: /.*\.spec\.ts/,
   globalSetup: "./e2e/seed.ts",
+  globalTeardown: "./e2e/teardown.ts",
   fullyParallel: false,
   workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [["github"], ["list"]] : "list",
+  // The html report is what the CI job uploads on failure; without a reporter
+  // that writes one, the upload step finds nothing.
+  reporter: process.env.CI ? [["github"], ["list"], ["html", { open: "never" }]] : "list",
   use: { ...devices["Desktop Chrome"], trace: "retain-on-failure", screenshot: "only-on-failure" },
   projects: [
     {

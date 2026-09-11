@@ -199,18 +199,24 @@ tests/                   Vitest suites (providers with mocked fetch, valuation, 
 ## Scripts
 
 ```bash
-npm run dev         # development server
-npm run build       # production build
+npm run dev         # the card app's development server (npm run skins for the other)
+npm run build       # production build of every workspace
+npm start           # the card app from its build; npm run start:skins for the other
 npm test            # unit tests (vitest)
-npm run e2e         # end-to-end tests (playwright, boots its own servers)
-npm run typecheck   # tsc (after generating Next route types)
-npm run lint
+npm run e2e         # end-to-end tests (playwright, boots its own servers, cleans up after)
+npm run typecheck   # tsc in every workspace, after generating Next route types
+npm run lint        # eslint in every workspace, the shared package included
 ```
 
 Every script above runs from the repository root and covers every workspace.
 To drive one app on its own, add `-w @collectcollect/cards` — which is how you
 reach the app-only scripts, such as `npm run e2e:ui -w @collectcollect/cards`
-for the Playwright suite in UI mode.
+for the Playwright suite in UI mode, or `npm run icons -w @collectcollect/skins`
+to re-render that app's icons from its SVG.
+
+Node 22 or later; `.nvmrc` says so for version managers. CI runs the checks,
+both end-to-end suites, both Docker images (booting each and asking it how it
+is) and an advisory dependency audit, as separate jobs.
 
 ## Testing
 
