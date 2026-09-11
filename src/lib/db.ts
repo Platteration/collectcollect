@@ -121,7 +121,23 @@ const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "cards", column: "grading_status", ddl: "ALTER TABLE cards ADD COLUMN grading_status TEXT NOT NULL DEFAULT 'undecided'" },
   { table: "cards", column: "accent_color", ddl: "ALTER TABLE cards ADD COLUMN accent_color TEXT" },
   { table: "cards", column: "location", ddl: "ALTER TABLE cards ADD COLUMN location TEXT" },
+  { table: "cards", column: "name_key", ddl: "ALTER TABLE cards ADD COLUMN name_key TEXT" },
 ];
+
+/**
+ * Applied after the columns exist, so it can name one of them.
+ *
+ * `name_key` is `lower(trim(name))` stored rather than computed: duplicate
+ * detection looks a card up by its normalised name on every add, and an
+ * expression in the WHERE clause cannot use an index, so that was a full scan
+ * of the cards table per row — over a table an import is itself growing. The
+ * backfill covers rows written before the column existed, and createCard and
+ * updateCard keep it in step.
+ */
+const POST_MIGRATIONS = `
+UPDATE cards SET name_key = lower(trim(name)) WHERE name_key IS NULL OR name_key != lower(trim(name));
+CREATE INDEX IF NOT EXISTS idx_cards_lookup ON cards(game, name_key);
+`;
 
 export function openDatabase(file: string): Database.Database {
   const db = new Database(file);
@@ -132,6 +148,7 @@ export function openDatabase(file: string): Database.Database {
     const cols = db.prepare(`PRAGMA table_info(${m.table})`).all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === m.column)) db.exec(m.ddl);
   }
+  db.exec(POST_MIGRATIONS);
   return db;
 }
 

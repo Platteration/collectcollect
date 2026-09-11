@@ -1,5 +1,5 @@
 import { latestSnapshotsByCard, listCards } from "@/lib/cards";
-import { GAMES } from "@/lib/types";
+import { GAMES, label } from "@/lib/types";
 import { listSales } from "@/lib/sales";
 
 const COLUMNS = [
@@ -24,7 +24,7 @@ function salesCsv(): string {
     const net = Math.round((s.unitPrice * s.quantity - s.fees) * 100) / 100;
     const gain = s.unitCost === null ? null : Math.round((net - s.unitCost * s.quantity) * 100) / 100;
     lines.push(
-      [s.id, s.cardId, GAMES[s.game], s.cardName, s.cardDetail, s.soldAt, s.quantity, s.unitPrice, s.fees, net, s.unitCost, gain, s.venue, s.notes]
+      [s.id, s.cardId, label(GAMES, s.game), s.cardName, s.cardDetail, s.soldAt, s.quantity, s.unitPrice, s.fees, net, s.unitCost, gain, s.venue, s.notes]
         .map(cell)
         .join(","),
     );
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
     const each = s?.yourCopyValue ?? null;
     lines.push(
       [
-        c.id, GAMES[c.game], c.sport, c.name, c.setName, c.setCode, c.cardNumber, c.year, c.rarity, c.variant, c.language, c.manufacturer,
+        c.id, label(GAMES, c.game), c.sport, c.name, c.setName, c.setCode, c.cardNumber, c.year, c.rarity, c.variant, c.language, c.manufacturer,
         c.quantity, c.grade ? "" : c.condition, c.gradingCompany, c.grade, c.certNumber, c.grade ? "" : c.gradingStatus, c.purchasePrice, c.location,
         each, each === null ? null : Math.round(each * c.quantity * 100) / 100, s?.ungraded ?? null,
         s?.graded["PSA 10"] ?? null, s?.estimatedGraded["PSA 10"] ?? null, s?.ungradedSource ?? null, s?.fetchedAt ?? null, c.notes,

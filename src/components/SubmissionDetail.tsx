@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { submissionOutcome } from "@/lib/analytics";
 import { money, when } from "@/lib/format";
-import { GRADING_STATUSES, SUBMISSION_STATUSES, type GradingStatus, type Submission } from "@/lib/types";
+import { GRADING_STATUSES, SUBMISSION_STATUSES, label, type GradingStatus, type Submission } from "@/lib/types";
 
 export interface Candidate {
   id: number;
@@ -75,7 +75,7 @@ export function SubmissionDetail({ submission: initial, candidates }: { submissi
         </div>
         <div className="flex items-center gap-2">
           <span className="badge bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100">
-            {SUBMISSION_STATUSES[submission.status]}
+            {label(SUBMISSION_STATUSES, submission.status)}
           </span>
           <button type="button" className="btn-danger" onClick={remove} disabled={busy}>
             Delete
@@ -195,7 +195,7 @@ export function SubmissionDetail({ submission: initial, candidates }: { submissi
                     <div className="truncate text-xs text-neutral-500">
                       {c.detail} · raw {money(c.raw)}
                       {c.best ? ` · gem mint ${money(c.best)}` : ""}
-                      {c.status !== "undecided" ? ` · ${GRADING_STATUSES[c.status]}` : ""}
+                      {c.status !== "undecided" ? ` · ${label(GRADING_STATUSES, c.status)}` : ""}
                     </div>
                   </div>
                   <button type="button" className="btn-secondary" onClick={() => patch({ addCardId: c.id })} disabled={busy}>

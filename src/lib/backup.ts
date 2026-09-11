@@ -2,8 +2,12 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type Database from "better-sqlite3";
 import { dataDir, databaseFile, getDb, lockDatabase, openDatabase, setDb, unlockDatabase, uploadsDir } from "./db";
+import { httpUrl } from "./format";
 import { isValidUploadName } from "./images";
+import { MAX_REQUEST_BYTES } from "./limits";
+import { CONDITIONS, GAMES, GRADING_STATUSES, has } from "./types";
 import { isSafeEntryName, readZip, zipStream, type ZipEntry } from "./zip";
 
 /**
@@ -139,12 +143,14 @@ export function backupSummary(): {
 // ---------------------------------------------------------------------------
 
 /**
- * Ceilings for an uploaded archive. A restore holds the archive and each
- * entry in memory, so this is deliberately well below what the writer can
- * produce; a collection larger than this is restored by unpacking the zip into
- * the data directory by hand.
+ * Ceilings for an uploaded archive. A restore holds the archive and each entry
+ * in memory, so this is deliberately well below what the writer can produce; a
+ * collection larger than this is restored by unpacking the zip into the data
+ * directory by hand. It is the same number the proxy's body buffer is set to
+ * (src/lib/limits.ts): a larger ceiling here would be unenforceable, because
+ * anything over that buffer reaches the route truncated rather than refused.
  */
-export const RESTORE_MAX_BYTES = 512 * 1024 * 1024;
+export const RESTORE_MAX_BYTES = MAX_REQUEST_BYTES;
 const RESTORE_LIMITS = { maxTotalBytes: RESTORE_MAX_BYTES, maxEntries: 100_000 };
 
 export interface RestoreResult {
@@ -152,6 +158,66 @@ export interface RestoreResult {
   cards: number;
   /** Where the collection that was replaced now lives, in case the restore was a mistake. */
   movedAsideTo: string;
+}
+
+/** Thrown when the archive is a database, but not one this app could have written. */
+class ArchiveContentError extends Error {}
+
+/**
+ * Every check the write path makes, applied to the database inside an archive.
+ *
+ * The archive is written by whoever hands the owner a file, and until now the
+ * only thing asked of its database was that `SELECT COUNT(*) FROM cards` ran:
+ * less than POST /api/cards asks of a single card. Its rows are then rendered
+ * by every page, so a game of `__proto__`, a summary that is not JSON, or a
+ * `reference_image_url` of `javascript:...` is installed over the live
+ * collection and breaks or poisons the app with no way back through the UI.
+ *
+ * This runs on the staging copy, before anything live is moved aside, and
+ * refuses the whole archive rather than quietly repairing it: a backup whose
+ * rows do not hold up is not this app's backup.
+ */
+function validateStagedDatabase(db: Database.Database): void {
+  const refuse = (what: string): never => {
+    throw new ArchiveContentError(`The database in that archive is not one this app wrote: ${what}`);
+  };
+  const isJson = (text: string | null): boolean => {
+    if (text === null) return true;
+    try {
+      JSON.parse(text);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const cards = db
+    .prepare(
+      `SELECT id, game, condition, grading_status, accent_color, image_path, reference_image_url,
+              external_ids, identification, manual_graded FROM cards`,
+    )
+    .all() as Array<{ id: number } & Record<string, string | null>>;
+  for (const row of cards) {
+    const at = `card ${row.id}`;
+    if (!has(GAMES, row.game)) refuse(`${at} has an unknown game "${row.game}"`);
+    if (!has(CONDITIONS, row.condition)) refuse(`${at} has an unknown condition "${row.condition}"`);
+    if (!has(GRADING_STATUSES, row.grading_status)) refuse(`${at} has an unknown grading status "${row.grading_status}"`);
+    if (row.accent_color !== null && !/^#[0-9a-f]{6}$/i.test(row.accent_color)) refuse(`${at} has an accent colour that is not a #rrggbb literal`);
+    if (row.image_path !== null && !isValidUploadName(row.image_path)) refuse(`${at} names a photo this app could not have stored`);
+    if (row.reference_image_url !== null && !httpUrl(row.reference_image_url)) refuse(`${at} has a reference image URL that is not http(s)`);
+    for (const column of ["external_ids", "identification", "manual_graded"] as const) {
+      if (!isJson(row[column])) refuse(`${at} has a ${column} column that is not JSON`);
+    }
+  }
+
+  // The columns every page parses on the way out, none of which has anywhere to
+  // report a failure from.
+  for (const row of db.prepare("SELECT id, summary FROM price_snapshots").all() as Array<{ id: number; summary: string }>) {
+    if (!isJson(row.summary)) refuse(`price snapshot ${row.id} has a summary that is not JSON`);
+  }
+  for (const row of db.prepare("SELECT id, cards FROM set_checklists").all() as Array<{ id: number; cards: string }>) {
+    if (!isJson(row.cards) || !Array.isArray(JSON.parse(row.cards))) refuse(`set checklist ${row.id} does not hold a list of cards`);
+  }
 }
 
 /**
@@ -188,10 +254,17 @@ export async function restoreBackup(archive: Uint8Array): Promise<RestoreResult>
   let cards = 0;
   try {
     const check = openDatabase(stagedDb);
-    cards = (check.prepare("SELECT COUNT(*) AS n FROM cards").get() as { n: number }).n;
-    check.close();
+    try {
+      validateStagedDatabase(check);
+      cards = (check.prepare("SELECT COUNT(*) AS n FROM cards").get() as { n: number }).n;
+    } finally {
+      check.close();
+    }
   } catch (e) {
     await fsp.rm(staging, { recursive: true, force: true });
+    // A row that does not hold up already says which row and why; anything else
+    // means the file is not a database at all.
+    if (e instanceof ArchiveContentError) throw e;
     throw new Error(`The database in that archive could not be opened: ${e instanceof Error ? e.message : e}`);
   }
 

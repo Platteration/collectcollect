@@ -1,8 +1,11 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { headerKey, parseCsv } from "@/lib/csv";
-import { applyImport, previewImport } from "@/lib/import";
-import { createCard, listCards } from "@/lib/cards";
-import { openDatabase, setDb } from "@/lib/db";
+import { MAX_IMPORT_ROWS, applyImport, previewImport } from "@/lib/import";
+import { createCard, findSimilar, listCards, updateCard } from "@/lib/cards";
+import { getDb, openDatabase, setDb } from "@/lib/db";
 
 describe("csv parsing", () => {
   it("handles quotes, embedded separators and both line endings", () => {
@@ -129,5 +132,87 @@ describe("applying an import", () => {
     const result = applyImport(previewImport([header, row].join("\r\n")));
     expect(result.created).toBe(1);
     expect(listCards()[0]).toMatchObject({ game: "sports", name: "Mike Trout", cardNumber: "US175", year: 2011, quantity: 2, purchasePrice: 650 });
+  });
+});
+
+/**
+ * A CSV import is a synchronous loop inside the request handler, so whatever it
+ * costs, the server answers nothing else for that long. Three things kept that
+ * unbounded: no cap on rows, a duplicate lookup that scanned the whole cards
+ * table per row because it filtered on an expression, and a transaction per
+ * row. Twenty thousand rows — well inside the route's 8 MB body — blocked the
+ * process for a minute, and the table it left behind made the next import
+ * slower still.
+ */
+describe("what one import is allowed to cost", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("reads no more rows than the cap, and says how many it left", () => {
+    const rows = MAX_IMPORT_ROWS + 25;
+    const csv = ["name,game", ...Array.from({ length: rows }, (_, i) => `Card ${i},pokemon`)].join("\n");
+    const preview = previewImport(csv);
+    // Derived from the file, not from the constant: whatever the cap is, the
+    // rows read plus the rows reported must account for every row in the file.
+    expect(preview.rows.length + preview.skippedForSize).toBe(rows);
+    expect(preview.skippedForSize).toBeGreaterThan(0);
+    expect(preview.total).toBe(preview.rows.length);
+    expect(applyImport(preview).created).toBe(preview.rows.length);
+    // Writing a capped file's worth of cards is the slow half of this suite;
+    // the point is that it finishes at all, not how fast.
+  }, 60_000);
+
+  it("leaves a file under the cap alone", () => {
+    const csv = ["name,game", "Charizard,pokemon", "Blastoise,pokemon"].join("\n");
+    expect(previewImport(csv).skippedForSize).toBe(0);
+  });
+
+  it("finds a duplicate through the index rather than by reading every card", () => {
+    createCard({ game: "pokemon", name: "Charizard" });
+    // SQLite's own plan, not a stopwatch: both columns have to be used, or the
+    // lookup degrades to a scan of every card in that game once per row.
+    const plan = getDb()
+      .prepare("EXPLAIN QUERY PLAN SELECT * FROM cards WHERE game = ? AND name_key = ? ORDER BY updated_at DESC")
+      .all("pokemon", "charizard") as Array<{ detail: string }>;
+    expect(plan.map((r) => r.detail).join(" ")).toMatch(/USING INDEX idx_cards_lookup \(game=\? AND name_key=\?\)/);
+    expect(findSimilar({ game: "pokemon", name: " CHARIZARD " })).toHaveLength(1);
+  });
+
+  it("keeps the stored key in step with the name, including on a row that predates it", () => {
+    const card = createCard({ game: "mtg", name: "Ragavan" });
+    updateCard(card.id, { name: " Lightning Bolt " });
+    expect(findSimilar({ game: "mtg", name: "lightning bolt" })).toHaveLength(1);
+    expect(findSimilar({ game: "mtg", name: "Ragavan" })).toHaveLength(0);
+
+    // A database written before the column existed: reopening backfills it.
+    getDb().prepare("UPDATE cards SET name_key = NULL WHERE id = ?").run(card.id);
+    expect(findSimilar({ game: "mtg", name: "lightning bolt" })).toHaveLength(0);
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "collectcollect-import-")), "old.db");
+    const fresh = openDatabase(file);
+    fresh.prepare("INSERT INTO cards (game, name, quantity, condition, grading_status, external_ids, manual_graded, created_at, updated_at) VALUES ('mtg','Ragavan',1,'NM','undecided','{}','{}','t','t')").run();
+    fresh.prepare("UPDATE cards SET name_key = NULL").run();
+    fresh.close();
+    setDb(openDatabase(file));
+    expect(findSimilar({ game: "mtg", name: "ragavan" })).toHaveLength(1);
+  });
+
+  it("commits once for the whole file, not once per row", () => {
+    const db = openDatabase(":memory:");
+    const real = db.transaction.bind(db);
+    let topLevel = 0;
+    db.transaction = ((fn: () => unknown) => {
+      const wrapped = real(fn);
+      return (...args: unknown[]) => {
+        const outermost = !db.inTransaction;
+        const out = (wrapped as (...a: unknown[]) => unknown)(...args);
+        if (outermost) topLevel += 1;
+        return out;
+      };
+    }) as typeof db.transaction;
+    setDb(db);
+
+    const csv = ["name,game", ...Array.from({ length: 20 }, (_, i) => `Card ${i},pokemon`)].join("\n");
+    expect(applyImport(previewImport(csv)).created).toBe(20);
+    // Twenty cards, one commit: intakeCard's own transaction nests as a savepoint.
+    expect(topLevel).toBe(1);
   });
 });

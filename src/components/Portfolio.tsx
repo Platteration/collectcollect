@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { RANGES, change, sliceRange, type Allocation, type OutlookPoint, type PortfolioPoint, type Range, type Realized, type Returns, type Verdict } from "@/lib/analytics";
 import { money, when } from "@/lib/format";
-import { GAMES, GRADING_STATUSES, type Game, type GradingStatus, type Settings } from "@/lib/types";
+import { GAMES, GRADING_STATUSES, label, type Game, type GradingStatus, type Settings } from "@/lib/types";
 import { PortfolioChart } from "./charts/PortfolioChart";
 import { OutlookChart } from "./charts/OutlookChart";
 import { VERDICT_STYLE } from "./verdict";
@@ -288,13 +288,13 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
                             <span className="badge bg-green-600 text-white">Ready</span>
                           )}
                           {o.status !== "undecided" && (
-                            <span className="badge bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100">{GRADING_STATUSES[o.status]}</span>
+                            <span className="badge bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100">{label(GRADING_STATUSES, o.status)}</span>
                           )}
                           <span className={`badge ${VERDICT_STYLE[o.verdict.kind]}`}>{o.verdict.headline}</span>
                         </span>
                       </div>
                       <div className="truncate text-xs text-neutral-500">
-                        {GAMES[o.game]} · {o.detail}
+                        {label(GAMES, o.game)} · {o.detail}
                       </div>
                       {last && (
                         <div className="mt-1 grid grid-cols-3 gap-2 text-xs">
@@ -322,15 +322,15 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
           <div className="card-surface p-4">
             <div className="flex h-3 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800" role="img" aria-label="Share of collection value by game">
               {allocation.map((a) => (
-                <div key={a.game} style={{ width: `${a.share * 100}%`, background: GAME_COLORS[a.game], marginRight: 2 }} title={`${GAMES[a.game]} ${(a.share * 100).toFixed(0)}%`} />
+                <div key={a.game} style={{ width: `${a.share * 100}%`, background: label(GAME_COLORS, a.game), marginRight: 2 }} title={`${label(GAMES, a.game)} ${(a.share * 100).toFixed(0)}%`} />
               ))}
             </div>
             <ul className="mt-3 grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-3">
               {allocation.map((a) => (
                 <li key={a.game} className="flex items-center gap-2">
-                  <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: GAME_COLORS[a.game] }} />
+                  <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: label(GAME_COLORS, a.game) }} />
                   <span className="min-w-0 flex-1 truncate">
-                    {GAMES[a.game]} <span className="text-neutral-500">· {a.cards}</span>
+                    {label(GAMES, a.game)} <span className="text-neutral-500">· {a.cards}</span>
                   </span>
                   <span className="font-medium">{money(a.value)}</span>
                   <span className="w-10 text-right text-neutral-500">{(a.share * 100).toFixed(0)}%</span>

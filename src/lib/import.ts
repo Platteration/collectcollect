@@ -1,6 +1,7 @@
 import { intakeCard } from "./cards";
 import { headerKey, parseCsv } from "./csv";
-import { CONDITIONS, GAMES, type CardInput, type Condition, type Game } from "./types";
+import { getDb } from "./db";
+import { CONDITIONS, GAMES, has, type CardInput, type Condition, type Game } from "./types";
 
 /**
  * Column aliases, so an export from another collection tool usually lands
@@ -95,6 +96,17 @@ export interface ImportRow {
   warning: string | null;
 }
 
+/**
+ * How many rows one import may carry.
+ *
+ * Every row is an insert plus a duplicate lookup, run synchronously inside the
+ * request handler on a database the import is itself growing — so while an
+ * import runs, the server answers nothing else. The route's 8 MB body is on the
+ * order of 10^5 rows, which is minutes of a frozen process from one request;
+ * a file bigger than this is split rather than run.
+ */
+export const MAX_IMPORT_ROWS = 5000;
+
 export interface ImportPreview {
   /** Header name found for each field the file supplies. */
   mapping: Record<string, string>;
@@ -102,6 +114,8 @@ export interface ImportPreview {
   rows: ImportRow[];
   total: number;
   usable: number;
+  /** Rows past MAX_IMPORT_ROWS, which were not read at all. */
+  skippedForSize: number;
 }
 
 /** Read a CSV into card inputs, reporting what could not be understood. */
@@ -111,7 +125,7 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
   const numbered = parseCsv(text)
     .map((cells, i) => ({ cells, line: i + 1 }))
     .filter((r) => r.cells.some((cell) => cell.trim() !== ""));
-  if (numbered.length === 0) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0 };
+  if (numbered.length === 0) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0, skippedForSize: 0 };
 
   const headers = numbered[0].cells.map((h) => h.trim());
   const keys = headers.map(headerKey);
@@ -129,12 +143,17 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
 
   const value = (row: string[], field: string): string => (index[field] === undefined ? "" : (row[index[field]] ?? "").trim());
 
-  const rows: ImportRow[] = numbered.slice(1).map(({ cells: row, line }) => {
+  // Bounded here, where the rows are read, rather than where they are written:
+  // a preview of a pathological file should not be built either.
+  const body = numbered.slice(1);
+  const skippedForSize = Math.max(0, body.length - MAX_IMPORT_ROWS);
+
+  const rows: ImportRow[] = body.slice(0, MAX_IMPORT_ROWS).map(({ cells: row, line }) => {
     const name = value(row, "name");
     if (!name) return { line, input: null, problem: "No card name in this row", warning: null };
 
     const rawGame = headerKey(value(row, "game"));
-    const game = GAME_ALIASES[rawGame] ?? defaults.game ?? (rawGame && rawGame in GAMES ? (rawGame as Game) : null);
+    const game = (has(GAME_ALIASES, rawGame) ? GAME_ALIASES[rawGame] : null) ?? defaults.game ?? (has(GAMES, rawGame) ? rawGame : null);
     if (!game) {
       return {
         line,
@@ -147,7 +166,9 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
     const quantity = Number(value(row, "quantity") || "1");
     const { grade, company, asCondition } = readGrade(value(row, "grade"), value(row, "gradingCompany"));
     const conditionText = headerKey(value(row, "condition") || asCondition || "");
-    const condition = CONDITION_ALIASES[conditionText] ?? (conditionText.toUpperCase() in CONDITIONS ? (conditionText.toUpperCase() as Condition) : null);
+    const conditionCode = conditionText.toUpperCase();
+    const condition =
+      (has(CONDITION_ALIASES, conditionText) ? CONDITION_ALIASES[conditionText] : null) ?? (has(CONDITIONS, conditionCode) ? conditionCode : null);
 
     const warnings: string[] = [];
     if (conditionText && !condition) warnings.push(`Condition "${value(row, "condition") || asCondition}" was not recognised, so Near Mint was assumed`);
@@ -180,7 +201,7 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
     };
   });
 
-  return { mapping, unmapped, rows, total: rows.length, usable: rows.filter((r) => r.input).length };
+  return { mapping, unmapped, rows, total: rows.length, usable: rows.filter((r) => r.input).length, skippedForSize };
 }
 
 export interface ImportResult {
@@ -192,20 +213,26 @@ export interface ImportResult {
 /** Apply a preview, merging into existing cards where they are interchangeable. */
 export function applyImport(preview: ImportPreview): ImportResult {
   const result: ImportResult = { created: 0, merged: 0, skipped: [] };
-  for (const row of preview.rows) {
-    if (!row.input) {
-      result.skipped.push({ line: row.line, reason: row.problem ?? "Could not be read" });
-      continue;
+  // One transaction around the whole file rather than one per row: intakeCard
+  // opens its own, which nests as a savepoint, so the import commits once
+  // instead of once per card.
+  const run = getDb().transaction(() => {
+    for (const row of preview.rows) {
+      if (!row.input) {
+        result.skipped.push({ line: row.line, reason: row.problem ?? "Could not be read" });
+        continue;
+      }
+      try {
+        const outcome = intakeCard(row.input);
+        if (outcome.result === "created") result.created++;
+        else if (outcome.result === "merged") result.merged++;
+        else result.skipped.push({ line: row.line, reason: `${row.input.name} matches more than one card you own` });
+      } catch (e) {
+        result.skipped.push({ line: row.line, reason: e instanceof Error ? e.message : String(e) });
+      }
     }
-    try {
-      const outcome = intakeCard(row.input);
-      if (outcome.result === "created") result.created++;
-      else if (outcome.result === "merged") result.merged++;
-      else result.skipped.push({ line: row.line, reason: `${row.input.name} matches more than one card you own` });
-    } catch (e) {
-      result.skipped.push({ line: row.line, reason: e instanceof Error ? e.message : String(e) });
-    }
-  }
+  });
+  run();
   return result;
 }
 

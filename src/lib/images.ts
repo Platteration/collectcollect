@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { uploadsDir } from "./db";
+import { has } from "./types";
 
 export const ALLOWED_IMAGE_TYPES: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -64,7 +65,7 @@ export async function saveUpload(file: File): Promise<{ name: string; bytes: num
   // the client cares to declare would otherwise pass, and image/svg+xml is a
   // vector document handed to a different parser than the raster formats this
   // app believes it accepts.
-  if (!ALLOWED_IMAGE_TYPES[file.type]) {
+  if (!has(ALLOWED_IMAGE_TYPES, file.type)) {
     throw new Error(`Unsupported file type: ${file.type || "unknown"}`);
   }
   const input = Buffer.from(await file.arrayBuffer());

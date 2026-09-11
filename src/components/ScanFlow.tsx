@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import type { Game, Identification } from "@/lib/types";
+import type { Identification } from "@/lib/types";
 import type { IntakeOutcome } from "@/lib/cards";
-import { GAMES } from "@/lib/types";
+import { GAMES, label } from "@/lib/types";
 
 type ScanStatus = "queued" | "uploading" | "identifying" | "saving" | "added" | "merged" | "review" | "failed";
 
@@ -389,7 +389,7 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
                     <>
                       <div className="truncate font-medium">{it.identification.name}</div>
                       <div className="truncate text-neutral-500">
-                        {GAMES[it.identification.game as Game]}
+                        {label(GAMES, it.identification.game)}
                         {it.identification.set_name ? ` · ${it.identification.set_name}` : ""}
                       </div>
                     </>

@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { MAX_REQUEST_SIZE } from "./src/lib/limits";
 
 const dev = process.env.NODE_ENV === "development";
 
@@ -30,6 +31,13 @@ const csp = [
 const nextConfig: NextConfig = {
   // Native modules must stay external to the server bundle.
   serverExternalPackages: ["better-sqlite3", "sharp"],
+  experimental: {
+    // src/proxy.ts makes Next buffer a copy of every request body, and past
+    // this it truncates the body silently instead of refusing the request. It
+    // is therefore the real ceiling on every route, so it is set from the same
+    // constant the routes enforce.
+    proxyClientMaxBodySize: MAX_REQUEST_SIZE,
+  },
   // Standalone output is for the Docker image only: it produces a
   // self-contained server.js, but `next start` does not support it, so a
   // normal local build keeps the default output.

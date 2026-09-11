@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { declaredTooLarge, errorMessage, jsonError } from "@/lib/http";
 import { applyImport, previewImport } from "@/lib/import";
-import { GAMES, type Game } from "@/lib/types";
+import { GAMES, has } from "@/lib/types";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   // Bytes, not UTF-16 code units: a CSV of accented names is not four times the limit.
   if (Buffer.byteLength(body.csv, "utf8") > MAX_BYTES) return jsonError("That file is larger than 8 MB", 413);
 
-  const game = typeof body.game === "string" && body.game in GAMES ? (body.game as Game) : undefined;
+  const game = has(GAMES, body.game) ? body.game : undefined;
   try {
     const preview = previewImport(body.csv, { game });
     if (!body.apply) return NextResponse.json({ preview });

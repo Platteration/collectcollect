@@ -48,6 +48,16 @@ describe("saveUpload", () => {
     await expect(saveUpload(upload(await png(), ""))).rejects.toThrow(/Unsupported file type/);
   });
 
+  it("is not fooled by a type named after something on Object.prototype", async () => {
+    // A bare `ALLOWED_IMAGE_TYPES[file.type]` answered truthily for every
+    // inherited name, so `Content-Type: constructor` walked past the allowlist
+    // and handed an SVG to librsvg. The two messages say which gate refused it,
+    // which is how the bypass shows.
+    for (const type of ["__proto__", "constructor", "toString", "valueOf", "hasOwnProperty"]) {
+      await expect(saveUpload(upload(SVG, type, "card.svg"))).rejects.toThrow(/Unsupported file type/);
+    }
+  });
+
   it("decides from the decoded bytes, not the declared type", async () => {
     await expect(saveUpload(upload(SVG, "image/png"))).rejects.toThrow(/not a JPEG, PNG, WebP or HEIC/);
     await expect(saveUpload(upload(Buffer.from("not an image at all"), "image/jpeg"))).rejects.toThrow(

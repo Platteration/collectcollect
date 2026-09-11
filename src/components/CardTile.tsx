@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { imageSrc, money } from "@/lib/format";
-import { GAMES, type CardRecord, type PriceSummary } from "@/lib/types";
+import { GAMES, label, type CardRecord, type PriceSummary } from "@/lib/types";
 import { Slab } from "./Slab";
 
 export function CardTile({ card, price, selected = false }: { card: CardRecord; price: PriceSummary | null; selected?: boolean }) {
@@ -19,7 +19,7 @@ export function CardTile({ card, price, selected = false }: { card: CardRecord; 
         ) : (
           <Art src={src} name={card.name} className="h-full w-full object-contain" />
         )}
-        <span className="badge absolute left-11 top-2 bg-black/70 text-white">{GAMES[card.game]}</span>
+        <span className="badge absolute left-11 top-2 bg-black/70 text-white">{label(GAMES, card.game)}</span>
         {card.quantity > 1 && (
           <span className="badge absolute right-2 top-2 bg-amber-600 text-white">×{card.quantity}</span>
         )}

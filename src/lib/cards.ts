@@ -8,7 +8,7 @@ import type {
   PriceSnapshot,
   PriceSummary,
 } from "./types";
-import { CONDITIONS, GAMES, GRADING_STATUSES, type GradingStatus } from "./types";
+import { CONDITIONS, GAMES, GRADING_STATUSES, has, type GradingStatus } from "./types";
 import { httpUrl } from "./format";
 import { IdentificationSchema } from "./identify/schema";
 import { isValidUploadName } from "./images";
@@ -47,13 +47,29 @@ interface CardRow {
   updated_at: string;
 }
 
-function parseJson<T>(text: string | null, fallback: T): T {
+export function parseJson<T>(text: string | null, fallback: T): T {
   if (!text) return fallback;
   try {
     return JSON.parse(text) as T;
   } catch {
     return fallback;
   }
+}
+
+/**
+ * A snapshot row as a record, or null when its summary is not JSON.
+ *
+ * Nothing reading the database can assume the rows are ones this app wrote: a
+ * restore installs someone else's file wholesale, and a bare `JSON.parse` here
+ * throws out of a server component, which has no error boundary to catch it —
+ * one unreadable row would take out the portfolio, the collection, the report
+ * and the cards API together. An unreadable snapshot is dropped instead, which
+ * loses one price reading and nothing else.
+ */
+function rowToSnapshot(r: SnapshotRow): PriceSnapshot | null {
+  const summary = parseJson<PriceSummary | null>(r.summary, null);
+  if (!summary || typeof summary !== "object") return null;
+  return { id: r.id, cardId: r.card_id, fetchedAt: r.fetched_at, summary };
 }
 
 function rowToCard(row: CardRow): CardRecord {
@@ -85,7 +101,7 @@ function rowToCard(row: CardRow): CardRecord {
     identification: parseJson<Identification | null>(row.identification, null),
     manualUngraded: row.manual_ungraded,
     manualGraded: parseJson(row.manual_graded, {}),
-    gradingStatus: (row.grading_status in GRADING_STATUSES ? row.grading_status : "undecided") as GradingStatus,
+    gradingStatus: has(GRADING_STATUSES, row.grading_status) ? row.grading_status : "undecided",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -130,14 +146,14 @@ export function normalizeInput(input: CardInput): Required<
   Omit<CardInput, "identification">
 > & { identification: Identification | null } {
   const game = str(input.game) as Game | null;
-  if (!game || !(game in GAMES)) throw new Error(`Unknown game: ${input.game}`);
+  if (!has(GAMES, game)) throw new Error(`Unknown game: ${input.game}`);
   const name = str(input.name);
   if (!name) throw new Error("Card name is required");
   const condition = (str(input.condition) ?? "NM") as Condition;
-  if (!(condition in CONDITIONS)) throw new Error(`Unknown condition: ${condition}`);
+  if (!has(CONDITIONS, condition)) throw new Error(`Unknown condition: ${condition}`);
   const quantity = Math.max(0, Math.floor(num(input.quantity) ?? 1));
   const gradingStatus = (str(input.gradingStatus) ?? "undecided") as GradingStatus;
-  if (!(gradingStatus in GRADING_STATUSES)) throw new Error(`Unknown grading status: ${gradingStatus}`);
+  if (!has(GRADING_STATUSES, gradingStatus)) throw new Error(`Unknown grading status: ${gradingStatus}`);
   const gradedNums: Record<string, number> = {};
   for (const [k, v] of Object.entries(input.manualGraded ?? {})) {
     const n = num(v);
@@ -181,11 +197,13 @@ export function createCard(input: CardInput): CardRecord {
   const now = new Date().toISOString();
   const result = getDb()
     .prepare(
-      `INSERT INTO cards (game, sport, name, set_name, set_code, card_number, year, rarity, variant,
+      // name_key is written by the same expression findSimilar reads it with, so
+      // the stored value and the old inline `lower(trim(name))` agree exactly.
+      `INSERT INTO cards (game, sport, name, name_key, set_name, set_code, card_number, year, rarity, variant,
         language, manufacturer, quantity, condition, grading_company, grade, cert_number, purchase_price,
         notes, image_path, reference_image_url, accent_color, location, external_ids, identification, manual_ungraded, manual_graded,
         grading_status, created_at, updated_at)
-       VALUES (@game, @sport, @name, @setName, @setCode, @cardNumber, @year, @rarity, @variant,
+       VALUES (@game, @sport, @name, lower(trim(@name)), @setName, @setCode, @cardNumber, @year, @rarity, @variant,
         @language, @manufacturer, @quantity, @condition, @gradingCompany, @grade, @certNumber, @purchasePrice,
         @notes, @imagePath, @referenceImageUrl, @accentColor, @location, @externalIds, @identification, @manualUngraded, @manualGraded,
         @gradingStatus, @now, @now)`,
@@ -206,7 +224,7 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
   const merged = normalizeInput({ ...existing, ...patch, game: patch.game ?? existing.game, name: patch.name ?? existing.name });
   getDb()
     .prepare(
-      `UPDATE cards SET game=@game, sport=@sport, name=@name, set_name=@setName, set_code=@setCode,
+      `UPDATE cards SET game=@game, sport=@sport, name=@name, name_key=lower(trim(@name)), set_name=@setName, set_code=@setCode,
         card_number=@cardNumber, year=@year, rarity=@rarity, variant=@variant, language=@language,
         manufacturer=@manufacturer, quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
         grade=@grade, cert_number=@certNumber, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
@@ -233,8 +251,11 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
 export function findSimilar(input: { game: Game; name: string; cardNumber?: string | null; setName?: string | null }): CardRecord[] {
   const name = input.name.trim().toLowerCase();
   if (!name) return [];
+  // name_key is the stored form of the same expression, so this is an index
+  // probe rather than a scan of the whole table — which, once per row, is what
+  // made a large CSV import block the process for a minute.
   const rows = getDb()
-    .prepare("SELECT * FROM cards WHERE game = ? AND lower(trim(name)) = ? ORDER BY updated_at DESC")
+    .prepare("SELECT * FROM cards WHERE game = ? AND name_key = ? ORDER BY updated_at DESC")
     .all(input.game, name) as CardRow[];
   const norm = (v: string | null | undefined) => (v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const num = normalizeNumber(input.cardNumber);
@@ -360,12 +381,7 @@ export function listSnapshots(cardId: number, limit = 50): PriceSnapshot[] {
   const rows = getDb()
     .prepare("SELECT * FROM price_snapshots WHERE card_id = ? ORDER BY fetched_at DESC, id DESC LIMIT ?")
     .all(cardId, limit) as SnapshotRow[];
-  return rows.map((r) => ({
-    id: r.id,
-    cardId: r.card_id,
-    fetchedAt: r.fetched_at,
-    summary: JSON.parse(r.summary) as PriceSummary,
-  }));
+  return rows.map(rowToSnapshot).filter((s): s is PriceSnapshot => s !== null);
 }
 
 export function latestSnapshot(cardId: number): PriceSnapshot | null {
@@ -377,12 +393,7 @@ export function allSnapshots(): PriceSnapshot[] {
   const rows = getDb()
     .prepare("SELECT * FROM price_snapshots ORDER BY fetched_at ASC, id ASC")
     .all() as SnapshotRow[];
-  return rows.map((r) => ({
-    id: r.id,
-    cardId: r.card_id,
-    fetchedAt: r.fetched_at,
-    summary: JSON.parse(r.summary) as PriceSummary,
-  }));
+  return rows.map(rowToSnapshot).filter((s): s is PriceSnapshot => s !== null);
 }
 
 /** Latest snapshot for every card in one query (for the collection view). */
@@ -396,12 +407,8 @@ export function latestSnapshotsByCard(): Map<number, PriceSnapshot> {
     .all() as SnapshotRow[];
   const map = new Map<number, PriceSnapshot>();
   for (const r of rows) {
-    map.set(r.card_id, {
-      id: r.id,
-      cardId: r.card_id,
-      fetchedAt: r.fetched_at,
-      summary: JSON.parse(r.summary) as PriceSummary,
-    });
+    const snapshot = rowToSnapshot(r);
+    if (snapshot) map.set(r.card_id, snapshot);
   }
   return map;
 }

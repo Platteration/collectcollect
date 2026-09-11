@@ -3,15 +3,15 @@ import { notFound } from "next/navigation";
 import { latestSnapshotsByCard } from "@/lib/cards";
 import { httpUrl, money } from "@/lib/format";
 import { setDetail } from "@/lib/sets";
-import { GAMES, type Game } from "@/lib/types";
+import { GAMES, has } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function SetPage({ params }: PageProps<"/sets/[game]/[name]">) {
   const { game, name } = await params;
-  if (!(game in GAMES)) notFound();
+  if (!has(GAMES, game)) notFound();
   const setName = decodeURIComponent(name);
-  const { owned, checklist, have } = setDetail(game as Game, setName);
+  const { owned, checklist, have } = setDetail(game, setName);
   if (owned.length === 0 && !checklist) notFound();
 
   const prices = latestSnapshotsByCard();
@@ -26,7 +26,7 @@ export default async function SetPage({ params }: PageProps<"/sets/[game]/[name]
         </Link>
         <h1 className="mt-1 font-display text-3xl font-semibold">{checklist?.setName ?? setName}</h1>
         <p className="text-sm text-neutral-500">
-          {GAMES[game as Game]} · {owned.length} card{owned.length === 1 ? "" : "s"} owned worth {money(ownedValue)}
+          {GAMES[game]} · {owned.length} card{owned.length === 1 ? "" : "s"} owned worth {money(ownedValue)}
           {checklist ? ` · ${checklist.cards.length} in the set` : " · no checklist fetched yet"}
         </p>
       </div>

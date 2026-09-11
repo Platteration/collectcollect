@@ -1,8 +1,8 @@
 import { getCard, latestSnapshot, updateCard } from "./cards";
 import { getDb } from "./db";
 import { gradeKey } from "./pricing";
-import type { Game, Submission, SubmissionCard, SubmissionStatus } from "./types";
-import { SUBMISSION_STATUSES } from "./types";
+import type { Game, Submission, SubmissionCard } from "./types";
+import { SUBMISSION_STATUSES, has } from "./types";
 
 interface SubmissionRow {
   id: number;
@@ -65,7 +65,7 @@ function rowToSubmission(r: SubmissionRow): Submission {
     serviceLevel: r.service_level,
     feePerCard: r.fee_per_card,
     shipping: r.shipping,
-    status: (r.status in SUBMISSION_STATUSES ? r.status : "draft") as SubmissionStatus,
+    status: has(SUBMISSION_STATUSES, r.status) ? r.status : "draft",
     sentAt: r.sent_at,
     returnedAt: r.returned_at,
     notes: r.notes,

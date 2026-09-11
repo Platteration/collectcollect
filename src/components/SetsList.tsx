@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { when } from "@/lib/format";
 import type { SetProgress } from "@/lib/sets";
-import { GAMES } from "@/lib/types";
+import { GAMES, label } from "@/lib/types";
 
 export function SetsList({ sets }: { sets: SetProgress[] }) {
   const router = useRouter();
@@ -45,7 +45,7 @@ export function SetsList({ sets }: { sets: SetProgress[] }) {
                   {set.setName}
                 </Link>
                 <div className="text-xs text-neutral-500">
-                  {GAMES[set.game]} · you have {set.owned} card{set.owned === 1 ? "" : "s"}
+                  {label(GAMES, set.game)} · you have {set.owned} card{set.owned === 1 ? "" : "s"}
                   {set.copies !== set.owned ? ` (${set.copies} copies)` : ""}
                   {set.fetchedAt ? ` · checklist from ${when(set.fetchedAt)}` : ""}
                 </div>

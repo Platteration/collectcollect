@@ -1,4 +1,4 @@
-import { listCards } from "../cards";
+import { listCards, parseJson } from "../cards";
 import { getDb } from "../db";
 import { normalizeNumber } from "../pricing/match";
 import type { CardRecord, Game } from "../types";
@@ -31,6 +31,18 @@ export interface SetProgress {
 
 const groupKey = (game: Game, setName: string) => `${game}:${setName.trim().toLowerCase()}`;
 
+/**
+ * A stored checklist, or null when its card list is not readable. The rows are
+ * not necessarily ones this app wrote — a restore installs someone else's
+ * database whole — and a bare `JSON.parse` here throws out of a server
+ * component with nothing to catch it.
+ */
+function rowToChecklist(row: ChecklistRow): (Checklist & { fetchedAt: string }) | null {
+  const cards = parseJson<Checklist["cards"] | null>(row.cards, null);
+  if (!Array.isArray(cards)) return null;
+  return { game: row.game as Game, setId: row.set_id, setName: row.set_name, cards, fetchedAt: row.fetched_at };
+}
+
 export function saveChecklist(list: Checklist): void {
   getDb()
     .prepare(
@@ -43,7 +55,7 @@ export function saveChecklist(list: Checklist): void {
 export function getChecklist(game: Game, setId: string): (Checklist & { fetchedAt: string }) | null {
   const row = getDb().prepare("SELECT * FROM set_checklists WHERE game = ? AND set_id = ?").get(game, setId) as ChecklistRow | undefined;
   if (!row) return null;
-  return { game: row.game as Game, setId: row.set_id, setName: row.set_name, cards: JSON.parse(row.cards), fetchedAt: row.fetched_at };
+  return rowToChecklist(row);
 }
 
 /** Any stored checklist whose name matches how the owner spells the set. */
@@ -51,8 +63,7 @@ function checklistForName(game: Game, setName: string): (Checklist & { fetchedAt
   const row = getDb()
     .prepare("SELECT * FROM set_checklists WHERE game = ? AND lower(trim(set_name)) = ?")
     .get(game, setName.trim().toLowerCase()) as ChecklistRow | undefined;
-  if (row) return { game: row.game as Game, setId: row.set_id, setName: row.set_name, cards: JSON.parse(row.cards), fetchedAt: row.fetched_at };
-  return null;
+  return row ? rowToChecklist(row) : null;
 }
 
 /** Which cards of a checklist the owner has, matched on collector number then name. */

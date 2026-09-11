@@ -3,7 +3,7 @@ import { submissionOutcome } from "@/lib/analytics";
 import { money, when } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { listSubmissions } from "@/lib/submissions";
-import { SUBMISSION_STATUSES } from "@/lib/types";
+import { SUBMISSION_STATUSES, label } from "@/lib/types";
 import { NewSubmission } from "@/components/NewSubmission";
 
 export const dynamic = "force-dynamic";
@@ -70,7 +70,7 @@ export default function SubmissionsPage() {
                         </div>
                       )
                     )}
-                    <span className={`badge ${STATUS_STYLE[s.status]}`}>{SUBMISSION_STATUSES[s.status]}</span>
+                    <span className={`badge ${STATUS_STYLE[s.status]}`}>{label(SUBMISSION_STATUSES, s.status)}</span>
                   </div>
                 </div>
               </li>

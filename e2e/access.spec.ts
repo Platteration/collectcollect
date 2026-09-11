@@ -71,6 +71,36 @@ test.describe("access guards", () => {
     expect(missing.status()).toBe(404);
   });
 
+  /**
+   * Adding src/proxy.ts made Next clone and buffer the body of every request,
+   * and past `experimental.proxyClientMaxBodySize` it truncates the body rather
+   * than refusing the request — so the route sees a body that ends mid-stream.
+   * That silently broke restore-from-backup, the app's only recovery path, for
+   * any collection over 10 MB, and reported it as "Expected multipart/form-data"
+   * — which reads as "your archive is the wrong type", not "it was cut in half".
+   */
+  test("a body larger than Next's default buffer arrives whole", async ({ request }) => {
+    // Over the 10 MB default, under the app's own ceilings, so what comes back
+    // has to be the route's opinion of the content rather than a parse failure.
+    const twelveMB = Buffer.alloc(12 * 1024 * 1024, 0x37);
+
+    const upload = await request.post("/api/uploads", {
+      headers: { "sec-fetch-site": "same-origin" },
+      multipart: { files: { name: "big.jpg", mimeType: "image/jpeg", buffer: twelveMB } },
+    });
+    expect(upload.status()).toBe(400);
+    // The decoder looked at all of it, which it could not have done with half a
+    // multipart body; a truncated one never gets past formData().
+    expect((await upload.json()).error).toMatch(/not a JPEG, PNG, WebP or HEIC/);
+
+    const restore = await request.post("/api/backup/restore", {
+      headers: { "sec-fetch-site": "same-origin" },
+      multipart: { archive: { name: "big.zip", mimeType: "application/zip", buffer: twelveMB } },
+    });
+    expect(restore.status()).toBe(400);
+    expect((await restore.json()).error).toMatch(/not a zip archive/);
+  });
+
   test("the app's own requests are unaffected", async ({ request }) => {
     expect((await request.get("/api/cards", { headers: { "sec-fetch-site": "same-origin" } })).status()).toBe(200);
     // A write reaches the route: the 400 is the route's own validation, not the guard.

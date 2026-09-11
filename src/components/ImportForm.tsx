@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { money } from "@/lib/format";
-import { GAMES, GAME_IDS, type Game } from "@/lib/types";
+import { GAMES, GAME_IDS, label, type Game } from "@/lib/types";
 import type { ImportPreview, ImportResult } from "@/lib/import";
 
 export function ImportForm() {
@@ -140,6 +140,13 @@ export function ImportForm() {
             {preview.unmapped.length > 0 && ` Ignored: ${preview.unmapped.join(", ")}.`}
           </p>
 
+          {preview.skippedForSize > 0 && (
+            <p className="mt-2 text-sm text-amber-700 dark:text-amber-500">
+              This file has {preview.skippedForSize} more row{preview.skippedForSize === 1 ? "" : "s"} than one import can take.
+              Only the first {preview.total} are shown and will be imported; split the file and run the rest separately.
+            </p>
+          )}
+
           <div className="mt-3 max-h-96 overflow-auto">
             <table className="w-full text-sm">
               <thead className="text-left text-xs uppercase tracking-wide text-neutral-500">
@@ -163,7 +170,7 @@ export function ImportForm() {
                           {row.warning && <div className="text-xs font-normal text-amber-700 dark:text-amber-300">{row.warning}</div>}
                         </td>
                         <td className="py-1 pr-3 text-neutral-500">
-                          {[GAMES[row.input.game], row.input.setName, row.input.cardNumber ? `#${row.input.cardNumber}` : null, row.input.year]
+                          {[label(GAMES, row.input.game), row.input.setName, row.input.cardNumber ? `#${row.input.cardNumber}` : null, row.input.year]
                             .filter(Boolean)
                             .join(" · ")}
                         </td>

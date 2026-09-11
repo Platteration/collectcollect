@@ -1,5 +1,27 @@
 // Shared domain types for the card catalog.
 
+/**
+ * Own-property membership, which is how every whitelist in this app is tested.
+ *
+ * `key in TABLE` and a bare `TABLE[key]` both walk the prototype chain, so
+ * `__proto__`, `constructor` and `toString` all read as valid names on a plain
+ * object. A card whose game is `__proto__` is then stored, and `GAMES[game]`
+ * renders as Object.prototype, which React refuses as a child: one request
+ * turns every page into a 500 for good.
+ */
+export function has<T extends object>(table: T, key: unknown): key is keyof T {
+  return typeof key === "string" && Object.prototype.hasOwnProperty.call(table, key);
+}
+
+/**
+ * A table's label for `key`, falling back to the raw value. Rows written before
+ * the whitelists were tightened, or installed by a restore, can still hold
+ * anything: a card the owner needs to find and delete must render, not throw.
+ */
+export function label<T extends Record<string, string>>(table: T, key: string): string {
+  return has(table, key) ? table[key] : key;
+}
+
 export type Game = "pokemon" | "yugioh" | "mtg" | "sports" | "other";
 
 export const GAMES: Record<Game, string> = {

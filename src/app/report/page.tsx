@@ -2,7 +2,7 @@ import Link from "next/link";
 import { latestSnapshotsByCard, listCards } from "@/lib/cards";
 import { imageSrc, money, when } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
-import { GAMES } from "@/lib/types";
+import { GAMES, label } from "@/lib/types";
 import { PrintButton } from "@/components/PrintButton";
 
 export const dynamic = "force-dynamic";
@@ -91,7 +91,7 @@ export default function ReportPage() {
                   </div>
                 </td>
                 <td className="py-2 pr-2 text-neutral-600 dark:text-neutral-300">
-                  <div>{GAMES[card.game]}</div>
+                  <div>{label(GAMES, card.game)}</div>
                   <div className="text-xs text-neutral-500">
                     {[card.setName, card.cardNumber ? `#${card.cardNumber}` : null, card.year, card.variant].filter(Boolean).join(" · ") || "—"}
                   </div>

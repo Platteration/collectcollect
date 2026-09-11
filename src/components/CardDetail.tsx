@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { httpUrl, imageSrc, money, when } from "@/lib/format";
-import { GAMES, GRADING_STATUSES, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Sale, type Settings } from "@/lib/types";
+import { GAMES, GRADING_STATUSES, label, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Sale, type Settings } from "@/lib/types";
 import { gradingVerdict, isReadyToGrade, outlookSeries } from "@/lib/analytics";
 import { OutlookChart } from "./charts/OutlookChart";
 import { PortfolioChart } from "./charts/PortfolioChart";
@@ -202,7 +202,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <div className="flex items-center gap-2">
-              <span className="badge bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100">{GAMES[card.game]}</span>
+              <span className="badge bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100">{label(GAMES, card.game)}</span>
               {card.sport && <span className="badge bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100">{card.sport}</span>}
               {card.quantity === 0 && <span className="badge bg-neutral-900 text-white dark:bg-white dark:text-neutral-900">Sold</span>}
             </div>

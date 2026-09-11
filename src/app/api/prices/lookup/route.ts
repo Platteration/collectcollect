@@ -3,7 +3,7 @@ import { jsonError } from "@/lib/http";
 import { fetchQuotes, summarize } from "@/lib/pricing";
 import type { CardQuery } from "@/lib/pricing/types";
 import { getSettings } from "@/lib/settings";
-import { CONDITIONS, GAMES, type Condition } from "@/lib/types";
+import { CONDITIONS, GAMES, has, type Condition } from "@/lib/types";
 
 /**
  * POST — price a card that is not saved yet (used while reviewing an
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   } catch {
     return jsonError("Expected a JSON body");
   }
-  if (!body.game || !(body.game in GAMES)) return jsonError("Unknown game");
+  if (!has(GAMES, body.game)) return jsonError("Unknown game");
   if (!body.name?.trim()) return jsonError("Card name is required");
   const query: CardQuery = {
     game: body.game,
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     manufacturer: body.manufacturer ?? null,
     externalIds: body.externalIds ?? {},
   };
-  const condition = (body.condition && body.condition in CONDITIONS ? body.condition : "NM") as Condition;
+  const condition: Condition = has(CONDITIONS, body.condition) ? body.condition : "NM";
   const { quotes, errors } = await fetchQuotes(query);
   const summary = summarize(quotes, errors, getSettings(), {
     condition,

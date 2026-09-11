@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { openDatabase, setDb } from "@/lib/db";
-import { addSnapshot, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
+import { getDb, openDatabase, setDb } from "@/lib/db";
+import { addSnapshot, allSnapshots, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
 import { getSettings, saveSettings } from "@/lib/settings";
-import { DEFAULT_SETTINGS, type PriceSummary } from "@/lib/types";
+import { CONDITIONS, DEFAULT_SETTINGS, GAMES, GRADING_STATUSES, SUBMISSION_STATUSES, label, type PriceSummary } from "@/lib/types";
 
 const summary = (v: number): PriceSummary => ({
   currency: "USD",
@@ -194,5 +194,88 @@ describe("intakeCard", () => {
     const merged = intakeCard({ game: "mtg", name: "Ragavan", imagePath: "11111111-2222-4333-8444-555555555555.jpg", accentColor: "#abcdef" });
     if (merged.result !== "merged") throw new Error("expected a merge");
     expect(merged.card).toMatchObject({ imagePath: "11111111-2222-4333-8444-555555555555.jpg", accentColor: "#abcdef", quantity: 2 });
+  });
+});
+
+/**
+ * Every name on Object.prototype is truthy on a plain table, so `key in TABLE`
+ * and a bare `TABLE[key]` both admit them. A game of `__proto__` survived
+ * validation, was written to the database, and then rendered as
+ * `GAMES[card.game]` — which is Object.prototype, and React refuses an object
+ * as a child. One unauthenticated POST turned every page into a 500 for good.
+ */
+describe("names inherited from Object.prototype are not values", () => {
+  const INHERITED = ["__proto__", "constructor", "toString", "valueOf", "hasOwnProperty"];
+
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("refuses them as a game, a condition or a grading status", () => {
+    for (const name of INHERITED) {
+      expect(() => createCard({ game: name as never, name: "x" })).toThrow(/Unknown game/);
+      expect(() => createCard({ game: "pokemon", name: "x", condition: name as never })).toThrow(/Unknown condition/);
+      expect(() => createCard({ game: "pokemon", name: "x", gradingStatus: name as never })).toThrow(/Unknown grading status/);
+    }
+    expect(listCards()).toHaveLength(0);
+  });
+
+  it("reads a stored one back as the fallback rather than a function", () => {
+    const card = createCard({ game: "pokemon", name: "Charizard" });
+    for (const name of INHERITED) {
+      // A row can still hold anything: it predates this check, or a restore put it there.
+      getDb().prepare("UPDATE cards SET grading_status = ? WHERE id = ?").run(name, card.id);
+      expect(getCard(card.id)!.gradingStatus).toBe("undecided");
+    }
+  });
+
+  it("labels one as itself, so a page that has to show it renders text", () => {
+    for (const name of INHERITED) {
+      // Not "is not Object.prototype": anything a page renders must be a string,
+      // and that is what React's own check tests.
+      expect(typeof label(GAMES, name)).toBe("string");
+      expect(typeof label(GRADING_STATUSES, name)).toBe("string");
+      expect(typeof label(SUBMISSION_STATUSES, name)).toBe("string");
+      expect(typeof label(CONDITIONS, name)).toBe("string");
+    }
+    // and a real key still reads as its label
+    expect(label(GAMES, "pokemon")).toBe(GAMES.pokemon);
+  });
+});
+
+/**
+ * A price snapshot's summary is JSON parsed on the way out of the database by
+ * the portfolio, the collection, the report, every card page and the cards API
+ * — none of which has an error boundary. A restore installs someone else's
+ * database whole, so one row of `{` used to take all of them out together.
+ */
+describe("a snapshot whose summary is not readable", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  const poison = (cardId: number, day: number) =>
+    getDb()
+      .prepare("INSERT INTO price_snapshots (card_id, fetched_at, summary) VALUES (?, ?, ?)")
+      .run(cardId, new Date(2026, 0, day).toISOString(), "{");
+
+  it("is dropped rather than thrown out of every page at once", () => {
+    const card = createCard({ game: "pokemon", name: "Charizard" });
+    poison(card.id, 1);
+    addSnapshot(card.id, summary(5));
+
+    // The good reading survives; the unreadable one simply is not there.
+    expect(listSnapshots(card.id)).toHaveLength(1);
+    expect(listSnapshots(card.id)[0].summary.ungraded).toBe(5);
+    expect(allSnapshots()).toHaveLength(1);
+    expect(latestSnapshotsByCard().get(card.id)?.summary.ungraded).toBe(5);
+  });
+
+  it("costs that card its price and nothing more, even as the newest row", () => {
+    const card = createCard({ game: "pokemon", name: "Charizard" });
+    const other = createCard({ game: "mtg", name: "Ragavan" });
+    addSnapshot(card.id, summary(5));
+    addSnapshot(other.id, summary(7));
+    poison(card.id, 9);
+
+    const latest = latestSnapshotsByCard();
+    expect(latest.has(card.id)).toBe(false);
+    expect(latest.get(other.id)?.summary.ungraded).toBe(7);
   });
 });

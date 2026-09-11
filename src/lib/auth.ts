@@ -67,11 +67,57 @@ function sessionSeed(): string | null {
 /** Test hook: forget the seed read from disk. */
 export function resetSessionSeed(): void {
   cachedSeed = null;
+  cachedRevoked = null;
+}
+
+function revokedFile(): string {
+  return path.join(path.dirname(seedFile()), "revoked-sessions");
+}
+
+/** A ceiling on the revocation list that does not depend on reasoning about it. */
+const MAX_REVOKED = 1000;
+
+let cachedRevoked: { at: number; ids: Set<string> } | null = null;
+
+function readRevoked(): Array<[string, number]> {
+  try {
+    return fs
+      .readFileSync(revokedFile(), "utf8")
+      .split("\n")
+      .map((line) => line.trim().split(" "))
+      .filter((parts) => parts.length === 2 && Number.isFinite(Number(parts[1])))
+      .map((parts) => [parts[0], Number(parts[1])] as [string, number]);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The identifiers signing out has retired. Read from disk when the file has
+ * changed, because the proxy and the route handlers are separate bundles with
+ * their own module state: a sign-out in one must be seen by the other.
+ */
+function revokedIds(): Set<string> {
+  let at: number;
+  try {
+    at = fs.statSync(revokedFile()).mtimeMs;
+  } catch {
+    cachedRevoked = null;
+    return new Set();
+  }
+  if (cachedRevoked && cachedRevoked.at === at) return cachedRevoked.ids;
+  const ids = new Set(readRevoked().map(([id]) => id));
+  cachedRevoked = { at, ids };
+  return ids;
 }
 
 async function secret(): Promise<string> {
-  if (process.env.APP_SECRET) return process.env.APP_SECRET;
   const password = process.env.APP_PASSWORD ?? "";
+  // However the key is supplied, the password is mixed into it, so rotating the
+  // password ends every existing session — which is what the README tells the
+  // owner to do about a leaked cookie. Returning APP_SECRET unmixed used to
+  // make that promise silently false for anyone who set one.
+  if (process.env.APP_SECRET) return await hmac(password, process.env.APP_SECRET);
   const seed = sessionSeed();
   // Without a place to keep a seed this is the old, weaker derivation, which is
   // still better than refusing to sign anyone in.
@@ -124,16 +170,63 @@ export async function passwordMatches(submitted: string): Promise<boolean> {
   return timingSafeEqual(a, b);
 }
 
+/**
+ * A token is `<expires>.<id>.<signature over "expires.id">`.
+ *
+ * The identifier is what makes signing out mean something: without it every
+ * token with the same expiry is the same token, so clearing the cookie in one
+ * browser leaves a captured copy working for the rest of its thirty days, and
+ * there is nothing to name in a revocation list.
+ */
 export async function createToken(now = Date.now()): Promise<string> {
   const expires = now + SESSION_DAYS * 86400_000;
-  return `${expires}.${await hmac(String(expires), await secret())}`;
+  const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const payload = `${expires}.${id}`;
+  return `${payload}.${await hmac(payload, await secret())}`;
+}
+
+function splitToken(token: string): { payload: string; expires: number; id: string; signature: string } | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [rawExpires, id, signature] = parts;
+  const expires = Number(rawExpires);
+  if (!Number.isFinite(expires) || !id || !signature) return null;
+  return { payload: `${rawExpires}.${id}`, expires, id, signature };
 }
 
 export async function verifyToken(token: string | undefined | null, now = Date.now()): Promise<boolean> {
   if (!token) return false;
-  const dot = token.indexOf(".");
-  if (dot < 1) return false;
-  const expires = Number(token.slice(0, dot));
-  if (!Number.isFinite(expires) || expires < now) return false;
-  return timingSafeEqual(token.slice(dot + 1), await hmac(String(expires), await secret()));
+  const parsed = splitToken(token);
+  if (!parsed || parsed.expires < now) return false;
+  if (revokedIds().has(parsed.id)) return false;
+  return timingSafeEqual(parsed.signature, await hmac(parsed.payload, await secret()));
+}
+
+/**
+ * Record that this token is no longer to be accepted, and say whether it was.
+ *
+ * Only a token that verifies is written down: signing out is reachable without
+ * a session, so anything else would let a stranger grow this file one made-up
+ * token at a time. Entries past their expiry are dropped on every write and an
+ * id is never listed twice, so the file holds at most one line per real sign-in
+ * inside a thirty-day window — and MAX_REVOKED bounds it whatever happens.
+ *
+ * Best effort, like the seed: a data directory that cannot be written to must
+ * not make signing out throw.
+ */
+export async function revokeToken(token: string | undefined | null): Promise<boolean> {
+  const parsed = token ? splitToken(token) : null;
+  if (!parsed || !(await verifyToken(token))) return false;
+  const now = Date.now();
+  const kept = readRevoked().filter(([id, expires]) => expires > now && id !== parsed.id);
+  kept.push([parsed.id, parsed.expires]);
+  try {
+    fs.mkdirSync(path.dirname(revokedFile()), { recursive: true });
+    const lines = kept.slice(-MAX_REVOKED).map(([id, expires]) => `${id} ${expires}`);
+    fs.writeFileSync(revokedFile(), `${lines.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
+  } catch {
+    /* nothing can be kept here; the cookie is still cleared in the browser */
+  }
+  cachedRevoked = null;
+  return true;
 }

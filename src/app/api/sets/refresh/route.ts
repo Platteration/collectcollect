@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { errorMessage, jsonError, tooManyRequests } from "@/lib/http";
 import { HOUR_MS, SET_REFRESH_PER_HOUR, rateLimit } from "@/lib/rate-limit";
 import { refreshChecklist } from "@/lib/sets";
-import { GAMES, type Game } from "@/lib/types";
+import { GAMES, has } from "@/lib/types";
 
 /** POST { game, setName } — fetch the published checklist for one of your sets. */
 export async function POST(request: Request) {
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   } catch {
     return jsonError("Expected a JSON body");
   }
-  if (typeof body.game !== "string" || !(body.game in GAMES)) return jsonError("Unknown game");
+  if (!has(GAMES, body.game)) return jsonError("Unknown game");
   if (typeof body.setName !== "string" || !body.setName.trim()) return jsonError("Which set?");
 
   const limit = rateLimit("sets-refresh", SET_REFRESH_PER_HOUR, HOUR_MS);
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const checklist = await refreshChecklist(body.game as Game, body.setName);
+    const checklist = await refreshChecklist(body.game, body.setName);
     if (!checklist) {
       return jsonError(
         "No checklist could be found for that set. Its name may not match the source's, or this game has no checklist source.",

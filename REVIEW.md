@@ -16,6 +16,15 @@ All of the following are fixed on `claude/repo-review-security-baiyud`, each wit
 
 Deliberately not done: `SUP-1`. Each was either already covered by an earlier pass, or judged churn or too risky to make without a device or a measurement. The reasoning is in the commit that touched it.
 
+**Third pass** — a security audit of this branch, which found both things the earlier passes left and one the earlier passes caused:
+
+- Every enum whitelist was an `in` test or a bare index, so `__proto__` passed as a game and one unauthenticated POST left every page answering 500 for good. All of them are own-property lookups now (`has` in `src/lib/types.ts`), and the render sinks fall back to the raw string (`label`) so a row that predates the check still draws.
+- A restore validated the archive's entry names but never a single row of the database it installed, and the price-snapshot and checklist columns were parsed without a guard — so a 16 KB archive bricked the app with no way back through it. The staged rows now go through the write path's own rules before anything live is moved aside.
+- `MISS-2` is now done: a stored `name_key` with an index (5,000 duplicate lookups over 5,000 cards: 9.5 s before, 38 ms after), one transaction around the whole file, and a cap on the rows one import may carry.
+- Adding `src/proxy.ts` in the first pass made Next buffer a copy of every request body and truncate it past 10 MB *without failing the request*, which silently broke restore-from-backup — the app's only recovery path — for any collection over that. One number now governs: `MAX_REQUEST_BYTES` in `src/lib/limits.ts`, which sets `experimental.proxyClientMaxBodySize` and `RESTORE_MAX_BYTES` together. Lowering the restore ceiling from 512 MB to 64 MB is also the rest of `SEC-4`.
+- The login limiter read `X-Forwarded-For` from the left, which the client writes, and shared one bucket when no proxy was declared — so the lockout could be evaded, aimed at the owner, or filled by any stranger. It now counts hops from the right, validates the entry is an address, and gives an unidentifiable caller no key at all; the password is compared before any counter, so no counter can refuse the right one.
+- `SEC-10`'s second half is now done: tokens carry a random identifier and signing out records it, so a captured cookie stops working. `APP_SECRET` now has the password mixed into it, so rotating the password ends every session on that branch too, as the README always said it did.
+
 An independent reviewer then read each commit and tried to find what was wrong with it, and a second reviewer tried to refute every objection raised. What survived that was fixed in a follow-up commit.
 
 Repository hardening applied here as well: every GitHub Action is pinned to a commit rather than a floating tag, each workflow declares a least-privilege `permissions` block, and a Dependabot config, a licence and a security policy are in place.
