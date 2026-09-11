@@ -78,4 +78,4 @@ npm test -w @collectcollect/watches
 ## Known gaps
 
 - No market price source; values are what you enter.
-- No e2e suite; the shared pages are covered by unit tests and a smoke run of the built app.
+- No end-to-end suite of its own. The pages this app renders come from the shared engine and are covered end to end by `apps/whisky`, which drives a real build through the portfolio, the collection, an item, the report, adding by hand, importing a spreadsheet and the password gate. What is not covered there is the service log, which unit tests reach but a browser does not.

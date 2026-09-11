@@ -85,4 +85,4 @@ npm test -w @collectcollect/comics
 - The PriceCharting column-to-grade mapping is unverified (see above).
 - No live certificate lookup; the verifier checks the number's shape only.
 - No eBay or auction-house source; a raw key's market between PriceCharting's grade columns is estimated by multiplier.
-- No e2e suite; the shared pages are covered by unit tests and a smoke run of the built app.
+- No end-to-end suite of its own. The pages this app renders come from the shared engine and are covered end to end by `apps/whisky`, which drives a real build through the portfolio, the collection, an item, the report, adding by hand, importing a spreadsheet and the password gate. What is not covered there is the key-issue line and the certificate check, which unit tests reach but a browser does not.

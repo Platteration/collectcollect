@@ -241,13 +241,17 @@ provider adapters (against recorded responses, never the network), the
 valuation and grading-outlook maths, the repository and its migrations, sales,
 submissions, alert rules, and the password gate.
 
-The end-to-end suite drives a real production build in Chromium against a
-throwaway data directory. Identification and price lookups are intercepted, so
+The end-to-end suites drive real production builds in Chromium against
+throwaway data directories. Identification and price lookups are intercepted, so
 the tests never call Anthropic or a price API, but everything else, including
 the database, runs for real. It covers adding a card by hand, duplicate
 merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
-grading submission from draft to booked outcome, and the password gate. Both
-suites plus lint, typecheck and build run in CI on every push.
+grading submission from draft to booked outcome, and the password gate. The
+skins app has its own suite, and the whisky app's stands for every app on the
+domain engine: it drives the shared portfolio, collection, item, report, add
+and import pages, plus the one thing that is whisky's alone — opening a bottle,
+which splits a copy off a stack and freezes what it was worth. Every suite plus
+lint, typecheck and build runs in CI on every push.
 
 ## The other apps
 
@@ -263,7 +267,7 @@ Four more collections run on a shared **domain engine** in `packages/core/src/do
 | [Watches](apps/watches/README.md) | 3004 | brand, model, reference, private serial, movement, case, dial, box and papers, service history | always unique | manual with dated history; insurance appraisal with serial and photo switches |
 | [Whisky](apps/whisky/README.md) | 3005 | distillery, expression, age, cask, strength, size, bottle or batch, sealed or open, fill level | sealed identical bottles stack, numbered and open bottles are unique | manual with dated history; an opened bottle's value is frozen and left out of the total |
 
-They keep the conventions of the two older apps: everything self-hosted and local-first, one SQLite file per app in its own data directory (`<PREFIX>_DATA_DIR`), an optional password (`<PREFIX>_APP_PASSWORD`), hourly auto-refresh (`<PREFIX>_AUTO_REFRESH_HOURS`), and every item mirrored to Markdown under `data/collection`. Photo identification and PriceCharting use the same keys as the card app. Each has unit tests for its schema, its merge rule and its price adapter against a fake `fetch`; none has an e2e suite yet.
+They keep the conventions of the two older apps: everything self-hosted and local-first, one SQLite file per app in its own data directory (`<PREFIX>_DATA_DIR`), an optional password (`<PREFIX>_APP_PASSWORD`), hourly auto-refresh (`<PREFIX>_AUTO_REFRESH_HOURS`), and every item mirrored to Markdown under `data/collection`. Photo identification and PriceCharting use the same keys as the card app. Each has unit tests for its schema, its merge rule and its price adapter against a fake `fetch`. The pages they share are driven end to end by the whisky app's Playwright suite, so a change to the engine's portfolio, collection, item, report, add, import or login pages is caught for all of them at once.
 
 ## The skins app
 

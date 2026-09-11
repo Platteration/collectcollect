@@ -79,4 +79,4 @@ npm test -w @collectcollect/retro-games
 - PriceCharting's graded price is one number per game; a WATA 9.8 and a 9.0 read the same figure. There is no per-grade source for games.
 - Console names for PriceCharting are unverified against the live API (no network access while this was written). If a platform never matches, fix its name in `priceChartingConsole` in `src/lib/types.ts`.
 - No certificate verification for WATA, VGA or CGC. The cert number is stored and printed on the report only.
-- No e2e suite; the shared pages are covered by unit tests and a smoke run of the built app.
+- No end-to-end suite of its own. The pages this app renders come from the shared engine and are covered end to end by `apps/whisky`, which drives a real build through the portfolio, the collection, an item, the report, adding by hand, importing a spreadsheet and the password gate. What is not covered there is the grade-or-wait panel, which unit tests reach but a browser does not.

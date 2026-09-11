@@ -78,8 +78,13 @@ npm test -w @collectcollect/whisky
 - `tests/open.test.ts`: opening one copy off a stack (cost from the oldest lot, frozen value, history carried over, lot invariant), opening the only copy in place, the freeze-and-thaw hook on an ordinary edit, a bottle opened before it was valued, and what stays in the collection and out of the total.
 - `tests/pricing.test.ts`: the manual-only source and hand-entered history.
 
+```sh
+npm run e2e -w @collectcollect/whisky
+```
+
+The end-to-end suite drives a real production build in Chromium against throwaway collections: one seeded and read-only, one empty for the specs that write, and one behind a password. Most of what it covers is the shared engine — the portfolio and its chart, the collection page's search and filters, an item, the appraisal report, adding by hand, importing a spreadsheet and the gate — so it stands for the other apps built on the engine too. What is whisky's own is the open-bottle flow: a copy leaving a stack at the cost of the oldest copy still held, its value freezing, and the total not moving.
+
 ## Known gaps
 
 - No auction or market price source; values are what you enter.
 - Drinking a bottle down does not change its frozen value, by design; a partly drunk bottle's resale value is not modelled.
-- No e2e suite; the shared pages are covered by unit tests and a smoke run of the built app.
