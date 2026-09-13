@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@collectcollect/core/api-client";
 import { when } from "@collectcollect/core/format";
@@ -14,32 +14,29 @@ const KINDS: Record<AlertKind, { label: string; icon: string }> = {
 };
 
 /**
- * The feed, and the two things that can be done to it.
+ * The feed, and what can be done to it.
  *
- * Both are optimistic — the row goes, the counter clears — and both are
- * undone on the page if the server refuses, with the refusal said out loud. A
- * dismiss that failed silently would leave an alert that comes back on the
- * next visit, which reads as the app not listening.
+ * Seeing the list is the acknowledgement, as on the card app: the unread rows
+ * are marked read once the page is on screen, and the layout's badge clears.
+ * Dismissing is optimistic — the row goes at once — and is undone on the page
+ * if the server refuses, with the refusal said out loud. A dismiss that failed
+ * silently would leave an alert that comes back on the next visit, which reads
+ * as the app not listening.
  */
-export function AlertList({ alerts: initial }: { alerts: Alert[] }) {
+export function AlertList({ alerts: initial, unreadIds }: { alerts: Alert[]; unreadIds: number[] }) {
   const router = useRouter();
   const [alerts, setAlerts] = useState(initial);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const unread = new Set(unreadIds);
+  const marked = useRef(false);
 
-  const readAll = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api("/api/alerts", { method: "POST" });
-      setAlerts((all) => all.map((a) => ({ ...a, readAt: a.readAt ?? new Date().toISOString() })));
-      router.refresh();
-    } catch (e) {
-      setError(`Could not mark them read: ${(e as Error).message}`);
-    } finally {
-      setBusy(false);
-    }
-  };
+  useEffect(() => {
+    if (marked.current || unreadIds.length === 0) return;
+    marked.current = true;
+    void api("/api/alerts", { method: "POST" })
+      .then(() => router.refresh())
+      .catch((e: Error) => setError(`Could not mark these read: ${e.message}`));
+  }, [unreadIds, router]);
 
   const dismiss = async (alert: Alert) => {
     setError(null);
@@ -64,15 +61,8 @@ export function AlertList({ alerts: initial }: { alerts: Alert[] }) {
     );
   }
 
-  const unread = alerts.filter((a) => !a.readAt).length;
-
   return (
     <div className="space-y-3">
-      {unread > 0 && (
-        <button type="button" className="btn-secondary" onClick={readAll} disabled={busy}>
-          Mark all {unread} read
-        </button>
-      )}
       {error && (
         <p className="card-surface p-3 text-sm" style={{ color: "var(--chart-bad-text)" }} role="alert">
           {error}
@@ -83,7 +73,7 @@ export function AlertList({ alerts: initial }: { alerts: Alert[] }) {
           <li
             key={alert.id}
             className="card-surface flex items-start gap-3 p-3 text-sm"
-            style={alert.readAt ? { opacity: 0.6 } : undefined}
+            style={unread.has(alert.id) ? undefined : { opacity: 0.6 }}
           >
             <span aria-hidden className="mt-0.5 text-base leading-none">
               {KINDS[alert.kind]?.icon ?? "•"}
@@ -103,7 +93,8 @@ export function AlertList({ alerts: initial }: { alerts: Alert[] }) {
               </span>
               <span className="mt-0.5 block text-xs" style={{ color: "var(--muted)" }}>
                 {KINDS[alert.kind]?.label ?? alert.kind} · {when(alert.createdAt)}
-                {!alert.readAt && " · unread"}
+                {/* Marked read on sight; the word stays for this visit, so a screen reader hears what was new. */}
+                {unread.has(alert.id) && " · unread"}
               </span>
             </span>
             <button

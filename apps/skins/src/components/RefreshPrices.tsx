@@ -54,7 +54,7 @@ export function RefreshPrices({ items }: { items: number }) {
       )}
 
       {result && (
-        <div className="card-surface space-y-1 p-3 text-sm">
+        <div className="card-surface space-y-1 p-3 text-sm" role="status">
           <p>
             {result.refreshed} priced
             {result.unpriced > 0 && `, ${result.unpriced} nothing is listing`}

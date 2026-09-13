@@ -1,23 +1,21 @@
 import { expect, test } from "@playwright/test";
 
+// Order matters: seeing the list marks it read, so the test that needs the
+// seeded alert still unread runs first, with the marking refused.
 test.describe("the alert feed", () => {
-  test("lists what refresh raised, counted in the header", async ({ page }) => {
-    await page.goto("/alerts");
-    await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
-    const row = page.locator("li").filter({ hasText: "Karambit" });
-    await expect(row).toContainText("Worth more elsewhere");
-    await expect(row).toContainText("unread");
-    // The header badge counts it.
-    await expect(page.getByRole("banner").getByRole("link", { name: /Alerts\s*1/ })).toBeVisible();
-    // And the title leads to the item.
-    await row.getByRole("link", { name: /Karambit/ }).click();
-    await expect(page).toHaveURL(/\/items\/\d+$/);
-  });
-
-  test("puts a row back and says why when a dismiss is refused", async ({ page }) => {
+  test("says so when it cannot mark the list read, and puts a row back when a dismiss is refused", async ({ page }) => {
+    await page.route("**/api/alerts", (route) =>
+      route.request().method() === "POST"
+        ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "still full" }) })
+        : route.continue(),
+    );
     await page.goto("/alerts");
     const row = page.locator("li").filter({ hasText: "Karambit" });
     await expect(row).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: /Could not mark these read/ })).toContainText("still full");
+    await expect(row).toContainText("unread");
+    // The header badge still counts it.
+    await expect(page.getByRole("banner").getByRole("link", { name: /Alerts\s*1/ })).toBeVisible();
 
     // The server refuses; the page must not pretend otherwise.
     await page.route("**/api/alerts/*", (route) =>
@@ -28,14 +26,17 @@ test.describe("the alert feed", () => {
     await row.getByRole("button", { name: /Dismiss/ }).click();
     await expect(page.getByRole("alert").filter({ hasText: /Could not dismiss/ })).toContainText("disk is full");
     await expect(row).toBeVisible();
+  });
 
-    await page.route("**/api/alerts", (route) =>
-      route.request().method() === "POST"
-        ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "still full" }) })
-        : route.continue(),
-    );
-    await page.getByRole("button", { name: /Mark all 1 read/ }).click();
-    await expect(page.getByRole("alert").filter({ hasText: /Could not mark them read/ })).toContainText("still full");
-    await expect(row).toContainText("unread");
+  test("lists what refresh raised, and seeing it clears the badge", async ({ page }) => {
+    await page.goto("/alerts");
+    await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
+    const row = page.locator("li").filter({ hasText: "Karambit" });
+    await expect(row).toContainText("Worth more elsewhere");
+    // Seeing the list is the acknowledgement, so the badge clears.
+    await expect(page.getByRole("banner")).not.toContainText(/Alerts\s*\d/);
+    // And the title leads to the item.
+    await row.getByRole("link", { name: /Karambit/ }).click();
+    await expect(page).toHaveURL(/\/items\/\d+$/);
   });
 });

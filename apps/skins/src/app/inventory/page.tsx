@@ -77,6 +77,12 @@ export default async function InventoryPage({ searchParams }: PageProps<"/invent
         <button type="submit" className="btn-secondary">
           Search
         </button>
+        <a href="/api/export" className="btn-secondary ml-auto" download>
+          Export CSV
+        </a>
+        <a href="/api/export?type=sales" className="btn-secondary" download>
+          Sales CSV
+        </a>
       </form>
 
       {/* A landmark rather than a loose pile of links: it gives the filters a
@@ -170,7 +176,7 @@ function Chip({ href, on, color, children }: { href: string; on: boolean; color?
     <Link
       href={href}
       aria-current={on ? "true" : undefined}
-      className="badge border transition"
+      className="badge inline-flex min-h-9 items-center border px-3 transition"
       style={{
         borderColor: on ? "var(--line-strong)" : "var(--line)",
         background: on ? "var(--surface-raised)" : "transparent",

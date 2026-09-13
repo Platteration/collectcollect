@@ -1,4 +1,4 @@
-import { money } from "@collectcollect/core/format";
+import { day, money } from "@collectcollect/core/format";
 import type { MarketProceeds } from "@/lib/pricing/index";
 
 /**
@@ -37,7 +37,7 @@ export function Spread({
 
       {lockedUntil && (
         <p className="card-surface p-3 text-sm" style={{ color: "var(--chart-bad-text)" }}>
-          Trade locked until {lockedUntil.slice(0, 10)}. None of this can be acted on until then.
+          Trade locked until {day(lockedUntil)}. None of this can be acted on until then.
         </p>
       )}
 

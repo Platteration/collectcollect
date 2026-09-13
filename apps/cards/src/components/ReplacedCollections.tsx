@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { when } from "@/lib/format";
 import type { ReplacedCollection, RestoreResult } from "@/lib/backup";
 
 /**
@@ -21,7 +22,7 @@ export function ReplacedCollections({ replaced }: { replaced: ReplacedCollection
 
   const restore = async (entry: ReplacedCollection) => {
     const what = entry.cards === null ? "that collection" : `${entry.cards} card${entry.cards === 1 ? "" : "s"}`;
-    if (!confirm(`Put back ${what} from ${new Date(entry.replacedAt).toLocaleString()}? The collection you have now is moved aside in its turn, so this can be undone too.`)) return;
+    if (!confirm(`Put back ${what} from ${when(entry.replacedAt)}? The collection you have now is moved aside in its turn, so this can be undone too.`)) return;
     setBusy(entry.name);
     setError(null);
     setResult(null);
@@ -53,7 +54,7 @@ export function ReplacedCollections({ replaced }: { replaced: ReplacedCollection
         {replaced.map((entry) => (
           <li key={entry.name} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
             <div>
-              <div>{new Date(entry.replacedAt).toLocaleString()}</div>
+              <div>{when(entry.replacedAt)}</div>
               <div className="text-xs text-neutral-500">
                 {entry.cards === null ? "database unreadable" : `${entry.cards} card${entry.cards === 1 ? "" : "s"}`}, {entry.photos} photo
                 {entry.photos === 1 ? "" : "s"} · <span className="font-mono">{entry.name}</span>

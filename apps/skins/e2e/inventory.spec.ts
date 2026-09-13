@@ -21,6 +21,15 @@ test.describe("the inventory", () => {
     await expect(page.getByRole("link", { name: /Karambit/ })).toBeVisible();
   });
 
+  test("offers the inventory and the sales ledger as spreadsheets", async ({ page }) => {
+    await page.goto("/inventory");
+    await expect(page.getByRole("link", { name: "Export CSV" })).toHaveAttribute("href", "/api/export");
+    await expect(page.getByRole("link", { name: "Sales CSV" })).toHaveAttribute("href", "/api/export?type=sales");
+    const csv = await page.request.get("/api/export");
+    expect(csv.ok()).toBe(true);
+    expect(csv.headers()["content-type"]).toContain("csv");
+  });
+
   test("stacks one filter on another instead of replacing it", async ({ page }) => {
     await page.goto("/inventory");
     await filters(page).getByRole("link", { name: "Weapon", exact: true }).click();

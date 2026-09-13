@@ -6,6 +6,7 @@ import { ReplacedCollections } from "@/components/ReplacedCollections";
 import { CollectionFiles } from "@/components/CollectionFiles";
 import { collectionStatus } from "@/lib/markdown/mirror";
 import Link from "next/link";
+import { when } from "@/lib/format";
 import { providerStatuses } from "@/lib/status";
 import { GAMES } from "@/lib/types";
 
@@ -98,7 +99,7 @@ export default function SettingsPage() {
           {collection.enabled ? (
             <>
               {collection.files} file{collection.files === 1 ? "" : "s"} ({mb(collection.bytes)})
-              {collection.updatedAt ? `, last written ${new Date(collection.updatedAt).toLocaleString()}` : ""}.
+              {collection.updatedAt ? `, last written ${when(collection.updatedAt)}` : ""}.
             </>
           ) : (
             <>Switched off by <code>MARKDOWN_MIRROR=off</code>.</>

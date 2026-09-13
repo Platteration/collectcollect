@@ -44,7 +44,7 @@ export function TabBar({ items }: { items: TabItem[] }) {
                 {item.label}
                 {item.badge !== undefined && item.badge > 0 && (
                   <span className="absolute right-1/2 top-1.5 translate-x-4 rounded-full bg-[var(--chart-bad)] px-1.5 text-[10px] font-medium text-white">
-                    {item.badge > 9 ? "9+" : item.badge}
+                    {item.badge > 99 ? "99+" : item.badge}
                   </span>
                 )}
               </Link>

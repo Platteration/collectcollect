@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 import Link from "next/link";
-import { money } from "@collectcollect/core/format";
+import { day, money } from "@collectcollect/core/format";
 import type { ItemRecord } from "@/lib/types";
 import { CATEGORIES, EXTERIORS, RARITIES } from "@/lib/types";
 import { isTradeLocked } from "@/lib/items";
@@ -65,7 +65,7 @@ export function ItemTile({ item, value }: { item: ItemRecord; value: number | nu
         </div>
         {locked && (
           <p className="text-xs" style={{ color: "var(--chart-bad-text)" }}>
-            Trade locked until {item.tradableAfter!.slice(0, 10)}
+            Trade locked until {day(item.tradableAfter)}
           </p>
         )}
       </div>

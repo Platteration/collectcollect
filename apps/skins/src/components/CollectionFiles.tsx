@@ -154,7 +154,7 @@ export function CollectionFiles({ status }: { status: CollectionStatus }) {
       </p>
 
       {rebuilt && (
-        <p className="card-surface p-3 text-sm">
+        <p className="card-surface p-3 text-sm" role="status">
           Wrote {rebuilt.written} file{rebuilt.written === 1 ? "" : "s"}.
           {rebuilt.orphans > 0 && (
             <>
@@ -167,7 +167,7 @@ export function CollectionFiles({ status }: { status: CollectionStatus }) {
       )}
 
       {imported && (
-        <div className="card-surface space-y-2 p-3 text-sm">
+        <div className="card-surface space-y-2 p-3 text-sm" role="status">
           <p>
             {imported.created} added, {imported.replaced} replaced, {imported.acquisitions} purchases, {imported.sales}{" "}
             sales and {imported.prices} recorded prices came back.

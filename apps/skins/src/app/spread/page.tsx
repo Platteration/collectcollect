@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { money } from "@collectcollect/core/format";
+import { day, money } from "@collectcollect/core/format";
 import { spreadView, type SpreadRow } from "@/lib/spread";
 import { listItems } from "@/lib/items";
 import { RefreshPrices } from "@/components/RefreshPrices";
@@ -145,7 +145,7 @@ function Row({ row }: { row: SpreadRow }) {
       </p>
       {row.locked && (
         <p className="mt-1 text-sm" style={{ color: "var(--chart-bad-text)" }}>
-          Trade locked until {row.tradableAfter!.slice(0, 10)} — not actionable yet.
+          Trade locked until {day(row.tradableAfter)} — not actionable yet.
         </p>
       )}
     </li>

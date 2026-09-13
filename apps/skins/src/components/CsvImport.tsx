@@ -173,7 +173,7 @@ export function CsvImport() {
       )}
 
       {result && (
-        <div className="card-surface space-y-2 p-4 text-sm">
+        <div className="card-surface space-y-2 p-4 text-sm" role="status">
           <p>
             <strong>{result.created}</strong> added, <strong>{result.merged}</strong> joined something already held,{" "}
             <strong>{result.updated}</strong> already known.

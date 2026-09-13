@@ -4,7 +4,7 @@ import { thinPoints } from "@collectcollect/core/series";
 /* eslint-disable @next/next/no-img-element */
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { money, when } from "@collectcollect/core/format";
+import { day, money, when } from "@collectcollect/core/format";
 import { ValueChart } from "@collectcollect/core/components/ValueChart";
 import { RANGES, change, sliceRange, type PortfolioPoint, type Range, type Realized, type Returns, type Split as Allocation } from "@/lib/analytics";
 import { CATEGORIES, RARITIES, type Category, type Rarity } from "@/lib/types";
@@ -216,7 +216,7 @@ export function Portfolio(props: Props) {
                 <Link href={`/items/${s.itemId}`} className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{s.name}</span>
                   <span className="block truncate text-xs" style={{ color: "var(--muted)" }}>
-                    {s.detail} · {s.soldAt.slice(0, 10)}
+                    {s.detail} · {day(s.soldAt)}
                     {s.quantity > 1 && ` · ×${s.quantity}`}
                   </span>
                 </Link>

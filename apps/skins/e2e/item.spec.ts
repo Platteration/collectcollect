@@ -17,6 +17,17 @@ test.describe("one item", () => {
     await expect(page.getByText("First one I ever bought.")).toBeVisible();
   });
 
+  test("draws an item's own value line once it has more than one price", async ({ page }) => {
+    // The knife was priced in January and again in June.
+    await page.goto("/inventory?q=Karambit");
+    await page.getByRole("link", { name: /Karambit/ }).click();
+    const chart = page.locator("svg[aria-label^='Value of this item over time']").first();
+    await expect(chart).toBeVisible();
+    await expect(chart).toHaveAttribute("aria-label", /\$1,180/);
+    // The table beneath it says the same dates the same way as the rest of the app.
+    await expect(page.getByRole("cell", { name: "Jun 1, 2026" })).toBeVisible();
+  });
+
   test("keeps two copies of the same skin apart", async ({ page }) => {
     await page.goto("/inventory?q=Redline");
     const links = page.getByRole("link", { name: /AK-47 \| Redline/ });

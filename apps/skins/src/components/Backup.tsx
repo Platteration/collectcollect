@@ -133,7 +133,7 @@ export function Backup({ summary, replaced }: { summary: { items: number; databa
         </p>
       )}
       {result && (
-        <p className="card-surface p-3 text-sm">
+        <p className="card-surface p-3 text-sm" role="status">
           {result.verb} {result.result.items} item{result.result.items === 1 ? "" : "s"}. The inventory that was live is now in{" "}
           <span className="font-mono text-xs break-all">{result.result.movedAsideTo}</span>.
         </p>

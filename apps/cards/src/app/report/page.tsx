@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { latestSnapshotsByCard, listCards } from "@/lib/cards";
-import { imageSrc, money, when } from "@/lib/format";
+import { day, imageSrc, money, when } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { GAMES } from "@/lib/types";
 import { PrintButton } from "@collectcollect/core/components/PrintButton";
@@ -112,7 +112,7 @@ export default function ReportPage() {
                 <td className="py-2 pr-2 text-right tabular-nums">{money(each)}</td>
                 <td className="py-2 text-right tabular-nums font-medium">
                   {money(rowTotal)}
-                  {source && <div className="text-[10px] font-normal text-neutral-500">{source}{asOf ? `, ${new Date(asOf).toLocaleDateString("en-US")}` : ""}</div>}
+                  {source && <div className="text-[10px] font-normal text-neutral-500">{source}{asOf ? `, ${day(asOf)}` : ""}</div>}
                 </td>
               </tr>
             );

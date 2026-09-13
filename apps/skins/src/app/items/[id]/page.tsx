@@ -1,7 +1,8 @@
 /* eslint-disable @next/next/no-img-element */
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { money, when } from "@collectcollect/core/format";
+import { day, money, when } from "@collectcollect/core/format";
+import { ValueChart } from "@collectcollect/core/components/ValueChart";
 import { getItem, isTradeLocked, listSnapshots, listStorageUnits } from "@/lib/items";
 import { listLots } from "@/lib/acquisitions";
 import { listSalesForItem } from "@/lib/sales";
@@ -29,6 +30,11 @@ export default async function ItemPage({ params }: PageProps<"/items/[id]">) {
   const rarity = item.rarity ? RARITIES[item.rarity] : null;
   const locked = isTradeLocked(item);
   const { cash, wallet } = proceedsByMarket(snapshots[0]?.summary.quotes ?? [], getSettings());
+  // Newest first in the table, oldest first on the line.
+  const valuePoints = [...snapshots]
+    .reverse()
+    .filter((s) => s.summary.yourCopyValue !== null)
+    .map((s) => ({ t: s.fetchedAt, value: s.summary.yourCopyValue ?? 0, priced: 1 }));
 
   return (
     <div
@@ -76,7 +82,7 @@ export default async function ItemPage({ params }: PageProps<"/items/[id]">) {
           </p>
           {locked && (
             <p className="mt-2 text-sm" style={{ color: "var(--chart-bad-text)" }}>
-              Trade locked until {item.tradableAfter!.slice(0, 10)}. It cannot be sold anywhere until then, whatever it is
+              Trade locked until {day(item.tradableAfter)}. It cannot be sold anywhere until then, whatever it is
               worth.
             </p>
           )}
@@ -143,10 +149,19 @@ export default async function ItemPage({ params }: PageProps<"/items/[id]">) {
       {snapshots.length > 0 && (
         <section>
           <h2 className="font-display mb-2 text-lg font-semibold uppercase tracking-wide">Value history</h2>
+          {valuePoints.length > 1 && (
+            <div className="card-surface mb-3 p-3">
+              <ValueChart
+                points={valuePoints}
+                up={(valuePoints[valuePoints.length - 1]?.value ?? 0) >= (valuePoints[0]?.value ?? 0)}
+                label={`Value of this item over time, ${money(valuePoints[valuePoints.length - 1]?.value)} now`}
+              />
+            </div>
+          )}
           <Table
             headers={["Date", "Your copy", "Market", "Basis"]}
             rows={snapshots.map((s) => [
-              s.fetchedAt.slice(0, 10),
+              day(s.fetchedAt),
               s.summary.yourCopyValue === null ? "—" : money(s.summary.yourCopyValue),
               s.summary.market === null ? "—" : money(s.summary.market),
               s.summary.yourCopyBasis || "—",

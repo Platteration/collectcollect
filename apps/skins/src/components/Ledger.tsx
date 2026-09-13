@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@collectcollect/core/api-client";
-import { money } from "@collectcollect/core/format";
+import { day, money } from "@collectcollect/core/format";
 import type { Acquisition } from "@/lib/acquisitions";
 import type { ItemRecord, Sale } from "@/lib/types";
 
@@ -94,7 +94,7 @@ export function Ledger({ item, acquisitions, sales }: { item: ItemRecord; acquis
               <tbody>
                 {acquisitions.map((lot) => (
                   <tr key={lot.id} className="border-t" style={{ borderColor: "var(--line)" }}>
-                    <td className="whitespace-nowrap px-3 py-2">{lot.acquiredAt.slice(0, 10)}</td>
+                    <td className="whitespace-nowrap px-3 py-2">{day(lot.acquiredAt)}</td>
                     <td className="px-3 py-2">{lot.quantity}</td>
                     <td className="px-3 py-2">{lot.remaining}</td>
                     <td className="whitespace-nowrap px-3 py-2">
@@ -158,7 +158,7 @@ export function Ledger({ item, acquisitions, sales }: { item: ItemRecord; acquis
                       : Math.round((sale.unitPrice * sale.quantity - sale.fees - sale.unitCost * sale.quantity) * 100) / 100;
                   return (
                     <tr key={sale.id} className="border-t" style={{ borderColor: "var(--line)" }}>
-                      <td className="whitespace-nowrap px-3 py-2">{sale.soldAt.slice(0, 10)}</td>
+                      <td className="whitespace-nowrap px-3 py-2">{day(sale.soldAt)}</td>
                       <td className="px-3 py-2">{sale.quantity}</td>
                       <td className="whitespace-nowrap px-3 py-2">{money(sale.unitPrice)}</td>
                       <td className="whitespace-nowrap px-3 py-2">{money(sale.fees)}</td>

@@ -131,7 +131,7 @@ export function SteamImport() {
       )}
 
       {result && (
-        <div className="card-surface space-y-2 p-4 text-sm">
+        <div className="card-surface space-y-2 p-4 text-sm" role="status">
           <p>
             <strong>{result.created}</strong> added, <strong>{result.updated}</strong> already known,{" "}
             <strong>{result.increased}</strong> gone up, <strong>{result.unchanged}</strong> unchanged.
