@@ -48,7 +48,10 @@ export interface RefreshResult {
 }
 
 /** When each item was last attempted, so an item nothing prices is retried on the normal cadence rather than every tick. */
-const lastAttempt = new Map<number, number>();
+const globalForAttempts = globalThis as unknown as { __skinsLastAttempt?: Map<number, number> };
+// On the global object, so a development reload does not forget what was
+// tried a minute ago and try it all again.
+const lastAttempt: Map<number, number> = (globalForAttempts.__skinsLastAttempt ??= new Map());
 
 /**
  * Forget every attempt. Item ids restart with each test database, so a test

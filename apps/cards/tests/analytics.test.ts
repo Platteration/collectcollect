@@ -272,3 +272,46 @@ describe("when a card is ready to grade", () => {
   });
 });
 
+
+describe("a long history", () => {
+  it("builds a series over two hundred thousand snapshots that agrees with summing every card", () => {
+    const cards = Array.from({ length: 400 }, (_, i) => card(i + 1, (i % 3) + 1));
+    const snapshots: PriceSnapshot[] = [];
+    for (let k = 0; k < 200_000; k++) {
+      const cardId = (k % 400) + 1;
+      const value = ((k * 7) % 50) / 10;
+      snapshots.push({ id: k + 1, cardId, fetchedAt: new Date(Date.UTC(2025, 0, 1) + k * 60_000).toISOString(), summary: summary({ yourCopyValue: value, ungraded: value / 2 }) });
+    }
+    const started = Date.now();
+    const series = portfolioSeries(cards, snapshots);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(series).toHaveLength(200_000);
+
+    for (const index of [0, 399, 4_321, 123_456, 199_999]) {
+      const latest = new Map<number, number>();
+      for (let k = 0; k <= index; k++) {
+        const snap = snapshots[k]!;
+        latest.set(snap.cardId, (snap.summary.yourCopyValue ?? 0) * cards[snap.cardId - 1]!.quantity);
+      }
+      let sum = 0;
+      let priced = 0;
+      for (const v of latest.values()) {
+        sum += v;
+        if (v > 0) priced++;
+      }
+      expect(series[index]!.value).toBeCloseTo(Math.round(sum * 100) / 100, 1);
+      expect(series[index]!.priced).toBe(priced);
+    }
+  });
+
+  it("scales a chart over two hundred thousand points without a spread", async () => {
+    const { xScale, timeTicks } = await import("@collectcollect/core/charts/chart-utils");
+    const times = Array.from({ length: 200_000 }, (_, i) => i * 60_000);
+    const layout = { width: 800, height: 200, left: 10, right: 10, top: 10, bottom: 10 };
+    const x = xScale(times, layout);
+    expect(x(0)).toBe(10);
+    expect(x(times[times.length - 1]!)).toBe(790);
+    const xs = times.map(x);
+    expect(timeTicks(times, xs, times.map(String)).length).toBeGreaterThan(1);
+  });
+});

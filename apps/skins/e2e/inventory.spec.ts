@@ -24,6 +24,9 @@ test.describe("the inventory", () => {
   test("stacks one filter on another instead of replacing it", async ({ page }) => {
     await page.goto("/inventory");
     await filters(page).getByRole("link", { name: "Weapon", exact: true }).click();
+    // The second chip's link is built from the page's current filters, so the
+    // first navigation has to land before it is read.
+    await expect(page).toHaveURL(/category=weapon/);
     await filters(page).getByRole("link", { name: "StatTrak™", exact: true }).click();
     await expect(page).toHaveURL(/category=weapon/);
     await expect(page).toHaveURL(/stattrak=1/);

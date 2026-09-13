@@ -9,47 +9,44 @@ export function getSettings(): Settings {
     .get(KEY) as { value: string } | undefined;
   if (!row) return structuredClone(DEFAULT_SETTINGS);
   try {
-    const stored = JSON.parse(row.value) as Partial<Settings>;
-    return {
-      // Grade rows are fully user-managed (they may remove defaults); condition
-      // rows must always cover every condition, so defaults fill any gaps.
-      gradeMultipliers: stored.gradeMultipliers ?? { ...DEFAULT_SETTINGS.gradeMultipliers },
-      conditionMultipliers: {
-        ...DEFAULT_SETTINGS.conditionMultipliers,
-        ...(stored.conditionMultipliers ?? {}),
-      },
-      gradingFee: Number.isFinite(stored.gradingFee) ? Number(stored.gradingFee) : DEFAULT_SETTINGS.gradingFee,
-      readyMinUpside: Number.isFinite(stored.readyMinUpside) ? Number(stored.readyMinUpside) : DEFAULT_SETTINGS.readyMinUpside,
-      readyMinUpsidePercent: Number.isFinite(stored.readyMinUpsidePercent) ? Number(stored.readyMinUpsidePercent) : DEFAULT_SETTINGS.readyMinUpsidePercent,
-      ownerName: typeof stored.ownerName === "string" ? stored.ownerName.slice(0, 120) : DEFAULT_SETTINGS.ownerName,
-      alertMovePercent: Number.isFinite(stored.alertMovePercent) ? Number(stored.alertMovePercent) : DEFAULT_SETTINGS.alertMovePercent,
-      alertWebhookUrl: typeof stored.alertWebhookUrl === "string" ? stored.alertWebhookUrl : DEFAULT_SETTINGS.alertWebhookUrl,
-    };
+    return sanitize(JSON.parse(row.value) as Partial<Settings>);
   } catch {
     return structuredClone(DEFAULT_SETTINGS);
   }
 }
 
 export function saveSettings(settings: Settings): Settings {
-  const clean: Settings = {
-    gradeMultipliers: sanitizeNumbers(settings.gradeMultipliers),
-    conditionMultipliers: {
-      ...DEFAULT_SETTINGS.conditionMultipliers,
-      ...sanitizeNumbers(settings.conditionMultipliers),
-    } as Settings["conditionMultipliers"],
-    gradingFee: nonNegative(settings.gradingFee, DEFAULT_SETTINGS.gradingFee),
-    readyMinUpside: nonNegative(settings.readyMinUpside, DEFAULT_SETTINGS.readyMinUpside),
-    readyMinUpsidePercent: nonNegative(settings.readyMinUpsidePercent, DEFAULT_SETTINGS.readyMinUpsidePercent),
-    ownerName: (typeof settings.ownerName === "string" ? settings.ownerName : "").trim().slice(0, 120),
-    alertMovePercent: nonNegative(settings.alertMovePercent, DEFAULT_SETTINGS.alertMovePercent),
-    alertWebhookUrl: webhookUrl(settings.alertWebhookUrl),
-  };
+  const clean = sanitize(settings);
   getDb()
     .prepare(
       "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     )
     .run(KEY, JSON.stringify(clean));
   return clean;
+}
+
+/**
+ * The one set of rules for what a setting may be, applied both when settings
+ * are saved and when they are read back. A stored copy can predate a rule, or
+ * have been edited by hand; reading it as strictly as it would be saved means
+ * a negative fee never reaches the grading verdict from either direction.
+ */
+export function sanitize(input: Partial<Settings>): Settings {
+  return {
+    // Grade rows are fully user-managed (they may remove defaults); condition
+    // rows must always cover every condition, so defaults fill any gaps.
+    gradeMultipliers: input.gradeMultipliers === undefined ? { ...DEFAULT_SETTINGS.gradeMultipliers } : sanitizeNumbers(input.gradeMultipliers),
+    conditionMultipliers: {
+      ...DEFAULT_SETTINGS.conditionMultipliers,
+      ...sanitizeNumbers(input.conditionMultipliers),
+    } as Settings["conditionMultipliers"],
+    gradingFee: nonNegative(input.gradingFee, DEFAULT_SETTINGS.gradingFee),
+    readyMinUpside: nonNegative(input.readyMinUpside, DEFAULT_SETTINGS.readyMinUpside),
+    readyMinUpsidePercent: nonNegative(input.readyMinUpsidePercent, DEFAULT_SETTINGS.readyMinUpsidePercent),
+    ownerName: (typeof input.ownerName === "string" ? input.ownerName : "").trim().slice(0, 120),
+    alertMovePercent: nonNegative(input.alertMovePercent, DEFAULT_SETTINGS.alertMovePercent),
+    alertWebhookUrl: webhookUrl(input.alertWebhookUrl),
+  };
 }
 
 /** Only http(s) URLs are accepted; the server POSTs to this on its own. */

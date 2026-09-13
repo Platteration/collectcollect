@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { extent } from "../series";
 
 export interface Layout {
   width: number;
@@ -12,8 +13,7 @@ export interface Layout {
 }
 
 export function xScale(times: number[], layout: Layout) {
-  const min = Math.min(...times);
-  const max = Math.max(...times);
+  const [min, max] = extent(times);
   const span = max - min || 1;
   const innerW = layout.width - layout.left - layout.right;
   return (t: number) => layout.left + ((t - min) / span) * innerW;
@@ -81,8 +81,7 @@ export function shortDate(iso: string, withTime = false): string {
  */
 export function timeTicks(times: number[], xs: number[], labels: string[], count = 4, minGap = 70): number[] {
   if (times.length === 0) return [];
-  const min = Math.min(...times);
-  const max = Math.max(...times);
+  const [min, max] = extent(times);
   const chosen: number[] = [];
   for (let k = 0; k < count; k++) {
     const target = min + ((max - min) * k) / Math.max(1, count - 1);

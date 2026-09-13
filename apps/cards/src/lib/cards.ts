@@ -189,7 +189,10 @@ export function normalizeInput(input: CardInput): Required<
  * back intake must not leave a Markdown file for a card that does not exist.
  */
 /** Card id -> whether it might already be filed under a different name. */
-const deferredMirror = new Map<number, boolean>();
+const globalForMirror = globalThis as unknown as { __collectcollectDeferredMirror?: Map<number, boolean> };
+// On the global object, like the connection: a development reload in the
+// middle of a transaction must not lose the list of what to mirror after it.
+const deferredMirror: Map<number, boolean> = (globalForMirror.__collectcollectDeferredMirror ??= new Map());
 
 function touch(card: CardRecord | null, opts: { mayHaveOldName?: boolean } = {}): void {
   if (!card) return;

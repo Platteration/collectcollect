@@ -16,6 +16,7 @@ import {
   yScale,
   type Layout,
 } from "../charts/chart-utils";
+import { extent } from "../series";
 
 /** The only thing this chart needs to know about a point. */
 export interface ValuePoint {
@@ -58,7 +59,8 @@ export function ValueChart<P extends ValuePoint>({
   const layout: Layout = { ...LAYOUT, width, height: narrow ? Math.round(height * 0.8) : height, right: narrow ? 48 : LAYOUT.right };
   const times = points.map((p) => new Date(p.t).getTime());
   const values = points.map((p) => p.value);
-  const { lo, hi, ticks } = niceTicks(Math.min(...values, 0), Math.max(...values, 1));
+  const [minValue, maxValue] = extent(values);
+  const { lo, hi, ticks } = niceTicks(Math.min(minValue, 0), Math.max(maxValue, 1));
   const sx = xScale(times, layout);
   const sy = yScale(lo, hi, layout);
   const coords: Array<[number, number]> = points.map((p) => [sx(new Date(p.t).getTime()), sy(p.value)]);

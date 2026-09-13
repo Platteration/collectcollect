@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDatabase, setDb } from "@/lib/db";
-import { WEBHOOK_TIMEOUT_MS, createAlert, deliver } from "@/lib/alerts";
+import { WEBHOOK_TIMEOUT_MS, alertsForRefresh, createAlert, deliver } from "@/lib/alerts";
+import type { PriceSummary } from "@/lib/types";
+import { seedCase } from "./helpers";
 import { DEFAULT_SETTINGS } from "@/lib/types";
 
 function at<T>(xs: readonly T[], i: number): T {
@@ -53,5 +55,29 @@ describe("delivering an alert to a webhook", () => {
     expect(WEBHOOK_TIMEOUT_MS).toBe(10_000);
     expect(error).toHaveBeenCalledTimes(1);
     expect(String(error.mock.calls[0]?.[1])).toMatch(/timeout/i);
+  });
+});
+
+describe("what a refresh is worth saying", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  const priced = (value: number): PriceSummary => ({
+    currency: "USD",
+    fetchedAt: "2026-06-01T00:00:00.000Z",
+    market: value,
+    marketSource: "Skinport",
+    yourCopyValue: value,
+    yourCopyBasis: "Skinport lowest ask",
+    quotes: [],
+    errors: [],
+  });
+
+  it("treats a threshold of zero as move alerts switched off", () => {
+    const item = seedCase({ quantity: 1 });
+    const moved = alertsForRefresh(item, priced(1), priced(1.5), { ...DEFAULT_SETTINGS, alertMovePercent: 10 });
+    expect(moved.map((a) => a.kind)).toContain("price_move");
+    // Zero used to fire on every refresh that changed a price by anything.
+    const off = alertsForRefresh(item, priced(1), priced(1.5), { ...DEFAULT_SETTINGS, alertMovePercent: 0 });
+    expect(off.map((a) => a.kind)).not.toContain("price_move");
   });
 });

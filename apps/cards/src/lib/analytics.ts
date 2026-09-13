@@ -1,3 +1,4 @@
+import { extent } from "@collectcollect/core/series";
 import type { CostBasis } from "./acquisitions";
 import type { CardRecord, PriceSnapshot, PriceSummary, Settings } from "./types";
 import { round2 } from "./pricing/match";
@@ -28,21 +29,25 @@ export function portfolioSeries(cards: CardRecord[], snapshots: PriceSnapshot[])
   const current = new Map<number, { value: number; ungraded: number }>();
   const points: PortfolioPoint[] = [];
   const sorted = [...snapshots].sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt) || a.id - b.id);
+  // Running totals: each snapshot replaces one card's contribution, so the
+  // whole is adjusted by the difference rather than re-summed over every card
+  // for every snapshot, which is quadratic in a collection's history.
+  let value = 0;
+  let ungraded = 0;
+  let priced = 0;
   for (const s of sorted) {
     if (!qty.has(s.cardId)) continue; // card has been deleted
     const q = qty.get(s.cardId)!;
-    current.set(s.cardId, {
+    const before = current.get(s.cardId) ?? { value: 0, ungraded: 0 };
+    const after = {
       value: (s.summary.yourCopyValue ?? 0) * q,
       ungraded: (s.summary.ungraded ?? 0) * q,
-    });
-    let value = 0;
-    let ungraded = 0;
-    let priced = 0;
-    for (const v of current.values()) {
-      value += v.value;
-      ungraded += v.ungraded;
-      if (v.value > 0) priced++;
-    }
+    };
+    current.set(s.cardId, after);
+    value += after.value - before.value;
+    ungraded += after.ungraded - before.ungraded;
+    if (before.value > 0) priced--;
+    if (after.value > 0) priced++;
     const point = { t: s.fetchedAt, value: round2(value), ungraded: round2(ungraded), priced };
     // Snapshots taken in the same second (e.g. "refresh all") collapse into one point.
     const prev = points.at(-1);
@@ -204,7 +209,7 @@ export function gradingVerdict(series: OutlookPoint[]): Verdict {
       upsideVsPeak: null,
     };
   }
-  const peak = Math.max(...series.map((p) => p.upside));
+  const [, peak] = extent(series.map((p) => p.upside));
   const ratio = peak > 0 ? last.upside / peak : 0;
   const trend = last.upside - (series[Math.max(0, series.length - 4)] ?? last).upside;
   if (ratio >= 0.9) {

@@ -4,6 +4,7 @@ import type { OutlookPoint } from "@/lib/analytics";
 import { money } from "@/lib/format";
 import { useId } from "react";
 import { INK, bandPath, compactMoney, linePath, niceTicks, shortDate, timeTicks, useContainerWidth, useCrosshair, xScale, yScale, type Layout } from "@collectcollect/core/charts/chart-utils";
+import { extent } from "@collectcollect/core/series";
 
 interface Props {
   series: OutlookPoint[];
@@ -24,7 +25,8 @@ export function OutlookChart({ series, compact = false }: Props) {
   const dated = series.map((p) => ({ ...p, time: new Date(p.t).getTime() }));
   const times = dated.map((p) => p.time);
   const all = series.flatMap((p) => [p.min, p.max, p.raw]);
-  const { lo, hi, ticks } = niceTicks(Math.min(...all, 0), Math.max(...all, 1));
+  const [minAll, maxAll] = extent(all);
+  const { lo, hi, ticks } = niceTicks(Math.min(minAll, 0), Math.max(maxAll, 1));
   const sx = xScale(times, layout);
   const sy = yScale(lo, hi, layout);
   // Each point carries its own x position, so drawing never looks one up by index.

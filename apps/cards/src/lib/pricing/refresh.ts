@@ -50,7 +50,10 @@ export interface RefreshResult {
 }
 
 /** When each card was last attempted, so cards that yield no price are retried on the normal cadence, not every tick. */
-const lastAttempt = new Map<number, number>();
+const globalForAttempts = globalThis as unknown as { __collectcollectLastAttempt?: Map<number, number> };
+// On the global object, so a development reload does not forget what was
+// tried a minute ago and try it all again.
+const lastAttempt: Map<number, number> = (globalForAttempts.__collectcollectLastAttempt ??= new Map());
 
 /** Forget every attempt. Card ids restart with each test database, so a test
  * that did not clear this would inherit another test's throttling. */

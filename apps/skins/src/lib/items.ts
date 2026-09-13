@@ -243,7 +243,10 @@ export function normalizeInput(input: ItemInput): NormalizedItem {
  * back import must not leave a Markdown file for an item that does not exist.
  */
 /** Item id -> whether it might already be filed under a different name. */
-const deferredMirror = new Map<number, boolean>();
+const globalForMirror = globalThis as unknown as { __skinsDeferredMirror?: Map<number, boolean> };
+// On the global object, like the connection: a development reload in the
+// middle of a transaction must not lose the list of what to mirror after it.
+const deferredMirror: Map<number, boolean> = (globalForMirror.__skinsDeferredMirror ??= new Map());
 
 function touch(item: ItemRecord | null, opts: { mayHaveOldName?: boolean } = {}): void {
   if (!item) return;

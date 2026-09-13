@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { openDatabase, setDb } from "@/lib/db";
+import { getDb, openDatabase, setDb } from "@/lib/db";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { PUT } from "@/app/api/settings/route";
 import { DEFAULT_SETTINGS } from "@/lib/types";
@@ -72,5 +72,20 @@ describe("saving settings", () => {
     const res = await put({ gradeMultipliers: { "PSA 10": 3 } });
     expect(res.status).toBe(200);
     expect(getSettings().gradeMultipliers).toEqual({ "PSA 10": 3 });
+  });
+});
+
+describe("reading settings back", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("applies the same rules as saving, so a stored negative fee comes back as the default", () => {
+    // A copy written by hand, or by a version before the rule existed.
+    getDb()
+      .prepare("INSERT INTO settings (key, value) VALUES ('settings', ?)")
+      .run(JSON.stringify({ gradingFee: -20, gradeMultipliers: { "PSA 10": "ten", "PSA 9": 4 }, alertWebhookUrl: "ftp://nope" }));
+    const read = getSettings();
+    expect(read.gradingFee).toBe(DEFAULT_SETTINGS.gradingFee);
+    expect(read.gradeMultipliers).toEqual({ "PSA 9": 4 });
+    expect(read.alertWebhookUrl).toBe("");
   });
 });

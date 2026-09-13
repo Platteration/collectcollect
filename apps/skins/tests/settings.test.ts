@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { openDatabase, setDb } from "@/lib/db";
+import { getDb, openDatabase, setDb } from "@/lib/db";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { PUT } from "@/app/api/settings/route";
 import { DEFAULT_SETTINGS } from "@/lib/types";
@@ -61,5 +61,21 @@ describe("saving settings", () => {
   it("says so when the body is not JSON", async () => {
     const res = await PUT(new Request("http://localhost/api/settings", { method: "PUT", body: "{nope" }));
     expect(res.status).toBe(400);
+  });
+});
+
+describe("reading settings back", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("applies the same rules as saving, so a stored fee at or above 1 comes back as the default", () => {
+    // A copy written by hand, or by a version before the rule existed.
+    getDb()
+      .prepare("INSERT INTO settings (key, value) VALUES ('settings', ?)")
+      .run(JSON.stringify({ marketFees: { steam: 1.5, skinport: -0.1 }, stattrakMultiplier: -2, ownerName: "  Ada  " }));
+    const read = getSettings();
+    expect(read.marketFees.steam).toBe(DEFAULT_SETTINGS.marketFees.steam);
+    expect(read.marketFees.skinport).toBe(DEFAULT_SETTINGS.marketFees.skinport);
+    expect(read.stattrakMultiplier).toBe(DEFAULT_SETTINGS.stattrakMultiplier);
+    expect(read.ownerName).toBe("Ada");
   });
 });

@@ -15,11 +15,14 @@ import { ProviderError, type ItemQuery, type PriceProvider } from "../types";
 const ENDPOINT = "https://csfloat.com/api/v1/listings";
 
 /** Their documented ceiling is generous; this stays well inside it. */
-let limiter: RateLimit = rateLimit(60, 60_000);
+// On the global object, like the database handle: a development reload that
+// made a fresh limiter would forget the calls already made this minute.
+const globalForLimiter = globalThis as unknown as { __skinsCsfloatLimiter?: RateLimit };
+let limiter: RateLimit = (globalForLimiter.__skinsCsfloatLimiter ??= rateLimit(60, 60_000));
 
 /** Tests only: replace the shared limit so a test does not wait. */
 export function setRateLimit(next: RateLimit): void {
-  limiter = next;
+  limiter = globalForLimiter.__skinsCsfloatLimiter = next;
 }
 
 export interface CsFloatListing {

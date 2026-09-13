@@ -1,5 +1,6 @@
 "use client";
 
+import { thinPoints } from "@collectcollect/core/series";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -78,7 +79,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const visible = useMemo(() => sliceRange(points, range), [points, range]);
+  const visible = useMemo(() => thinPoints(sliceRange(points, range)), [points, range]);
   const latest = points[points.length - 1] ?? null;
   const shown = hover ?? latest;
   const delta = useMemo(() => {

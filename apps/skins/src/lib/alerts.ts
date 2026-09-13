@@ -130,7 +130,9 @@ export function alertsForRefresh(
   const after = next.yourCopyValue ?? null;
   if (before !== null && after !== null && before > 0) {
     const change = ((after - before) / before) * 100;
-    if (Math.abs(change) >= settings.alertMovePercent) {
+    // A threshold of zero switches move alerts off, as the settings page says;
+    // without the guard every refresh that changed a price at all would fire.
+    if (settings.alertMovePercent > 0 && Math.abs(change) >= settings.alertMovePercent) {
       const up = change > 0;
       out.push({
         kind: "price_move",

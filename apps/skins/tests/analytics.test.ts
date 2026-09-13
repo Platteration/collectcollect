@@ -5,6 +5,8 @@ import { allocationBy, change, portfolioSeries, realizedReturn, sliceRange, tota
 import { valueOf } from "@/lib/valuation";
 import type { ItemRecord, PriceSummary } from "@/lib/types";
 import { seedCase, seedRedline } from "./helpers";
+import { extent, thinPoints } from "@collectcollect/core/series";
+import type { PriceSnapshot } from "@/lib/types";
 
 beforeEach(() => setDb(openDatabase(":memory:")));
 
@@ -157,5 +159,51 @@ describe("valuation", () => {
   it("says an unpriced item is unpriced rather than guessing", () => {
     const item = seedCase({ quantity: 1 });
     expect(valueOf(item, undefined)).toEqual({ value: null, basis: "Not priced yet" });
+  });
+});
+
+describe("a long history", () => {
+  it("builds a series over two hundred thousand snapshots that agrees with summing every item", () => {
+    const items = Array.from({ length: 400 }, (_, i) => ({ id: i + 1, quantity: (i % 3) + 1 })) as ItemRecord[];
+    const snapshots: PriceSnapshot[] = [];
+    for (let k = 0; k < 200_000; k++) {
+      const itemId = (k % 400) + 1;
+      const at = new Date(Date.UTC(2025, 0, 1) + k * 60_000).toISOString();
+      snapshots.push({ id: k + 1, itemId, fetchedAt: at, summary: priced(at, ((k * 7) % 50) / 10) });
+    }
+    const started = Date.now();
+    const series = portfolioSeries(items, snapshots);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(series).toHaveLength(200_000);
+
+    // Spot checks against the plain sum of every item's latest value at that point.
+    for (const index of [0, 399, 4_321, 123_456, 199_999]) {
+      const latest = new Map<number, number>();
+      for (let k = 0; k <= index; k++) {
+        const snap = snapshots[k]!;
+        latest.set(snap.itemId, (snap.summary.yourCopyValue ?? 0) * items[snap.itemId - 1]!.quantity);
+      }
+      let sum = 0;
+      let priced = 0;
+      for (const v of latest.values()) {
+        sum += v;
+        if (v > 0) priced++;
+      }
+      expect(series[index]!.value).toBeCloseTo(Math.round(sum * 100) / 100, 1);
+      expect(series[index]!.priced).toBe(priced);
+    }
+  });
+
+  it("finds the ends of a series and thins it without losing either", () => {
+    const xs = Array.from({ length: 200_000 }, (_, i) => (i * 7919) % 100_003);
+    // 7919 and 100003 share no factor and there are more than 100003 terms, so every residue appears.
+    expect(extent(xs)).toEqual([0, 100_002]);
+    expect(extent([])).toEqual([Infinity, -Infinity]);
+    const points = Array.from({ length: 10_001 }, (_, i) => ({ t: i }));
+    const thin = thinPoints(points, 2000);
+    expect(thin).toHaveLength(2000);
+    expect(thin[0]).toEqual({ t: 0 });
+    expect(thin[thin.length - 1]).toEqual({ t: 10_000 });
+    expect(thinPoints(points.slice(0, 5), 2000)).toHaveLength(5);
   });
 });

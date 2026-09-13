@@ -1,3 +1,4 @@
+import { thinPoints } from "@collectcollect/core/series";
 import { allSnapshots, costBasisByItem, isTradeLocked, latestSnapshotsByItem, listItems } from "@/lib/items";
 import { allocationBy, portfolioSeries, realizedReturn, totalReturn } from "@/lib/analytics";
 import { listSales } from "@/lib/sales";
@@ -12,7 +13,9 @@ export default function HomePage() {
   const items = listItems().filter((i) => i.quantity > 0);
   const snapshots = allSnapshots();
   const latest = latestSnapshotsByItem();
-  const points = portfolioSeries(items, snapshots);
+  // A long history is thinned before it travels to the browser; the chart
+  // thins what it shows again, so a short range keeps its detail.
+  const points = thinPoints(portfolioSeries(items, snapshots), 20_000);
   const priceOf = (item: (typeof items)[number]) => valueOf(item, latest.get(item.id)).value;
 
   const detailOf = (item: (typeof items)[number]) =>

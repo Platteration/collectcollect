@@ -1,3 +1,4 @@
+import { thinPoints } from "@collectcollect/core/series";
 import { allSnapshots, costBasisByCard, latestSnapshotsByCard, listCards } from "@/lib/cards";
 import { allocationByGame, gradingVerdict, isReadyToGrade, outlookSeries, portfolioSeries, realizedReturn, totalReturn } from "@/lib/analytics";
 import { imageSrc } from "@/lib/format";
@@ -16,7 +17,9 @@ export default function HomePage() {
   const snapshots = allSnapshots();
   const settings = getSettings();
   const latest = latestSnapshotsByCard();
-  const points = portfolioSeries(cards, snapshots);
+  // A long history is thinned before it travels to the browser; the chart
+  // thins what it shows again, so a short range keeps its detail.
+  const points = thinPoints(portfolioSeries(cards, snapshots), 20_000);
 
   const byCard = new Map<number, PriceSnapshot[]>();
   for (const s of snapshots) {

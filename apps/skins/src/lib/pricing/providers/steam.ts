@@ -23,11 +23,14 @@ const USD = 1;
 /** Steam's published guidance is twenty a minute; this stays under it. */
 export const STEAM_LIMIT = { max: 18, windowMs: 60_000 };
 
-let limiter: RateLimit = rateLimit(STEAM_LIMIT.max, STEAM_LIMIT.windowMs);
+// On the global object, like the database handle: a development reload that
+// made a fresh limiter would forget the calls already made this minute.
+const globalForLimiter = globalThis as unknown as { __skinsSteamLimiter?: RateLimit };
+let limiter: RateLimit = (globalForLimiter.__skinsSteamLimiter ??= rateLimit(STEAM_LIMIT.max, STEAM_LIMIT.windowMs));
 
 /** Tests only: replace the shared limit so a test does not wait a real minute. */
 export function setRateLimit(next: RateLimit): void {
-  limiter = next;
+  limiter = globalForLimiter.__skinsSteamLimiter = next;
 }
 
 export interface SteamPriceOverview {

@@ -1,5 +1,6 @@
 "use client";
 
+import { thinPoints } from "@collectcollect/core/series";
 /* eslint-disable @next/next/no-img-element */
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -51,7 +52,7 @@ export function Portfolio(props: Props) {
   const [range, setRange] = useState<Range>("ALL");
   const [hover, setHover] = useState<PortfolioPoint | null>(null);
 
-  const shown = useMemo(() => sliceRange(points, range), [points, range]);
+  const shown = useMemo(() => thinPoints(sliceRange(points, range)), [points, range]);
   const delta = useMemo(() => change(shown), [shown]);
   const latest = points[points.length - 1]?.value ?? 0;
   const headline = hover ? hover.value : latest;

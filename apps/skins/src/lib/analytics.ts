@@ -30,15 +30,19 @@ export function portfolioSeries(items: ItemRecord[], snapshots: PriceSnapshot[])
   const current = new Map<number, number>();
   const points: PortfolioPoint[] = [];
   const sorted = [...snapshots].sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt) || a.id - b.id);
+  // Running totals: each snapshot replaces one item's contribution, so the
+  // whole is adjusted by the difference rather than re-summed over every item
+  // for every snapshot, which is quadratic in an inventory's history.
+  let value = 0;
+  let priced = 0;
   for (const s of sorted) {
     if (!qty.has(s.itemId)) continue; // item has been deleted
-    current.set(s.itemId, (s.summary.yourCopyValue ?? 0) * qty.get(s.itemId)!);
-    let value = 0;
-    let priced = 0;
-    for (const v of current.values()) {
-      value += v;
-      if (v > 0) priced++;
-    }
+    const before = current.get(s.itemId) ?? 0;
+    const after = (s.summary.yourCopyValue ?? 0) * qty.get(s.itemId)!;
+    current.set(s.itemId, after);
+    value += after - before;
+    if (before > 0) priced--;
+    if (after > 0) priced++;
     const point = { t: s.fetchedAt, value: round2(value), priced };
     // Snapshots taken in the same second (a "refresh all") collapse into one point.
     const last = points[points.length - 1];

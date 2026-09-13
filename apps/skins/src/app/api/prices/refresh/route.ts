@@ -4,7 +4,7 @@ import { errorMessage, jsonError, logError } from "@collectcollect/core/http";
 import { createThrottle } from "@collectcollect/core/throttle";
 import { refreshAll } from "@/lib/pricing/refresh";
 
-/** A whole-inventory refresh is minutes of work against rate-limited markets; six an hour is plenty. */
+/** A whole-inventory refresh is minutes of work against rate-limited markets; six a minute is already more than anyone means. */
 export const throttle = createThrottle(6, 60_000, "price refreshes");
 
 /**
