@@ -3,6 +3,8 @@ import { headerKey, parseCsv } from "@collectcollect/core/csv";
 import { applyImport, previewImport } from "@/lib/import";
 import { createCard, listCards } from "@/lib/cards";
 import { openDatabase, setDb } from "@/lib/db";
+import { verifyLotInvariant } from "@/lib/acquisitions";
+import { POST, forgetAppliedImports, throttle } from "@/app/api/import/route";
 
 describe("csv parsing", () => {
   it("handles quotes, embedded separators and both line endings", () => {
@@ -119,6 +121,35 @@ describe("applying an import", () => {
     expect(result.skipped[0]).toMatchObject({ line: 4 });
     const pikachu = listCards().find((c) => c.name === "Pikachu");
     expect(pikachu?.quantity).toBe(3); // the one owned plus the two imported
+  });
+
+  it("takes the nine good rows of a file whose tenth is refused, in one transaction", () => {
+    const lines = Array.from({ length: 9 }, (_, i) => `Card ${i},pokemon,1,${i + 1}`);
+    // A count the repository refuses; the preview cannot know that yet.
+    const result = applyImport(previewImport(["name,game,qty,cost", ...lines, "Bad Card,pokemon,5000000,1"].join("\n")));
+    expect(result.created).toBe(9);
+    expect(result.skipped).toEqual([{ line: 11, reason: expect.stringMatching(/larger than anything/) }]);
+    expect(listCards()).toHaveLength(9);
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
+  it("only applies what was previewed, and not the same file twice", async () => {
+    forgetAppliedImports();
+    throttle.reset();
+    const post = (body: Record<string, unknown>) =>
+      POST(new Request("http://localhost/api/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+    const csv = "name,game,qty\nSnorlax,pokemon,2";
+    const { preview } = (await (await post({ csv })).json()) as { preview: { token: string } };
+    expect((await post({ csv: "name,game,qty\nSnorlax,pokemon,20", apply: true, token: preview.token })).status).toBe(409);
+    expect((await post({ csv, apply: true, token: preview.token })).status).toBe(200);
+    const again = await post({ csv, apply: true, token: preview.token });
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toMatch(/imported a moment ago/);
+    expect(listCards().map((c) => c.quantity)).toEqual([2]);
+    // Looking at the file again and asking for it is a second import meant.
+    expect((await post({ csv })).status).toBe(200);
+    expect((await post({ csv, apply: true, token: preview.token })).status).toBe(200);
+    expect(listCards().map((c) => c.quantity)).toEqual([4]);
   });
 
   it("round-trips this app's own export format", () => {

@@ -36,7 +36,7 @@ export function CsvImport() {
     try {
       const body = await api<{ preview: ImportPreview; result?: ImportResult }>("/api/import", {
         method: "POST",
-        body: JSON.stringify({ csv, category: category || undefined, apply }),
+        body: JSON.stringify({ csv, category: category || undefined, apply, token: apply ? preview?.token : undefined }),
       });
       setPreview(body.preview);
       if (body.result) {

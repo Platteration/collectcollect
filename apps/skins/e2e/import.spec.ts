@@ -66,6 +66,25 @@ test.describe("importing a spreadsheet", () => {
 });
 
 test.describe("importing from Steam", () => {
+  test("importing the same file twice does not double the stack", async ({ page }) => {
+    const csv = "name,qty,cost\nDanger Zone Case,4,0.10";
+    const previewed = await page.request.post("/api/import", { data: { csv } });
+    expect(previewed.ok()).toBe(true);
+    const { preview } = (await previewed.json()) as { preview: { token: string } };
+    const applied = await page.request.post("/api/import", { data: { csv, apply: true, token: preview.token } });
+    expect(applied.ok()).toBe(true);
+    // The retry a flaky connection or a double click would send.
+    const again = await page.request.post("/api/import", { data: { csv, apply: true, token: preview.token } });
+    expect(again.status()).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toMatch(/imported a moment ago/);
+
+    await page.goto("/inventory?q=Danger%20Zone");
+    await expect(page.getByRole("link", { name: /Danger Zone Case/ })).toHaveCount(1);
+    await page.getByRole("link", { name: /Danger Zone Case/ }).click();
+    const purchases = page.locator("table").filter({ has: page.getByRole("columnheader", { name: "Left" }) });
+    await expect(purchases.getByRole("cell", { name: "4", exact: true }).first()).toBeVisible();
+  });
+
   test("will not send anything that is not a SteamID64", async ({ page }) => {
     await page.goto("/import");
     const read = page.getByRole("button", { name: "See what is there" });

@@ -529,6 +529,24 @@ export type IntakeOutcome =
  * and gets its own row even when an identical name is already there.
  */
 export function intakeItem(input: ItemInput): IntakeOutcome {
+  try {
+    const outcome = intakeItemWithin(input);
+    flushDeferredMirror();
+    return outcome;
+  } catch (e) {
+    discardDeferredMirror();
+    throw e;
+  }
+}
+
+/**
+ * The intake itself, for a caller that has opened its own transaction — a
+ * spreadsheet import takes every row inside one, so a file that fails half way
+ * leaves nothing behind. Each row is still its own savepoint, so one bad row
+ * rolls back alone and the rest go in. The caller flushes the mirror once the
+ * outer transaction commits, or discards it if that rolls back.
+ */
+export function intakeItemWithin(input: ItemInput): IntakeOutcome {
   const clean = normalizeInput(input);
   const run = getDb().transaction((): IntakeOutcome => {
     if (clean.assetId) {
@@ -549,14 +567,7 @@ export function intakeItem(input: ItemInput): IntakeOutcome {
     }
     return { result: "created", item: createItem(input) };
   });
-  try {
-    const outcome = run();
-    flushDeferredMirror();
-    return outcome;
-  } catch (e) {
-    discardDeferredMirror();
-    throw e;
-  }
+  return run();
 }
 
 export type SyncOutcome =

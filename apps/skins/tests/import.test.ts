@@ -3,6 +3,7 @@ import { openDatabase, setDb } from "@/lib/db";
 import { getItem, listItems } from "@/lib/items";
 import { listLots, verifyLotInvariant } from "@/lib/acquisitions";
 import { applyImport, exteriorFromName, guessCategory, previewImport } from "@/lib/import";
+import { POST, forgetAppliedImports, throttle } from "@/app/api/import/route";
 
 beforeEach(() => setDb(openDatabase(":memory:")));
 
@@ -183,6 +184,16 @@ describe("applying a file", () => {
     expect(listItems().find((i) => i.category === "knife")?.assetId).toBe("123456789");
   });
 
+  it("takes the nine good rows of a file whose tenth is refused, in one transaction", () => {
+    const lines = Array.from({ length: 9 }, (_, i) => `Crate ${i} Case,1,${i + 1}`);
+    // A count the repository refuses; the preview cannot know that yet.
+    const result = applyImport(previewImport(csv("name,qty,cost", ...lines, "Bad Case,5000000,1")));
+    expect(result.created).toBe(9);
+    expect(result.skipped).toEqual([{ line: 11, reason: expect.stringMatching(/larger than anything/) }]);
+    expect(listItems()).toHaveLength(9);
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
   it("reports the rows it skipped rather than failing the whole file", () => {
     const result = applyImport(previewImport(csv("name,cost", "Clutch Case,1", ",2", "Clutch Case,3")));
     expect(result.created).toBe(1);
@@ -208,5 +219,52 @@ describe("applying a file", () => {
     expect(item.purchasePrice).toBeNull();
     expect(listLots(item.id)[0]?.unitCost).toBeNull();
     expect(getItem(item.id)!.quantity).toBe(3);
+  });
+});
+
+describe("the import route", () => {
+  const post = (body: Record<string, unknown>) =>
+    POST(new Request("http://localhost/api/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+
+  beforeEach(() => {
+    forgetAppliedImports();
+    throttle.reset();
+  });
+
+  it("only applies what was previewed, and not the same file twice", async () => {
+    const text = csv("name,qty,cost", "Clutch Case,3,0.5");
+    const previewed = await post({ csv: text });
+    expect(previewed.status).toBe(200);
+    const { preview } = (await previewed.json()) as { preview: { token: string } };
+    expect(preview.token).toMatch(/^[a-f0-9]{32}$/);
+
+    // A file edited after the preview is not what the owner looked at.
+    const changed = await post({ csv: csv("name,qty,cost", "Clutch Case,30,0.5"), apply: true, token: preview.token });
+    expect(changed.status).toBe(409);
+    expect(((await changed.json()) as { error: string }).error).toMatch(/changed since it was previewed/);
+    expect(listItems()).toHaveLength(0);
+
+    const applied = await post({ csv: text, apply: true, token: preview.token });
+    expect(applied.status).toBe(200);
+    expect(listItems()[0]?.quantity).toBe(3);
+
+    // A double click, a retried request: the same file is not taken again.
+    const again = await post({ csv: text, apply: true, token: preview.token });
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toMatch(/imported a moment ago/);
+    expect(listItems()[0]?.quantity).toBe(3);
+
+    // Looking at the file again and asking for it is a second import meant.
+    expect((await post({ csv: text })).status).toBe(200);
+    expect((await post({ csv: text, apply: true, token: preview.token })).status).toBe(200);
+    expect(listItems()[0]?.quantity).toBe(6);
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
+  it("tells the file apart from the same file under a different kind", async () => {
+    const text = csv("name,qty", "Mystery Thing,1");
+    const asCase = (await (await post({ csv: text, category: "case" })).json()) as { preview: { token: string } };
+    const asSticker = (await (await post({ csv: text, category: "sticker" })).json()) as { preview: { token: string } };
+    expect(asCase.preview.token).not.toBe(asSticker.preview.token);
   });
 });

@@ -394,8 +394,9 @@ different tool can take it from here.
 
 ## What these files do not hold
 
-The per-market quotes behind each price are left out — the recorded prices
-themselves are all here.
+Each price row carries the best quote from every market that answered, but not
+the listing URLs or the day's sales volumes behind them; those are only
+convenient while a market is still up, and are fetched again on the next refresh.
 `;
 
 function writeReadme(): void {

@@ -1,4 +1,6 @@
-import { intakeCard } from "./cards";
+import { createHash } from "node:crypto";
+import { discardDeferredMirror, flushDeferredMirror, intakeCardWithin } from "./cards";
+import { getDb } from "./db";
 import { headerKey, parseCsv } from "@collectcollect/core/csv";
 import { isCondition, isGame, type CardInput, type Condition, type Game } from "./types";
 import { lookup } from "@collectcollect/core/lookup";
@@ -96,6 +98,11 @@ export interface ImportRow {
   warning: string | null;
 }
 
+/** The fingerprint an apply must present: the file text and the game chosen for it. */
+export function importToken(text: string, defaults: { game?: Game } = {}): string {
+  return createHash("sha256").update(defaults.game ?? "").update("\n").update(text).digest("hex").slice(0, 32);
+}
+
 export interface ImportPreview {
   /** Header name found for each field the file supplies. */
   mapping: Record<string, string>;
@@ -103,6 +110,12 @@ export interface ImportPreview {
   rows: ImportRow[];
   total: number;
   usable: number;
+  /**
+   * A fingerprint of the file and the choices made about it. Applying has to
+   * present the same one, so what goes in is what was previewed, and the
+   * same file is not taken twice by accident.
+   */
+  token: string;
 }
 
 /** Read a CSV into card inputs, reporting what could not be understood. */
@@ -113,7 +126,7 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
     .map((cells, i) => ({ cells, line: i + 1 }))
     .filter((r) => r.cells.some((cell) => cell.trim() !== ""));
   const [header, ...body] = numbered;
-  if (!header) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0 };
+  if (!header) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0, token: importToken(text, defaults) };
 
   const headers = header.cells.map((h) => h.trim());
   const keys = headers.map(headerKey);
@@ -184,7 +197,7 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
     };
   });
 
-  return { mapping, unmapped, rows, total: rows.length, usable: rows.filter((r) => r.input).length };
+  return { mapping, unmapped, rows, total: rows.length, usable: rows.filter((r) => r.input).length, token: importToken(text, defaults) };
 }
 
 export interface ImportResult {
@@ -193,23 +206,39 @@ export interface ImportResult {
   skipped: Array<{ line: number; reason: string }>;
 }
 
-/** Apply a preview, merging into existing cards where they are interchangeable. */
+/**
+ * Apply a preview, merging into existing cards where they are interchangeable.
+ *
+ * One transaction for the whole file: a failure part way through — the disk
+ * filling, the process dying — leaves none of it behind rather than an
+ * unknown number of rows. Within it each row is its own savepoint, so a row
+ * the repository refuses is reported and the rest still go in.
+ */
 export function applyImport(preview: ImportPreview): ImportResult {
   const result: ImportResult = { created: 0, merged: 0, skipped: [] };
-  for (const row of preview.rows) {
-    if (!row.input) {
-      result.skipped.push({ line: row.line, reason: row.problem ?? "Could not be read" });
-      continue;
+  const run = getDb().transaction(() => {
+    for (const row of preview.rows) {
+      if (!row.input) {
+        result.skipped.push({ line: row.line, reason: row.problem ?? "Could not be read" });
+        continue;
+      }
+      try {
+        const outcome = intakeCardWithin(row.input);
+        if (outcome.result === "created") result.created++;
+        else if (outcome.result === "merged") result.merged++;
+        else result.skipped.push({ line: row.line, reason: `${row.input.name} matches more than one card you own` });
+      } catch (e) {
+        result.skipped.push({ line: row.line, reason: e instanceof Error ? e.message : String(e) });
+      }
     }
-    try {
-      const outcome = intakeCard(row.input);
-      if (outcome.result === "created") result.created++;
-      else if (outcome.result === "merged") result.merged++;
-      else result.skipped.push({ line: row.line, reason: `${row.input.name} matches more than one card you own` });
-    } catch (e) {
-      result.skipped.push({ line: row.line, reason: e instanceof Error ? e.message : String(e) });
-    }
+  });
+  try {
+    run();
+  } catch (e) {
+    discardDeferredMirror();
+    throw e;
   }
+  flushDeferredMirror();
   return result;
 }
 

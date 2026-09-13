@@ -1,4 +1,6 @@
-import { intakeItem } from "./items";
+import { createHash } from "node:crypto";
+import { getDb } from "./db";
+import { discardDeferredMirror, flushDeferredMirror, intakeItemWithin } from "./items";
 import { headerKey, parseCsv } from "@collectcollect/core/csv";
 import { CATEGORIES, EXTERIORS, RARITIES, exteriorForFloat, type Category, type Exterior, type ItemInput, type Rarity } from "./types";
 import { EXTERIOR_ALIASES, exteriorFromName, guessCategory, isSouvenirName, isStatTrakName, splitName } from "./naming";
@@ -118,6 +120,17 @@ export interface ImportPreview {
   rows: ImportRow[];
   total: number;
   usable: number;
+  /**
+   * A fingerprint of the file and the choices made about it. Applying has to
+   * present the same one, so what goes in is what was previewed, and the
+   * same file is not taken twice by accident.
+   */
+  token: string;
+}
+
+/** The fingerprint an apply must present: the file text and the kind chosen for it. */
+export function importToken(text: string, defaults: { category?: Category } = {}): string {
+  return createHash("sha256").update(defaults.category ?? "").update("\n").update(text).digest("hex").slice(0, 32);
 }
 
 /** Read a CSV into item inputs, reporting what could not be understood. */
@@ -128,7 +141,7 @@ export function previewImport(text: string, defaults: { category?: Category } = 
     .map((cells, i) => ({ cells, line: i + 1 }))
     .filter((r) => r.cells.some((cell) => cell.trim() !== ""));
   const head = numbered[0];
-  if (!head) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0 };
+  if (!head) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0, token: importToken(text, defaults) };
 
   const headers = head.cells.map((h) => h.trim());
   const keys = headers.map(headerKey);
@@ -241,7 +254,7 @@ export function previewImport(text: string, defaults: { category?: Category } = 
     };
   });
 
-  return { mapping, unmapped, rows, total: rows.length, usable: rows.filter((r) => r.input).length };
+  return { mapping, unmapped, rows, total: rows.length, usable: rows.filter((r) => r.input).length, token: importToken(text, defaults) };
 }
 
 export interface ImportResult {
@@ -251,20 +264,36 @@ export interface ImportResult {
   skipped: Array<{ line: number; reason: string }>;
 }
 
-/** Apply a preview, joining stacks that are already held. */
+/**
+ * Apply a preview, joining stacks that are already held.
+ *
+ * One transaction for the whole file: a failure part way through — the disk
+ * filling, the process dying — leaves none of it behind rather than an
+ * unknown number of rows. Within it each row is its own savepoint, so a row
+ * the repository refuses is reported and the rest still go in.
+ */
 export function applyImport(preview: ImportPreview): ImportResult {
   const result: ImportResult = { created: 0, merged: 0, updated: 0, skipped: [] };
-  for (const row of preview.rows) {
-    if (!row.input) {
-      result.skipped.push({ line: row.line, reason: row.problem ?? "Could not be read" });
-      continue;
+  const run = getDb().transaction(() => {
+    for (const row of preview.rows) {
+      if (!row.input) {
+        result.skipped.push({ line: row.line, reason: row.problem ?? "Could not be read" });
+        continue;
+      }
+      try {
+        result[intakeItemWithin(row.input).result]++;
+      } catch (e) {
+        result.skipped.push({ line: row.line, reason: e instanceof Error ? e.message : String(e) });
+      }
     }
-    try {
-      result[intakeItem(row.input).result]++;
-    } catch (e) {
-      result.skipped.push({ line: row.line, reason: e instanceof Error ? e.message : String(e) });
-    }
+  });
+  try {
+    run();
+  } catch (e) {
+    discardDeferredMirror();
+    throw e;
   }
+  flushDeferredMirror();
   return result;
 }
 

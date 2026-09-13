@@ -2,14 +2,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDatabase, setDb } from "@/lib/db";
-import { addAcquisition, getItem, latestSnapshot, listItems, updateItem } from "@/lib/items";
+import { addAcquisition, addSnapshot, createItem, getItem, latestSnapshot, listItems, updateItem } from "@/lib/items";
+import { spreadView } from "@/lib/spread";
+import type { PriceQuote, PriceSummary } from "@/lib/types";
 import { listLots, listSaleLots, verifyLotInvariant } from "@/lib/acquisitions";
 import { deleteSale, listSalesForItem, recordSale } from "@/lib/sales";
 import { itemFileName, itemMarkdown, parseItemMarkdown } from "@/lib/markdown/item";
 import { collectionDir, flushCollection, itemsDir, mirrorEnabled, readItemFiles, rebuildCollection } from "@/lib/markdown/mirror";
 import { importFromDisk, importItemFiles } from "@/lib/markdown/restore";
 import { parseDocument, readTable } from "@collectcollect/core/markdown/format";
-import { seedCase, seedRedline } from "./helpers";
+import { clutchCase, seedCase, seedRedline } from "./helpers";
 
 beforeEach(() => setDb(openDatabase(":memory:")));
 
@@ -363,6 +365,93 @@ describe("what a rebuild puts right", () => {
     const parsed = parseItemMarkdown(text)!;
     expect(parsed.sales).toHaveLength(1);
     expect(parsed.warnings.some((w) => /unreadable sale row: yesterday/.test(w))).toBe(true);
+  });
+});
+
+describe("what a rebuild leaves out and what it keeps", () => {
+  it("costs one unreadable file, not the folder", () => {
+    // Three files. The middle one claims an asset id another item already
+    // carries, which the database refuses; the other two still go in.
+    const first = seedCase({ quantity: 1 });
+    createItem(clutchCase({ assetId: "A1", quantity: 1 }));
+    const third = seedRedline({ purchasePrice: 5 });
+    flushCollection();
+    const files = readItemFiles().map((f) =>
+      f.name.includes(`${String(first.id).padStart(4, "0")}-`) ? { ...f, text: f.text.replace(/^quantity: 1$/m, 'asset_id: "A1"\nquantity: 1') } : f,
+    );
+    expect(files.some((f) => f.text.includes('asset_id: "A1"\nquantity'))).toBe(true);
+
+    const result = importItemFiles(files);
+    expect(result.skipped).toEqual([{ file: expect.stringContaining(String(first.id).padStart(4, "0")), reason: "Another item already carries this file's asset id" }]);
+    expect(result.replaced).toBe(2);
+    expect(getItem(first.id)!.assetId).toBeNull();
+    expect(getItem(third.id)!.purchasePrice).toBe(5);
+    expect(listItems()).toHaveLength(3);
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
+  it("keeps each market's quote through the round trip, so the spread page has something to say", () => {
+    const item = seedCase({ quantity: 10, purchasePrice: 0.5 });
+    const quote = (source: PriceQuote["source"], price: number): PriceQuote => ({
+      source,
+      sourceLabel: source,
+      currency: "USD",
+      url: "https://example.test/listing",
+      matchedName: "Clutch Case",
+      price,
+      volume: 40,
+      fetchedAt: "2026-06-01T00:00:00.000Z",
+    });
+    const summary: PriceSummary = {
+      currency: "USD",
+      fetchedAt: "2026-06-01T00:00:00.000Z",
+      market: 1.4,
+      marketSource: "Steam",
+      yourCopyValue: 1.4,
+      yourCopyBasis: "Steam listing",
+      quotes: [quote("skinport", 1.2), quote("csfloat", 4.15), quote("steam", 1.4)],
+      errors: [],
+    };
+    addSnapshot(item.id, summary);
+    flushCollection();
+    const files = readItemFiles();
+    expect(files.find((f) => f.name.includes("clutch"))!.text).toContain("Skinport $1.20 · CSFloat $4.15 · Steam $1.40");
+
+    setDb(openDatabase(":memory:"));
+    importItemFiles(files);
+    const back = latestSnapshot(item.id)!.summary;
+    expect(back.quotes.map((q) => [q.source, q.price])).toEqual([
+      ["skinport", 1.2],
+      ["csfloat", 4.15],
+      ["steam", 1.4],
+    ]);
+    // Two cash markets far enough apart to be worth a listing.
+    const view = spreadView();
+    expect(view.unpriced).toBe(0);
+    expect(view.worthDoing.map((r) => r.item.id)).toEqual([item.id]);
+  });
+
+  it("reads a file written before the Markets column as having no quotes", () => {
+    const item = seedCase({ quantity: 1 });
+    const text = [
+      "---",
+      `id: ${item.id}`,
+      'market_hash_name: "Clutch Case"',
+      'category: "case"',
+      "quantity: 1",
+      "---",
+      "",
+      "# Clutch Case",
+      "",
+      "## Value history",
+      "",
+      "| Date | Your copy | Market | Basis |",
+      "| --- | --- | --- | --- |",
+      "| 2026-03-01T00:00:00.000Z | $9.00 | $9.00 (Skinport) | Skinport |",
+      "",
+    ].join("\n");
+    importItemFiles([{ name: "x.md", text }]);
+    expect(latestSnapshot(item.id)!.summary.quotes).toEqual([]);
   });
 });
 

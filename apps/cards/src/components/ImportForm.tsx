@@ -50,7 +50,7 @@ export function ImportForm() {
     try {
       const res = await api<{ result: ImportResult }>("/api/import", {
         method: "POST",
-        body: JSON.stringify({ csv, game: game || undefined, apply: true }),
+        body: JSON.stringify({ csv, game: game || undefined, apply: true, token: preview?.token }),
       });
       setResult(res.result);
       setPreview(null);

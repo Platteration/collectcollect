@@ -407,6 +407,24 @@ export type IntakeOutcome =
  * folded into a slab, since it would then be valued as a graded copy.
  */
 export function intakeCard(input: CardInput): IntakeOutcome {
+  try {
+    const outcome = intakeCardWithin(input);
+    flushDeferredMirror();
+    return outcome;
+  } catch (e) {
+    discardDeferredMirror();
+    throw e;
+  }
+}
+
+/**
+ * The intake itself, for a caller that has opened its own transaction — a
+ * spreadsheet import takes every row inside one, so a file that fails half way
+ * leaves nothing behind. Each row is still its own savepoint, so one bad row
+ * rolls back alone and the rest go in. The caller flushes the mirror once the
+ * outer transaction commits, or discards it if that rolls back.
+ */
+export function intakeCardWithin(input: CardInput): IntakeOutcome {
   const clean = normalizeInput(input);
   const run = getDb().transaction((): IntakeOutcome => {
     const candidates = findSimilar({
@@ -438,14 +456,7 @@ export function intakeCard(input: CardInput): IntakeOutcome {
     }
     return { result: "created", card: createCard(input) };
   });
-  try {
-    const outcome = run();
-    flushDeferredMirror();
-    return outcome;
-  } catch (e) {
-    discardDeferredMirror();
-    throw e;
-  }
+  return run();
 }
 
 export function getCard(id: number): CardRecord | null {

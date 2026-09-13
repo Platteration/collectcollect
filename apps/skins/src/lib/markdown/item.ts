@@ -1,11 +1,14 @@
-import type { Acquisition } from "../acquisitions";
+import type {
+  Acquisition } from "../acquisitions";
 import type {
   AppliedSticker,
   Category,
   Exterior,
   ItemInput,
   ItemRecord,
+  PriceQuote,
   PriceSnapshot,
+  PriceSource,
   PriceSummary,
   Rarity,
   Sale,
@@ -51,7 +54,40 @@ export interface ParsedItem {
   warnings: string[];
 }
 
-const VALUE_HEADERS = ["Date", "Your copy", "Market", "Basis"];
+const VALUE_HEADERS = ["Date", "Your copy", "Market", "Basis", "Markets"];
+
+/**
+ * How each market is written in the Markets column, and read back. Short,
+ * because the column already carries a price per market; the full label is
+ * what the pages show.
+ */
+const MARKET_SHORT: Record<Exclude<PriceSource, "manual">, string> = { steam: "Steam", skinport: "Skinport", csfloat: "CSFloat" };
+const MARKET_BY_SHORT = new Map(Object.entries(MARKET_SHORT).map(([id, short]) => [short, id as Exclude<PriceSource, "manual">]));
+
+/** `Skinport $1.20 · CSFloat $1.15 · Steam $1.40` — the best price each market quoted. */
+function quotesCell(quotes: PriceQuote[]): string {
+  const best = new Map<Exclude<PriceSource, "manual">, number>();
+  for (const q of quotes) {
+    if (q.source === "manual" || q.price === null) continue;
+    const held = best.get(q.source);
+    if (held === undefined || q.price > held) best.set(q.source, q.price);
+  }
+  return [...best.entries()].map(([source, price]) => `${MARKET_SHORT[source]} ${money(price)}`).join(" · ");
+}
+
+/** The Markets column read back into quotes; a file written without the column simply has none. */
+function parseQuotesCell(text: string, fetchedAt: string): PriceQuote[] {
+  const quotes: PriceQuote[] = [];
+  for (const part of text.split("·")) {
+    const match = /^\s*(\S+)\s+(.+?)\s*$/.exec(part);
+    if (!match) continue;
+    const source = MARKET_BY_SHORT.get(match[1] ?? "");
+    const price = readMoney(match[2] ?? "");
+    if (!source || price === null) continue;
+    quotes.push({ source, sourceLabel: MARKET_SHORT[source], currency: "USD", url: null, matchedName: "", price, volume: null, fetchedAt });
+  }
+  return quotes;
+}
 const ACQUISITION_HEADERS = ["Acquired", "Copies", "Left", "Cost each", "From", "Notes"];
 const SALE_HEADERS = ["Sold", "Copies", "Each", "Fees", "Cost each", "Venue", "Notes", "Lots"];
 const STICKER_HEADERS = ["Slot", "Sticker", "Wear", "Market name"];
@@ -261,6 +297,7 @@ export function itemMarkdown(bundle: ItemBundle): string {
           s.summary.yourCopyValue === null ? "" : money(s.summary.yourCopyValue),
           moneyCell(s.summary.market, s.summary.marketSource),
           s.summary.yourCopyBasis ?? "",
+          quotesCell(s.summary.quotes ?? []),
         ]),
       ),
     );
@@ -474,7 +511,7 @@ export function parseItemMarkdown(text: string): ParsedItem | null {
 
   const snapshots: ParsedItem["snapshots"] = [];
   for (const row of readTable(body, "Value history")) {
-    const [fetchedAt, yourCopy, marketCell, basis] = row;
+    const [fetchedAt, yourCopy, marketCell, basis, markets] = row;
     if (!fetchedAt || Number.isNaN(Date.parse(fetchedAt))) {
       warnings.push(`Skipped a price row with no readable date: ${row.join(" | ")}`);
       continue;
@@ -489,7 +526,9 @@ export function parseItemMarkdown(text: string): ParsedItem | null {
         marketSource: market.source,
         yourCopyValue: readMoney(yourCopy ?? ""),
         yourCopyBasis: basis ?? "",
-        quotes: [],
+        // Each market's quote, so a spread page rebuilt from files still has
+        // something to compare. Files from before the column simply have none.
+        quotes: parseQuotesCell(markets ?? "", fetchedAt),
         errors: [],
       },
     });
