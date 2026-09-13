@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import type { Auth } from "./auth";
+import type { Auth, Revoked } from "./auth";
 import { isSecureRequest } from "./net";
 
 /**
@@ -17,7 +17,8 @@ export interface ProxyOptions {
   /** Hosts images may come from, on top of this origin, data: and blob:. */
   imageHosts?: string[];
   /** Browser features the app uses; everything not named here is refused. */
-  permissions?: { camera?: boolean };
+  permissions?: { camera?: boolean };  /** Where revoked sessions are recorded; without one, a signed cookie is good until it runs out. */
+  sessions?: { revoked(): Revoked };
 }
 
 /** The value of a fresh nonce, base64 so it survives an HTTP header. */
@@ -98,7 +99,7 @@ export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
     const { pathname, search } = request.nextUrl;
     if (opts.publicPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return next();
 
-    if (await auth.verifyToken(request.cookies.get(auth.SESSION_COOKIE)?.value)) return next();
+    if (await auth.verifyToken(request.cookies.get(auth.SESSION_COOKIE)?.value, Date.now(), opts.sessions?.revoked())) return next();
 
     // An unauthenticated API call gets a status, not an HTML redirect.
     if (pathname.startsWith("/api/")) {

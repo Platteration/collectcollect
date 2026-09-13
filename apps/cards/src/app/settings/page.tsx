@@ -1,4 +1,6 @@
 import { SettingsForm } from "@/components/SettingsForm";
+import { SESSION_DAYS, authEnabled } from "@/lib/auth";
+import { SignOut } from "@collectcollect/core/components/SignOut";
 import { getSettings } from "@/lib/settings";
 import { backupSummary, replacedCollections } from "@/lib/backup";
 import { RestoreForm } from "@/components/RestoreForm";
@@ -25,6 +27,19 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <h1 className="font-display text-2xl font-semibold uppercase tracking-wide">Settings</h1>
+
+      {authEnabled() && (
+        <section className="card-surface p-4">
+          <h2 className="font-semibold">Sessions</h2>
+          <p className="mt-1 text-sm text-neutral-500">
+            A password is set, and every device that gave it stays signed in for {SESSION_DAYS} days. If one of them is
+            lost, or was left signed in somewhere, end every session at once; each will ask for the password again.
+          </p>
+          <div className="mt-3">
+            <SignOut everywhere />
+          </div>
+        </section>
+      )}
 
       {/* The phone tab bar holds five destinations; these are the rest. */}
       <nav className="card-surface p-4 md:hidden" aria-label="More sections">

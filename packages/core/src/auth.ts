@@ -1,8 +1,8 @@
 /**
  * Optional single-password gate.
  *
- * Uses Web Crypto only, so the same code runs in the Edge runtime (an app's
- * `proxy.ts`) and in Node route handlers.
+ * Uses Web Crypto only, so the same code runs wherever the proxy does and in
+ * Node route handlers alike.
  *
  * Every app that uses it gets its own cookie name and its own environment
  * variables. That is not tidiness: cookies are scoped to a host and not to a
@@ -23,13 +23,43 @@ export interface AuthConfig {
   days?: number;
 }
 
+/** Sessions that are no longer good: everything issued before a moment, and particular ones by id. */
+export interface Revoked {
+  before: number;
+  ids: readonly string[];
+}
+
 export interface Auth {
   SESSION_COOKIE: string;
   SESSION_DAYS: number;
   authEnabled(): boolean;
   passwordMatches(submitted: string): Promise<boolean>;
   createToken(now?: number): Promise<string>;
-  verifyToken(token: string | undefined | null, now?: number): Promise<boolean>;
+  verifyToken(token: string | undefined | null, now?: number, revoked?: Revoked): Promise<boolean>;
+}
+
+/**
+ * The parts of a token, or null when it is not one. The format is
+ * `v2.<expires>.<issued>.<id>.<signature>`: when it stops being good, when it
+ * was made, which one it is, and the proof that this app made it. A token
+ * from before the format carried only the first and the last, which is why it
+ * could never be revoked short of changing the password.
+ */
+export function parseToken(token: string | undefined | null): { expires: number; issued: number; id: string; signature: string } | null {
+  if (!token) return null;
+  const parts = token.split(".");
+  if (parts.length !== 5 || parts[0] !== "v2") return null;
+  const expires = Number(parts[1]);
+  const issued = Number(parts[2]);
+  const id = parts[3] ?? "";
+  const signature = parts[4] ?? "";
+  if (!Number.isFinite(expires) || !Number.isFinite(issued) || !/^[a-f0-9-]{36}$/.test(id) || !signature) return null;
+  return { expires, issued, id, signature };
+}
+
+/** The id inside a token, for revoking that one session; null for anything that is not a token. */
+export function tokenId(token: string | undefined | null): string | null {
+  return parseToken(token)?.id ?? null;
 }
 
 async function hmac(message: string, key: string): Promise<string> {
@@ -82,16 +112,28 @@ export function createAuth(config: AuthConfig): Auth {
 
     async createToken(now = Date.now()): Promise<string> {
       const expires = now + SESSION_DAYS * 86400_000;
-      return `${expires}.${await hmac(String(expires), secret())}`;
+      const id = crypto.randomUUID();
+      const body = `${expires}.${now}.${id}`;
+      return `v2.${body}.${await hmac(body, secret())}`;
     },
 
-    async verifyToken(token: string | undefined | null, now = Date.now()): Promise<boolean> {
-      if (!token) return false;
-      const dot = token.indexOf(".");
-      if (dot < 1) return false;
-      const expires = Number(token.slice(0, dot));
-      if (!Number.isFinite(expires) || expires < now) return false;
-      return timingSafeEqual(token.slice(dot + 1), await hmac(String(expires), secret()));
+    /**
+     * A token is good when this app signed it, it has not run out, nothing
+     * has revoked every session since it was issued, and it is not one of the
+     * sessions revoked by name. The revocation list is the caller's to read —
+     * the proxy keeps one beside the data directory — so this stays free of
+     * any store of its own.
+     */
+    async verifyToken(token: string | undefined | null, now = Date.now(), revoked?: Revoked): Promise<boolean> {
+      const parsed = parseToken(token);
+      if (!parsed) return false;
+      if (parsed.expires < now || parsed.issued > now + 60_000) return false;
+      if (!timingSafeEqual(parsed.signature, await hmac(`${parsed.expires}.${parsed.issued}.${parsed.id}`, secret()))) return false;
+      if (revoked) {
+        if (parsed.issued < revoked.before) return false;
+        if (revoked.ids.includes(parsed.id)) return false;
+      }
+      return true;
     },
   };
 }

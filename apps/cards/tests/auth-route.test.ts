@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAuth } from "@collectcollect/core/auth";
 import { createAuthRoutes } from "@collectcollect/core/auth-route";
+import { createSessionStore } from "@collectcollect/core/sessions";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 /**
  * The sign-in handler, in isolation: its own auth instance and its own
@@ -90,7 +94,61 @@ describe("signing in", () => {
 
   it("signs out by clearing the cookie", async () => {
     const { DELETE } = createAuthRoutes(auth);
-    const res = await DELETE();
+    const res = await DELETE(new Request("http://localhost/api/auth", { method: "DELETE" }));
     expect(res.headers.get("set-cookie")).toMatch(/^t_session=;.*Max-Age=0/i);
+  });
+});
+
+describe("ending sessions", () => {
+  let dir: string;
+  beforeEach(() => {
+    process.env.T_PASSWORD = "hunter2";
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "cc-auth-sessions-"));
+  });
+  afterEach(() => {
+    delete process.env.T_PASSWORD;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const cookieOf = (res: Response) => /^t_session=([^;]+)/.exec(res.headers.get("set-cookie") ?? "")?.[1] ?? "";
+  const withCookie = (url: string, method: string, token: string) => new Request(url, { method, headers: { cookie: `t_session=${token}` } });
+
+  it("signing out ends that session and no other, and signing out everywhere ends them all", async () => {
+    const sessions = createSessionStore(path.join(dir, "sessions.json"));
+    const { POST, DELETE, revokeAll } = createAuthRoutes(auth, { sessions });
+    const phone = cookieOf(await attempt(POST, "hunter2"));
+    const laptop = cookieOf(await attempt(POST, "hunter2"));
+    expect(phone).not.toBe(laptop);
+    const good = (token: string) => auth.verifyToken(token, Date.now(), sessions.revoked());
+    expect(await good(phone)).toBe(true);
+    expect(await good(laptop)).toBe(true);
+
+    // The phone signs out: its cookie is no longer honoured, even a copy of it.
+    const out = await DELETE(withCookie("http://localhost/api/auth", "DELETE", phone));
+    expect(out.headers.get("set-cookie")).toMatch(/Max-Age=0/i);
+    expect(await good(phone)).toBe(false);
+    expect(await good(laptop)).toBe(true);
+
+    // Signing out everywhere needs a session of its own to do it from…
+    expect((await revokeAll(new Request("http://localhost/api/auth/revoke", { method: "POST" }))).status).toBe(401);
+    expect((await revokeAll(withCookie("http://localhost/api/auth/revoke", "POST", phone))).status).toBe(401);
+    // …and then ends every one, including the one that asked.
+    const swept = await revokeAll(withCookie("http://localhost/api/auth/revoke", "POST", laptop));
+    expect(swept.status).toBe(200);
+    expect(swept.headers.get("set-cookie")).toMatch(/Max-Age=0/i);
+    expect(await good(laptop)).toBe(false);
+    // A sign-in afterwards is fine.
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 10);
+    const again = cookieOf(await attempt(POST, "hunter2"));
+    vi.useRealTimers();
+    expect(await good(again)).toBe(true);
+  });
+
+  it("says so when there is no record to end sessions in", async () => {
+    const { POST, revokeAll } = createAuthRoutes(auth);
+    const token = cookieOf(await attempt(POST, "hunter2"));
+    const res = await revokeAll(withCookie("http://localhost/api/auth/revoke", "POST", token));
+    expect(res.status).toBe(501);
   });
 });

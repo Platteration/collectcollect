@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { authEnabled, createToken, passwordMatches, timingSafeEqual, verifyToken } from "@/lib/auth";
+import { tokenId } from "@collectcollect/core/auth";
 
 afterEach(() => {
   delete process.env.APP_PASSWORD;
@@ -29,7 +30,9 @@ describe("optional password gate", () => {
     expect(await verifyToken(undefined)).toBe(false);
     expect(await verifyToken("garbage")).toBe(false);
     // a forged expiry does not match the signature
-    const [, sig] = token.split(".");
+    const [v, , issued, id, sig] = token.split(".");
+    expect(await verifyToken(`${v}.${Date.now() + 9e9}.${issued}.${id}.${sig}`)).toBe(false);
+    // and a token from before sessions carried an id is no longer honoured
     expect(await verifyToken(`${Date.now() + 9e9}.${sig}`)).toBe(false);
     // an expired token is refused even though the signature is genuine
     const old = await createToken(Date.now() - 40 * 86400_000);
@@ -41,6 +44,23 @@ describe("optional password gate", () => {
     const token = await createToken();
     process.env.APP_PASSWORD = "different";
     expect(await verifyToken(token)).toBe(false);
+  });
+
+  it("carries an id, and is refused once its session has been ended", async () => {
+    process.env.APP_PASSWORD = "hunter2";
+    const now = Date.now();
+    const token = await createToken(now);
+    expect(token).toMatch(/^v2\.\d+\.\d+\.[a-f0-9-]{36}\.[a-f0-9]{64}$/);
+    const id = tokenId(token);
+    expect(id).toMatch(/^[a-f0-9-]{36}$/);
+    expect(tokenId("garbage")).toBeNull();
+    // Nothing revoked: good. Everything before a later moment: gone. Named: gone.
+    expect(await verifyToken(token, now + 1000, { before: 0, ids: [] })).toBe(true);
+    expect(await verifyToken(token, now + 1000, { before: now + 1, ids: [] })).toBe(false);
+    expect(await verifyToken(token, now + 1000, { before: 0, ids: [id!] })).toBe(false);
+    // A session made after the sweep is not caught by it.
+    const later = await createToken(now + 5000);
+    expect(await verifyToken(later, now + 6000, { before: now + 1, ids: [id!] })).toBe(true);
   });
 
   it("compares strings without leaking through length", () => {

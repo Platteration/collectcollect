@@ -32,7 +32,7 @@ docker build -t collectcollect .                            # the card app
 docker build -t collectcollect-skins --build-arg APP=skins .
 ```
 
-**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach. Failed attempts are rate limited, and changing the password invalidates existing sessions.
+**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach. Failed attempts are rate limited, and changing the password invalidates existing sessions. Each session carries an id: signing out ends that one, wherever a copy of its cookie went, and *Sign out everywhere* on the Settings page ends every session issued so far — for the phone that was lost or the browser left signed in. The record lives in `sessions.json` in the data directory. Sessions from before this record existed are not recognised, so upgrading asks for the password once more.
 
 > Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
 

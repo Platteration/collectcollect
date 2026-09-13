@@ -3,7 +3,8 @@ import { getSettings } from "@/lib/settings";
 import { providerStatuses } from "@/lib/status";
 import { collectionStatus } from "@/lib/markdown/mirror";
 import { dataDir } from "@/lib/db";
-import { authEnabled } from "@/lib/auth";
+import { SESSION_DAYS, authEnabled } from "@/lib/auth";
+import { SignOut } from "@collectcollect/core/components/SignOut";
 import { backupSummary, replacedCollections } from "@/lib/backup";
 import { SettingsForm } from "@/components/SettingsForm";
 import { CollectionFiles } from "@/components/CollectionFiles";
@@ -23,6 +24,19 @@ export default function SettingsPage() {
             : "No password is set (SKINS_APP_PASSWORD), so anyone who can reach this page can change it."}
         </p>
       </header>
+
+      {authEnabled() && (
+        <section className="card-surface p-4">
+          <h2 className="font-display text-lg font-semibold uppercase tracking-wide">Sessions</h2>
+          <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
+            Every device that gave the password stays signed in for {SESSION_DAYS} days. If one of them is lost, or was
+            left signed in somewhere, end every session at once; each will ask for the password again.
+          </p>
+          <div className="mt-3">
+            <SignOut everywhere />
+          </div>
+        </section>
+      )}
 
       {/* The phone tab bar holds five destinations; these are the rest. */}
       <nav className="card-surface p-4 md:hidden" aria-label="More sections">
