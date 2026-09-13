@@ -4,9 +4,19 @@ import { errorMessage, jsonError, logError, parseId } from "@collectcollect/core
 import { refreshItem } from "@/lib/pricing/refresh";
 import { proceedsByMarket } from "@/lib/pricing/index";
 import { getSettings } from "@/lib/settings";
+import { createThrottle } from "@collectcollect/core/throttle";
+
+/**
+ * Each one asks every market about an item. A bulk refresh sends one per item,
+ * so the ceiling has to clear an inventory of a hundred; the markets' own
+ * limiters pace the real work, and this only stops a loop.
+ */
+export const throttle = createThrottle(120, 60_000, "price lookups");
 
 /** POST — ask every source about this item again and record what they say. */
-export async function POST(_request: Request, ctx: RouteContext<"/api/items/[id]/price">) {
+export async function POST(request: Request, ctx: RouteContext<"/api/items/[id]/price">) {
+  const refused = throttle.check(request);
+  if (refused) return refused;
   const id = parseId((await ctx.params).id);
   const item = id ? getItem(id) : null;
   if (!item) return jsonError("Item not found", 404);

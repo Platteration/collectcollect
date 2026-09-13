@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Auth } from "./auth";
+import { isSecureRequest } from "./net";
 
 /**
  * What a page is allowed to load, beyond itself.
@@ -48,14 +49,21 @@ export function contentSecurityPolicy(nonce: string, imageHosts: string[] = [], 
 }
 
 /** The headers every response carries, whatever it is. */
-export function securityHeaders(csp: string, permissions: ProxyOptions["permissions"] = {}): Record<string, string> {
-  return {
+export function securityHeaders(csp: string, permissions: ProxyOptions["permissions"] = {}, secure = false): Record<string, string> {
+  const headers: Record<string, string> = {
     "Content-Security-Policy": csp,
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": `camera=(${permissions.camera ? "self" : ""}), microphone=(), geolocation=(), payment=()`,
+    // Nothing here opens another origin's window, and nothing else may keep a
+    // handle on this one.
+    "Cross-Origin-Opener-Policy": "same-origin",
   };
+  // Only over TLS: sent on a plain-http answer it would be ignored, and a
+  // proxy that terminates TLS is the one that says so (see TRUST_PROXY).
+  if (secure) headers["Strict-Transport-Security"] = "max-age=31536000";
+  return headers;
 }
 
 /**
@@ -73,7 +81,7 @@ export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
   return async function proxy(request: NextRequest) {
     const nonce = makeNonce();
     const csp = contentSecurityPolicy(nonce, opts.imageHosts);
-    const headers = securityHeaders(csp, opts.permissions);
+    const headers = securityHeaders(csp, opts.permissions, isSecureRequest(request));
     const secure = (response: NextResponse) => {
       for (const [key, value] of Object.entries(headers)) response.headers.set(key, value);
       return response;

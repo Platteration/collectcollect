@@ -47,6 +47,17 @@ describe("signing in", () => {
     expect(cookie).not.toMatch(/Secure/);
     const tls = await POST(new Request("https://cards.example/api/auth", { method: "POST", body: JSON.stringify({ password: "hunter2" }) }));
     expect(tls.headers.get("set-cookie")).toMatch(/Secure/);
+
+    // Behind a proxy that terminates TLS the app sees plain http; the proxy
+    // says otherwise, and is believed only when it is trusted.
+    const behindProxy = () => attempt(POST, "hunter2", { "x-forwarded-proto": "https" });
+    expect((await behindProxy()).headers.get("set-cookie")).not.toMatch(/Secure/);
+    process.env.TRUST_PROXY = "1";
+    try {
+      expect((await behindProxy()).headers.get("set-cookie")).toMatch(/Secure/);
+    } finally {
+      delete process.env.TRUST_PROXY;
+    }
   });
 
   it("locks a client out after eight wrong guesses, for a minute", async () => {

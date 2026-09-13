@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { alertsForRefresh, createAlert, deleteAlert, listAlerts, markAllRead, unreadCount } from "@/lib/alerts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { alertsForRefresh, createAlert, deleteAlert, deliver, listAlerts, markAllRead, unreadCount } from "@/lib/alerts";
 import { openDatabase, setDb } from "@/lib/db";
 import { DEFAULT_SETTINGS, type CardRecord, type PriceSnapshot, type PriceSummary } from "@/lib/types";
 
@@ -85,5 +85,30 @@ describe("alert storage", () => {
     expect(deleteAlert(a.id)).toBe(true);
     expect(deleteAlert(a.id)).toBe(false);
     expect(listAlerts()).toHaveLength(1);
+  });
+});
+
+describe("delivering an alert to a webhook", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+  afterEach(() => vi.restoreAllMocks());
+  const settings = { ...DEFAULT_SETTINGS, alertWebhookUrl: "https://hooks.example/cc" };
+  const outward = async () => [{ address: "93.184.216.34" }];
+  const stored = () => createAlert({ kind: "price_move", cardId: null, title: "Charizard up 30%", body: "…" });
+
+  it("posts the alert without following redirects, and refuses a name that resolves inward", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    let init: RequestInit | undefined;
+    const fetchImpl = (async (_url: string, i?: RequestInit) => {
+      init = i;
+      return new Response("ok");
+    }) as unknown as typeof fetch;
+    expect(await deliver(stored(), settings, fetchImpl, outward)).toBe(true);
+    expect(init?.redirect).toBe("error");
+    expect(JSON.parse(String(init?.body))).toMatchObject({ kind: "price_move", title: "Charizard up 30%" });
+
+    const posted = vi.fn(async () => new Response("ok")) as unknown as typeof fetch;
+    expect(await deliver(stored(), settings, posted, async () => [{ address: "192.168.0.10" }])).toBe(false);
+    expect(posted).not.toHaveBeenCalled();
+    expect(String(error.mock.calls[0]?.[1])).toMatch(/resolves to 192\.168\.0\.10/);
   });
 });

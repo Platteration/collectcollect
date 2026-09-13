@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { openDatabase, setDb } from "@/lib/db";
 import { createCard } from "@/lib/cards";
 import { createAlert } from "@/lib/alerts";
@@ -150,6 +150,39 @@ describe("the health check", () => {
     expect(body.app).toBe("collectcollect");
     expect(typeof body.database).toBe("boolean");
     expect(body.scheduler).toMatchObject({ running: false });
+    // It answers anyone, so it says nothing about where the collection lives
+    // or what last went wrong.
+    expect(body).not.toHaveProperty("dataDir");
+    expect(body.scheduler).not.toHaveProperty("lastError");
+  });
+});
+
+describe("pricing one card over HTTP", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("is throttled, and answers a source failure with a 502 rather than a crash", async () => {
+    const { POST, throttle } = await import("@/app/api/cards/[id]/price/route");
+    throttle.reset();
+    const card = createCard({ game: "pokemon", name: "Priced" });
+    // No provider is configured or reachable here, so a refresh either stores
+    // nothing or fails; either way the route answers with JSON.
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("network down");
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    try {
+      const res = await POST(new Request("http://localhost/x", { method: "POST" }), ctx({ id: String(card.id) }) as never);
+      expect([200, 502]).toContain(res.status);
+      expect(res.headers.get("content-type")).toContain("json");
+      expect((await POST(new Request("http://localhost/x", { method: "POST" }), ctx({ id: "999" }) as never)).status).toBe(404);
+      for (let i = 0; i < 118; i++) await POST(new Request("http://localhost/x", { method: "POST" }), ctx({ id: "999" }) as never);
+      const refused = await POST(new Request("http://localhost/x", { method: "POST" }), ctx({ id: String(card.id) }) as never);
+      expect(refused.status).toBe(429);
+      expect(refused.headers.get("Retry-After")).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+      throttle.reset();
+    }
   });
 });
 

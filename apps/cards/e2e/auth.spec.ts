@@ -26,6 +26,7 @@ test.describe("password gate", () => {
     const body = (await res.json()) as { ok: boolean; app: string; database: boolean };
     expect(body).toMatchObject({ ok: true, app: "collectcollect" });
     expect(typeof body.database).toBe("boolean");
+    expect(body).not.toHaveProperty("dataDir");
     // Every response, including this one, carries the security headers.
     expect(res.headers()["x-content-type-options"]).toBe("nosniff");
   });

@@ -23,6 +23,10 @@ test.describe("what every response carries", () => {
     const headers = response!.headers();
     expect(headers["x-content-type-options"]).toBe("nosniff");
     expect(headers["x-frame-options"]).toBe("DENY");
+    expect(headers["cross-origin-opener-policy"]).toBe("same-origin");
+    // Plain http here, and no trusted proxy saying otherwise: no HSTS, which
+    // a browser would ignore on this answer and remember from a wrong one.
+    expect(headers["strict-transport-security"]).toBeUndefined();
     expect(headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
     // Nothing here uses a camera.
     expect(headers["permissions-policy"]).toContain("camera=()");

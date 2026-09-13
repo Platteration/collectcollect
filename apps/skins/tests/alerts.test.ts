@@ -13,6 +13,8 @@ function at<T>(xs: readonly T[], i: number): T {
 
 const alert = () => createAlert({ kind: "price_move", itemId: null, title: "AK up 30%", body: "…" });
 const settings = { ...DEFAULT_SETTINGS, alertWebhookUrl: "https://hooks.example/cc" };
+/** The name resolves to somewhere on the public internet. */
+const outward = async () => [{ address: "93.184.216.34" }];
 
 describe("delivering an alert to a webhook", () => {
   beforeEach(() => setDb(openDatabase(":memory:")));
@@ -20,7 +22,7 @@ describe("delivering an alert to a webhook", () => {
 
   it("posts the alert as JSON and says it landed", async () => {
     const fetchImpl = vi.fn(async () => new Response("ok")) as unknown as typeof fetch;
-    expect(await deliver(alert(), settings, fetchImpl)).toBe(true);
+    expect(await deliver(alert(), settings, fetchImpl, outward)).toBe(true);
     const [url, init] = at((fetchImpl as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls, 0);
     expect(url).toBe("https://hooks.example/cc");
     expect(JSON.parse(String(init.body))).toMatchObject({ kind: "price_move", title: "AK up 30%" });
@@ -34,11 +36,37 @@ describe("delivering an alert to a webhook", () => {
 
   it("reports a refusal and a failure rather than throwing, and says so in the log", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    expect(await deliver(alert(), settings, (async () => new Response("no", { status: 500 })) as unknown as typeof fetch)).toBe(false);
-    expect(await deliver(alert(), settings, (async () => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch)).toBe(false);
+    expect(await deliver(alert(), settings, (async () => new Response("no", { status: 500 })) as unknown as typeof fetch, outward)).toBe(false);
+    expect(await deliver(alert(), settings, (async () => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch, outward)).toBe(false);
     expect(error).toHaveBeenCalledTimes(2);
     expect(String(error.mock.calls[0]?.[0])).toContain("HTTP 500");
     expect(String(error.mock.calls[1]?.[1])).toContain("ECONNREFUSED");
+  });
+
+  it("does not follow a redirect, and refuses a name that resolves inward", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    let init: RequestInit | undefined;
+    const fetchImpl = (async (_url: string, i?: RequestInit) => {
+      init = i;
+      return new Response("ok");
+    }) as unknown as typeof fetch;
+    expect(await deliver(alert(), settings, fetchImpl, outward)).toBe(true);
+    // An answer that bounced the request somewhere else would be a way to
+    // point it inward after the address check; the request refuses to follow.
+    expect(init?.redirect).toBe("error");
+
+    // A public-looking name that resolves to this machine or its network.
+    const inward = async () => [{ address: "93.184.216.34" }, { address: "10.0.0.5" }];
+    const posted = vi.fn(async () => new Response("ok")) as unknown as typeof fetch;
+    expect(await deliver(alert(), settings, posted, inward)).toBe(false);
+    expect(posted).not.toHaveBeenCalled();
+    expect(String(error.mock.calls[0]?.[1])).toMatch(/resolves to 10\.0\.0\.5/);
+    // And a name nothing can resolve is a failure, not a request.
+    const unresolvable = async () => {
+      throw new Error("ENOTFOUND");
+    };
+    expect(await deliver(alert(), settings, posted, unresolvable)).toBe(false);
+    expect(posted).not.toHaveBeenCalled();
   });
 
   it("hands the webhook a deadline, and reports it running out", async () => {
@@ -50,7 +78,7 @@ describe("delivering an alert to a webhook", () => {
       signal = init?.signal ?? undefined;
       return Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
     }) as unknown as typeof fetch;
-    expect(await deliver(alert(), settings, hanging)).toBe(false);
+    expect(await deliver(alert(), settings, hanging, outward)).toBe(false);
     expect(signal).toBeInstanceOf(AbortSignal);
     expect(WEBHOOK_TIMEOUT_MS).toBe(10_000);
     expect(error).toHaveBeenCalledTimes(1);

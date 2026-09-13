@@ -91,6 +91,24 @@ describe("the health check", () => {
     expect(body.app).toBe("collectcollect-skins");
     expect(typeof body.database).toBe("boolean");
     expect(body.scheduler.running).toBe(false);
+    // It answers anyone, so it says nothing about where the inventory lives
+    // or what last went wrong.
+    expect(body).not.toHaveProperty("dataDir");
+    expect(body.scheduler).not.toHaveProperty("lastError");
+  });
+});
+
+describe("pricing one item over HTTP", () => {
+  it("is throttled like any other expensive route", async () => {
+    setDb(openDatabase(":memory:"));
+    const { POST, throttle } = await import("@/app/api/items/[id]/price/route");
+    throttle.reset();
+    const ask = () => POST(new Request("http://localhost/x", { method: "POST" }), { params: Promise.resolve({ id: "999" }) } as never);
+    for (let i = 0; i < 120; i++) expect((await ask()).status).toBe(404);
+    const refused = await ask();
+    expect(refused.status).toBe(429);
+    expect(refused.headers.get("Retry-After")).toBeTruthy();
+    throttle.reset();
   });
 });
 

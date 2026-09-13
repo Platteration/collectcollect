@@ -1,3 +1,4 @@
+import { assertPublicWebhook, type Lookup } from "@collectcollect/core/webhook";
 import { building, databaseExists, getDb } from "./db";
 import { gradingVerdict, isReadyToGrade, outlookSeries } from "./analytics";
 import { money } from "./format";
@@ -139,11 +140,16 @@ export function alertsForRefresh(
  * service the owner controls. Failures are logged, never thrown: a broken
  * webhook must not break a price refresh.
  */
-export async function deliver(alert: Alert, settings: Settings, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+export async function deliver(alert: Alert, settings: Settings, fetchImpl: typeof fetch = fetch, lookup?: Lookup): Promise<boolean> {
   if (!settings.alertWebhookUrl) return false;
   try {
+    // The address was checked when it was saved; the name it carries is
+    // resolved and checked again now, and the request will not follow a
+    // redirect, so neither can point the server at its own network.
+    await assertPublicWebhook(settings.alertWebhookUrl, lookup);
     const res = await fetchImpl(settings.alertWebhookUrl, {
       method: "POST",
+      redirect: "error",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind: alert.kind, title: alert.title, body: alert.body, cardId: alert.cardId, createdAt: alert.createdAt }),
       signal: AbortSignal.timeout(10_000),

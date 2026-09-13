@@ -63,7 +63,7 @@ export async function PUT(request: Request) {
   const alertMovePercent = number("price-move alert percentage", body.alertMovePercent, current.alertMovePercent);
   const ownerName = text("owner name", body.ownerName, current.ownerName);
   const alertWebhookUrl = text("webhook URL", body.alertWebhookUrl, current.alertWebhookUrl).trim();
-  if (alertWebhookUrl && !isWebhookUrl(alertWebhookUrl)) problems.push("webhook URL (it has to start with http:// or https://)");
+  if (alertWebhookUrl && !isWebhookUrl(alertWebhookUrl)) problems.push("webhook URL (it has to be an http:// or https:// address on the public internet, not this machine or its network)");
 
   if (problems.length) {
     return jsonError(`These are not right, and none of your settings were changed: ${problems.join(", ")}.`);

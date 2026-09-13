@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Auth } from "./auth";
 import { jsonError } from "./http";
+import { isSecureRequest } from "./net";
 import { clientKey } from "./throttle";
 
 /**
@@ -59,7 +60,7 @@ export function createAuthRoutes(auth: Auth) {
     response.cookies.set(auth.SESSION_COOKIE, await auth.createToken(), {
       httpOnly: true,
       sameSite: "lax",
-      secure: request.url.startsWith("https://"),
+      secure: isSecureRequest(request),
       path: "/",
       maxAge: auth.SESSION_DAYS * 86400,
     });

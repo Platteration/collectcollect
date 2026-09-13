@@ -1,4 +1,7 @@
 import { jsonError } from "./http";
+import { trustProxy } from "./net";
+
+export { trustProxy };
 
 /**
  * Who is asking, for anything that counts requests per client.
@@ -10,8 +13,7 @@ import { jsonError } from "./http";
  * runs on one machine for one person is the truth.
  */
 export function clientKey(request: Request): string {
-  const trusted = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY ?? "");
-  if (!trusted) return "local";
+  if (!trustProxy()) return "local";
   const forwarded = request.headers.get("x-forwarded-for");
   return (forwarded ? forwarded.split(",")[0] : null)?.trim() || "local";
 }

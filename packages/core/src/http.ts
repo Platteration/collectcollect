@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 
+// Pure checks with no dependencies live in ./net so that code which must not
+// pull Next in (the seed scripts, the settings module) can use them; they are
+// re-exported here for the routes that already import from this file.
+export { isPrivateAddress, isPrivateHost, isSecureRequest, isWebhookUrl, trustProxy } from "./net";
+
 export function jsonError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
@@ -28,16 +33,6 @@ export function tooLarge(request: Request, max: number, message: string) {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > max) return jsonError(message, 413);
   return null;
-}
-
-/** Whether a string is somewhere the server may POST to on its own: an http(s) URL. */
-export function isWebhookUrl(value: string): boolean {
-  try {
-    const u = new URL(value);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
 }
 
 /**

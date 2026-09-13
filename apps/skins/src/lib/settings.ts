@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { isWebhookUrl } from "@collectcollect/core/net";
 import { DEFAULT_SETTINGS, type Settings } from "./types";
 
 const KEY = "settings";
@@ -52,16 +53,10 @@ export function sanitize(input: Partial<Settings>): Settings {
   };
 }
 
-/** Only http(s) URLs are accepted; the server POSTs to this on its own. */
+/** Only a public http(s) address is kept; the server POSTs to this on its own. */
 function webhookUrl(v: unknown): string {
   const s = typeof v === "string" ? v.trim() : "";
-  if (!s) return "";
-  try {
-    const u = new URL(s);
-    return u.protocol === "http:" || u.protocol === "https:" ? u.toString() : "";
-  } catch {
-    return "";
-  }
+  return s && isWebhookUrl(s) ? new URL(s).toString() : "";
 }
 
 function nonNegative(v: unknown, fallback: number): number {
