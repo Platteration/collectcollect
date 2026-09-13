@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { putBack, replacedCollections } from "@/lib/backup";
+import { putBack, replacedCollections, restoreThrottle } from "@/lib/backup";
+import { BusyError } from "@collectcollect/core/gate";
 import { errorMessage, jsonError } from "@/lib/http";
 import { logError } from "@collectcollect/core/http";
 
@@ -15,6 +16,8 @@ export async function GET() {
 
 /** POST `{ name }` — make one of them the live collection again. */
 export async function POST(request: Request) {
+  const refused = restoreThrottle.check(request);
+  if (refused) return refused;
   let body: { name?: unknown };
   try {
     body = (await request.json()) as { name?: unknown };
@@ -25,6 +28,7 @@ export async function POST(request: Request) {
   try {
     return NextResponse.json({ result: await putBack(body.name) });
   } catch (e) {
+    if (e instanceof BusyError) return jsonError(e.message, 409);
     return jsonError(errorMessage(e), 400);
   }
 }

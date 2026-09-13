@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { zipStream } from "@collectcollect/core/zip";
 
 /** Add an item through the form and land on its page. */
 async function add(page: import("@playwright/test").Page, name: string, fields: Record<string, string> = {}) {
@@ -53,6 +54,15 @@ test.describe("backup", () => {
     page.once("dialog", (d) => d.accept());
     await page.getByRole("button", { name: "Restore from backup" }).click();
     await expect(page.getByText(/not a zip archive/)).toBeVisible();
+
+    // The card app's backup is a real zip with a manifest that says whose it is.
+    const manifest = new TextEncoder().encode(JSON.stringify({ app: "collectcollect", format: 1 }));
+    const parts: Uint8Array[] = [];
+    for await (const chunk of zipStream([{ name: "manifest.json", size: manifest.length, chunks: () => [manifest] }])) parts.push(chunk);
+    await page.setInputFiles("#restore-archive", { name: "cards.zip", mimeType: "application/zip", buffer: Buffer.concat(parts) });
+    page.once("dialog", (d) => d.accept());
+    await page.getByRole("button", { name: "Restore from backup" }).click();
+    await expect(page.getByText(/backup of the card app/)).toBeVisible();
   });
 
   test("reading files back in asks first", async ({ page }) => {

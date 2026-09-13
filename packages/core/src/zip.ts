@@ -100,13 +100,15 @@ export async function* zipStream(entries: ZipEntry[], now = new Date()): AsyncGe
     // entry has been read, so one entry at a time is buffered. Entries are
     // still emitted as they are finished, so the full archive never has to fit
     // in memory, only its largest single file.
+    // `size` was an estimate for the limit check; what was read is what is
+    // written, and every header carries that. A Markdown file the mirror
+    // rewrote while it was being copied must not abort the whole backup.
     const parts: Uint8Array[] = [];
     let written = 0;
     for await (const chunk of entry.chunks()) {
       parts.push(chunk);
       written += chunk.length;
     }
-    if (written !== entry.size) throw new Error(`${entry.name} changed size while being archived`);
     const whole = concat(parts, written);
     const crc = crc32(whole);
 

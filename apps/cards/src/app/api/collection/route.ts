@@ -1,6 +1,7 @@
 import { collectionFiles } from "@/lib/markdown/mirror";
 import { errorMessage, jsonError } from "@/lib/http";
 import { assertZippable, fileChunks, zipStream, type ZipEntry } from "@collectcollect/core/zip";
+import { createThrottle } from "@collectcollect/core/throttle";
 import { logError } from "@collectcollect/core/http";
 
 /**
@@ -8,7 +9,12 @@ import { logError } from "@collectcollect/core/http";
  * index, and a note explaining the format. Small enough to keep anywhere, and
  * readable without this app ever running again.
  */
-export async function GET() {
+/** Each download reads every file in the folder; six a minute is plenty for a person and nothing for a loop. */
+export const throttle = createThrottle(6, 60_000, "downloads");
+
+export async function GET(request: Request) {
+  const refused = throttle.check(request);
+  if (refused) return refused;
   try {
     const files = collectionFiles();
     // The folder always holds its own explainer; a download of nothing but
@@ -26,9 +32,16 @@ export async function GET() {
     const iterator = zipStream(entries);
     const stream = new ReadableStream<Uint8Array>({
       async pull(controller) {
-        const { value, done } = await iterator.next();
-        if (done) controller.close();
-        else controller.enqueue(value);
+        // A file that vanishes mid-download ends the stream with an error the
+        // client can see, rather than an unhandled rejection in the server.
+        try {
+          const { value, done } = await iterator.next();
+          if (done) controller.close();
+          else controller.enqueue(value);
+        } catch (e) {
+          logError("collection", e);
+          controller.error(e);
+        }
       },
     });
     const stamp = new Date().toISOString().slice(0, 10);

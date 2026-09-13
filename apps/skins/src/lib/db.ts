@@ -95,9 +95,6 @@ CREATE TABLE IF NOT EXISTS items (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_items_name ON items(market_hash_name);
--- An asset id names one object in one Steam account, so importing the same
--- inventory twice must find the row it made last time rather than duplicate it.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_items_asset ON items(asset_id) WHERE asset_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS item_stickers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
@@ -176,7 +173,48 @@ export function openDatabase(file: string): Database.Database {
     const cols = db.prepare(`PRAGMA table_info(${m.table})`).all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === m.column)) db.exec(m.ddl);
   }
+  ensureAssetIndex(db);
   return db;
+}
+
+/**
+ * An asset id names one object in one Steam account, so importing the same
+ * inventory twice must find the row it made last time rather than duplicate
+ * it; the index is what enforces that.
+ *
+ * It is not part of the schema block because a database from before the index
+ * can already hold two rows with one asset id, and `CREATE UNIQUE INDEX` on
+ * such a table fails — which, run at open, would lock the owner out of their
+ * own inventory. So the duplicates are resolved first: the newest row keeps
+ * the id and the others lose it (nothing else about them changes), each is
+ * named in the log, and then the index goes on. An index that still cannot be
+ * built is reported rather than fatal.
+ */
+function ensureAssetIndex(db: Database.Database): void {
+  const present = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_items_asset'").get();
+  if (present) return;
+  try {
+    db.transaction(() => {
+      const duplicated = db
+        .prepare(
+          `SELECT asset_id AS assetId, GROUP_CONCAT(id) AS ids FROM items
+           WHERE asset_id IS NOT NULL GROUP BY asset_id HAVING COUNT(*) > 1`,
+        )
+        .all() as Array<{ assetId: string; ids: string }>;
+      for (const dup of duplicated) {
+        const ids = dup.ids.split(",").map(Number);
+        const keep = Math.max(...ids);
+        const losers = ids.filter((id) => id !== keep);
+        db.prepare(`UPDATE items SET asset_id = NULL WHERE id IN (${losers.map(() => "?").join(",")})`).run(...losers);
+        console.warn(
+          `[collectcollect-skins] Asset id ${dup.assetId} was on items ${ids.join(", ")}; item ${keep} keeps it and the rest now have none.`,
+        );
+      }
+      db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_items_asset ON items(asset_id) WHERE asset_id IS NOT NULL");
+    })();
+  } catch (e) {
+    console.warn(`[collectcollect-skins] Could not build the asset id index: ${e instanceof Error ? e.message : e}`);
+  }
 }
 
 // Next.js reloads server modules in development; keep one connection per process.

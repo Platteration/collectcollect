@@ -255,14 +255,14 @@ describe("the collection routes", () => {
 
   it("has nothing to hand over when there are no cards", async () => {
     const { GET } = await import("@/app/api/collection/route");
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/collection"));
     expect(res.status).toBe(404);
   });
 
   it("streams a zip once there is something in it", async () => {
     createCard({ game: "pokemon", name: "Snorlax" });
     const { GET } = await import("@/app/api/collection/route");
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/collection"));
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toContain("zip");
     const bytes = new Uint8Array(await res.arrayBuffer());

@@ -84,14 +84,22 @@ describe("zip writer", () => {
     ).toThrow(/exceed 4 GB/);
   });
 
-  it("notices a file that changes size while being read", async () => {
-    await expect(
-      build([]).then(() =>
-        (async () => {
-          for await (const _ of zipStream([{ name: "x", size: 10, chunks: () => [new Uint8Array(3)] }])) void _;
-        })(),
-      ),
-    ).rejects.toThrow(/changed size/);
+  it("writes an entry that grew while being read at its real size, and the archive still verifies", async () => {
+    // The mirror rewrites Markdown files while a backup is being taken, so
+    // the size an entry was listed at is only an estimate. What was read is
+    // what every header must say.
+    const grown = new TextEncoder().encode("the file was rewritten while the archive was being made\n");
+    const parts: Uint8Array[] = [];
+    for await (const chunk of zipStream([{ name: "grew.md", size: 3, chunks: () => [grown] }])) parts.push(chunk);
+    const zip = Buffer.concat(parts);
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zip-grew-"));
+    const file = path.join(dir, "out.zip");
+    fs.writeFileSync(file, zip);
+    expect(execFileSync("unzip", ["-t", file]).toString()).toMatch(/No errors detected/);
+    execFileSync("unzip", ["-q", file, "-d", path.join(dir, "x")]);
+    expect(fs.readFileSync(path.join(dir, "x", "grew.md"))).toEqual(Buffer.from(grown));
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -297,10 +305,59 @@ describe("restore", () => {
     await expect(restoreBackup(await build("manifest.json", new Uint8Array([1])))).rejects.toThrow(/no collectcollect.db/);
     await expect(restoreBackup(await build("uploads/evil.sh", new Uint8Array([1])))).rejects.toThrow(/unexpected photo name/);
     await expect(restoreBackup(await build("collectcollect.db", new TextEncoder().encode("not a database")))).rejects.toThrow(/could not be opened/);
+    // The skins app's archive is the likeliest wrong file: named by its
+    // manifest before anything else is looked at, and by its database.
+    const skinsManifest = new TextEncoder().encode(JSON.stringify({ app: "collectcollect-skins", format: 1 }));
+    await expect(restoreBackup(await build("manifest.json", skinsManifest))).rejects.toThrow(/backup of the skins app/);
+    await expect(restoreBackup(await build("collectcollect-skins.db", new Uint8Array([1])))).rejects.toThrow(/skins app/);
+    // A real SQLite file that is not a card collection used to be "opened" by
+    // creating the tables in it, and reported as an empty collection.
+    const Database = (await import("better-sqlite3")).default;
+    const strangerFile = pathm.join(dir, "stranger.sqlite");
+    const stranger = new Database(strangerFile);
+    stranger.exec("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)");
+    stranger.close();
+    await expect(restoreBackup(await build("collectcollect.db", new Uint8Array(fsm.readFileSync(strangerFile))))).rejects.toThrow(
+      /not a card collection/,
+    );
     // The collection is untouched after every refusal.
     expect(fsm.existsSync(pathm.join(dir, "collectcollect.db"))).toBe(true);
     expect(fsm.readdirSync(dir).filter((n) => n.startsWith("replaced-"))).toHaveLength(0);
 
+    delete process.env.DATA_DIR;
+    fsm.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("a backup and a restore at once", () => {
+  it("turns a restore away while a backup copy is being taken, and the other way round", async () => {
+    const fsm = await import("node:fs");
+    const osm = await import("node:os");
+    const pathm = await import("node:path");
+    const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), "cc-gate-"));
+    process.env.DATA_DIR = dir;
+    const { setDb, openDatabase } = await import("@/lib/db");
+    const { createCard } = await import("@/lib/cards");
+    const { archiveGate, buildBackup, restoreBackup } = await import("@/lib/backup");
+    setDb(openDatabase(pathm.join(dir, "collectcollect.db")));
+    createCard({ game: "pokemon", name: "Gated" });
+    const { stream } = await buildBackup();
+    const parts: Uint8Array[] = [];
+    for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) parts.push(chunk);
+    const archive = new Uint8Array(Buffer.concat(parts));
+
+    // Something holds the gate — a backup copying the database — for as long
+    // as this promise is open.
+    let release: () => void = () => {};
+    const holding = archiveGate.run(() => new Promise<void>((resolve) => (release = resolve)));
+    await expect(restoreBackup(archive)).rejects.toThrow(/already running/);
+    await expect(buildBackup()).rejects.toThrow(/already running/);
+    expect(fsm.readdirSync(dir).filter((n) => n.startsWith("replaced-"))).toHaveLength(0);
+    release();
+    await holding;
+    expect((await restoreBackup(archive)).cards).toBe(1);
+
+    setDb(undefined);
     delete process.env.DATA_DIR;
     fsm.rmSync(dir, { recursive: true, force: true });
   });

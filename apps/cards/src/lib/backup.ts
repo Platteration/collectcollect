@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { listCards } from "./cards";
-import { DB_FILE, closeDatabase, dataDir, databaseFile, getDb, lockDatabase, openDatabase, unlockDatabase, uploadsDir } from "./db";
+import { DB_FILE, closeDatabase, dataDir, databaseFile, getDb, lockDatabase, unlockDatabase, uploadsDir } from "./db";
 import { isValidUploadName } from "./images";
 import { collectionDir, collectionFiles, rebuildCollection } from "./markdown/mirror";
 import {
@@ -15,6 +15,27 @@ import {
   type SwapDeps,
 } from "@collectcollect/core/collection-swap";
 import { assertZippable, fileChunks, isSafeEntryName, readZip, zipStream, type ZipEntry } from "@collectcollect/core/zip";
+import { createGate, type Gate } from "@collectcollect/core/gate";
+import { createThrottle } from "@collectcollect/core/throttle";
+
+/** What the manifest calls this app, which is how its archives are told from the skins app's. */
+export const BACKUP_APP = "collectcollect";
+
+/**
+ * A backup copies the database and a restore swaps it out; one running under
+ * the other would copy half of each. Held on the global object so a
+ * development reload cannot make two.
+ */
+const globalForGate = globalThis as unknown as { __collectcollectArchiveGate?: Gate };
+export const archiveGate: Gate = (globalForGate.__collectcollectArchiveGate ??= createGate("A backup or restore is already running; try again in a moment"));
+
+/**
+ * A restore swaps the whole database out, and putting a replaced one back is
+ * the same swap the other way. Restore, put back, restore the right file this
+ * time: that is a real minute's work, and six leaves room for it while still
+ * being nothing to a loop.
+ */
+export const restoreThrottle = createThrottle(6, 60_000, "restores");
 
 /**
  * Everything needed to restore a collection: a consistent copy of the database,
@@ -27,7 +48,12 @@ import { assertZippable, fileChunks, isSafeEntryName, readZip, zipStream, type Z
 export async function buildBackup(): Promise<{ filename: string; stream: ReadableStream<Uint8Array> }> {
   const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "collectcollect-backup-"));
   const dbCopy = path.join(tmpDir, "collectcollect.db");
-  await getDb().backup(dbCopy);
+  try {
+    await archiveGate.run(() => getDb().backup(dbCopy));
+  } catch (e) {
+    await fsp.rm(tmpDir, { recursive: true, force: true });
+    throw e;
+  }
 
   const uploads = uploadsDir();
   const photoNames = (await fsp.readdir(uploads).catch(() => [] as string[])).filter(isValidUploadName).sort();
@@ -36,7 +62,7 @@ export async function buildBackup(): Promise<{ filename: string; stream: Readabl
   const manifest = Buffer.from(
     JSON.stringify(
       {
-        app: "collectcollect",
+        app: BACKUP_APP,
         format: 1,
         createdAt: new Date().toISOString(),
         photos: photoNames.length,
@@ -147,7 +173,9 @@ export async function restoreBackup(archive: Uint8Array): Promise<RestoreResult>
   for (const entry of entries) {
     if (!isSafeEntryName(entry.name)) throw new Error(`The archive contains an unsafe path: ${entry.name}`);
     if (entry.name === "collectcollect.db") database = entry.data;
-    else if (entry.name === "manifest.json") continue;
+    else if (entry.name === "manifest.json") assertOwnManifest(entry.data);
+    // The skins app's backup is the likeliest wrong file, and says so by name.
+    else if (entry.name === "collectcollect-skins.db") throw new Error("That is a backup of the skins app, not of this collection");
     // The Markdown in an archive is a copy of what the database already holds,
     // so it is rewritten from the restored database rather than unpacked.
     else if (entry.name.startsWith("collection/")) continue;
@@ -165,24 +193,66 @@ export async function restoreBackup(archive: Uint8Array): Promise<RestoreResult>
   const staging = await fsp.mkdtemp(path.join(os.tmpdir(), "collectcollect-restore-"));
   const stagedDb = path.join(staging, "collectcollect.db");
   await fsp.writeFile(stagedDb, database);
-  let cards = 0;
+  let cards: number;
   try {
-    const check = openDatabase(stagedDb);
-    cards = (check.prepare("SELECT COUNT(*) AS n FROM cards").get() as { n: number }).n;
-    check.close();
+    cards = inspectDatabase(stagedDb);
   } catch (e) {
     await fsp.rm(staging, { recursive: true, force: true });
-    throw new Error(`The database in that archive could not be opened: ${e instanceof Error ? e.message : e}`);
+    throw e;
   }
 
   let movedAsideTo: string;
   try {
-    ({ movedAsideTo } = await swapCollection(SWAP, { database: { path: stagedDb, move: false }, uploads: { photos } }));
+    ({ movedAsideTo } = await archiveGate.run(() =>
+      swapCollection(SWAP, { database: { path: stagedDb, move: false }, uploads: { photos } }),
+    ));
   } finally {
     await fsp.rm(staging, { recursive: true, force: true });
   }
   reopen();
   return { photos: photos.length, cards, movedAsideTo };
+}
+
+/**
+ * A manifest that names another app is the clearest sign an archive is the
+ * wrong one, and is checked before anything else is. One that cannot be read
+ * is ignored: the database is what a restore is really made of.
+ */
+function assertOwnManifest(data: Uint8Array): void {
+  let app: unknown;
+  try {
+    app = (JSON.parse(new TextDecoder().decode(data)) as { app?: unknown }).app;
+  } catch {
+    return;
+  }
+  if (typeof app === "string" && app !== BACKUP_APP) {
+    throw new Error(`That is a backup of ${app === "collectcollect-skins" ? "the skins app" : app}, not of this collection`);
+  }
+}
+
+/**
+ * Look inside a database file without changing it. Opening it the normal way
+ * would create this app's tables in whatever file was uploaded and report it
+ * as an empty collection; opened read-only, a file that is not a database, or
+ * is some other app's, is refused as such.
+ */
+function inspectDatabase(file: string): number {
+  let db: Database.Database;
+  try {
+    db = new Database(file, { readonly: true, fileMustExist: true });
+  } catch (e) {
+    throw new Error(`The database in that archive could not be opened: ${e instanceof Error ? e.message : e}`);
+  }
+  try {
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((t) => t.name);
+    if (!tables.includes("cards")) throw new Error("The database in that archive is not a card collection: it has no cards table");
+    return (db.prepare("SELECT COUNT(*) AS n FROM cards").get() as { n: number }).n;
+  } catch (e) {
+    if (e instanceof Error && /not a card collection/.test(e.message)) throw e;
+    throw new Error(`The database in that archive could not be opened: ${e instanceof Error ? e.message : e}`);
+  } finally {
+    db.close();
+  }
 }
 
 const SWAP: SwapDeps = { dataDir, databaseFile, closeDatabase, lockDatabase, unlockDatabase, collectionDir, uploadsDir };
@@ -269,11 +339,13 @@ export async function putBack(name: string): Promise<RestoreResult> {
   const collection = path.join(folder, "collection");
   const photos = fs.existsSync(uploads) ? fs.readdirSync(uploads).length : 0;
 
-  const { movedAsideTo } = await swapCollection(SWAP, {
-    database: { path: database, move: true, siblings },
-    uploads: fs.existsSync(uploads) ? { dir: uploads } : { photos: [] },
-    collection: fs.existsSync(collection) ? collection : undefined,
-  });
+  const { movedAsideTo } = await archiveGate.run(() =>
+    swapCollection(SWAP, {
+      database: { path: database, move: true, siblings },
+      uploads: fs.existsSync(uploads) ? { dir: uploads } : { photos: [] },
+      collection: fs.existsSync(collection) ? collection : undefined,
+    }),
+  );
   // Everything of value has been moved out; what is left is an empty shell.
   await fsp.rm(folder, { recursive: true, force: true });
   reopen();

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { RESTORE_MAX_BYTES, restoreBackup } from "@/lib/backup";
+import { RESTORE_MAX_BYTES, restoreBackup, restoreThrottle } from "@/lib/backup";
+import { BusyError } from "@collectcollect/core/gate";
 import { errorMessage, jsonError, tooLarge } from "@collectcollect/core/http";
-import { createThrottle } from "@collectcollect/core/throttle";
 
 const TOO_LARGE = `That archive is larger than ${RESTORE_MAX_BYTES / 1024 / 1024} MB. Unpack it into the data directory by hand instead.`;
 
-/** A restore swaps the whole database out; three a minute is already two more than anyone means. */
-export const throttle = createThrottle(3, 60_000, "restores");
+/** Shared with putting a replaced collection back: both are the same swap. */
+export const throttle = restoreThrottle;
 
 /**
  * POST multipart/form-data with an `archive` file — replace the inventory with
@@ -30,6 +30,7 @@ export async function POST(request: Request) {
     const result = await restoreBackup(new Uint8Array(await file.arrayBuffer()));
     return NextResponse.json({ result });
   } catch (e) {
+    if (e instanceof BusyError) return jsonError(e.message, 409);
     return jsonError(errorMessage(e), 400);
   }
 }

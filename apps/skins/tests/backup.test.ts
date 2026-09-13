@@ -2,10 +2,11 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { lockDatabase, openDatabase, setDb, unlockDatabase } from "@/lib/db";
 import { createItem, listItems } from "@/lib/items";
-import { buildBackup, putBack, replacedCollections, restoreBackup } from "@/lib/backup";
+import { archiveGate, buildBackup, putBack, replacedCollections, restoreBackup, restoreThrottle } from "@/lib/backup";
+import Database from "better-sqlite3";
 import { flushCollection } from "@/lib/markdown/mirror";
 import { zipStream } from "@collectcollect/core/zip";
 import { clutchCase, redline } from "./helpers";
@@ -100,6 +101,18 @@ describe("restore", () => {
     await expect(restoreBackup(await zipOf([["collectcollect-skins.db", new TextEncoder().encode("not a database")]]))).rejects.toThrow(
       /could not be opened/,
     );
+    // A manifest naming the other app is refused before anything else is read.
+    const cardsManifest = new TextEncoder().encode(JSON.stringify({ app: "collectcollect", format: 1 }));
+    await expect(restoreBackup(await zipOf([["manifest.json", cardsManifest]]))).rejects.toThrow(/backup of the card app/);
+    // A real SQLite file that is not an inventory used to be "opened" by
+    // creating the tables in it, and reported as an empty inventory.
+    const strangerFile = path.join(dir, "stranger.sqlite");
+    const stranger = new Database(strangerFile);
+    stranger.exec("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)");
+    stranger.close();
+    await expect(restoreBackup(await zipOf([["collectcollect-skins.db", new Uint8Array(fs.readFileSync(strangerFile))]]))).rejects.toThrow(
+      /not an inventory/,
+    );
     expect(listItems()).toHaveLength(1);
     expect(fs.readdirSync(dir).filter((n) => n.startsWith("replaced-"))).toEqual([]);
   });
@@ -111,6 +124,33 @@ describe("restore", () => {
     await expect(restoreBackup(archive)).rejects.toThrow(/already in progress/);
     unlockDatabase();
     expect((await restoreBackup(archive)).items).toBe(1);
+  });
+
+  it("turns a restore away while a backup copy is being taken, and the other way round", async () => {
+    const dir = inventory();
+    const archive = await archiveOf();
+    // Something holds the gate — a backup copying the database — for as long
+    // as this promise is open.
+    let release: () => void = () => {};
+    const holding = archiveGate.run(() => new Promise<void>((resolve) => (release = resolve)));
+    await expect(restoreBackup(archive)).rejects.toThrow(/already running/);
+    await expect(buildBackup()).rejects.toThrow(/already running/);
+    expect(fs.readdirSync(dir).filter((n) => n.startsWith("replaced-"))).toEqual([]);
+    release();
+    await holding;
+    expect((await restoreBackup(archive)).items).toBe(1);
+  });
+
+  it("throttles putting a replaced inventory back as it does a restore", async () => {
+    inventory();
+    restoreThrottle.reset();
+    const { POST } = await import("@/app/api/backup/replaced/route");
+    const ask = () => POST(new Request("http://localhost/api/backup/replaced", { method: "POST", body: JSON.stringify({ name: "replaced-by-hand" }) }));
+    for (let i = 0; i < 6; i++) expect((await ask()).status).toBe(400);
+    const seventh = await ask();
+    expect(seventh.status).toBe(429);
+    expect(seventh.headers.get("Retry-After")).toBeTruthy();
+    restoreThrottle.reset();
   });
 
   it("can be undone from the list of what it replaced", async () => {
@@ -144,5 +184,39 @@ describe("restore", () => {
     await expect(restoreBackup(archive)).rejects.toThrow(/before anything was replaced/);
     expect(listItems()).toHaveLength(2);
     expect(fs.readdirSync(dir).filter((n) => n.startsWith("replaced-"))).toEqual([]);
+  });
+});
+
+describe("an older database with duplicate asset ids", () => {
+  it("keeps the id on the newest row, clears the others, and then enforces the index", () => {
+    const dir = process.env.SKINS_DATA_DIR!;
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "collectcollect-skins.db");
+    // A database from before the index existed: same tables, no index, and
+    // two rows carrying one asset id.
+    const before = openDatabase(file);
+    before.exec("DROP INDEX idx_items_asset");
+    const now = new Date().toISOString();
+    const insert = before.prepare(
+      "INSERT INTO items (market_hash_name, category, stackable, quantity, asset_id, created_at, updated_at) VALUES (?, 'case', 1, 1, ?, ?, ?)",
+    );
+    insert.run("Clutch Case", "111", now, now);
+    insert.run("Clutch Case", "111", now, now);
+    insert.run("Chroma Case", "222", now, now);
+    before.close();
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const after = openDatabase(file);
+    setDb(after);
+    expect(after.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_items_asset'").get()).toBeTruthy();
+    expect(after.prepare("SELECT id, asset_id AS assetId FROM items ORDER BY id").all()).toEqual([
+      { id: 1, assetId: null },
+      { id: 2, assetId: "111" },
+      { id: 3, assetId: "222" },
+    ]);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/Asset id 111 was on items 1, 2; item 2 keeps it/));
+    // From here on a duplicate is refused, as it always was on a new database.
+    expect(() => after.prepare("UPDATE items SET asset_id = '222' WHERE id = 1").run()).toThrow(/UNIQUE/);
+    warn.mockRestore();
   });
 });
