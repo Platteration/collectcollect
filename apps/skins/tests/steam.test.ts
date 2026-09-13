@@ -326,11 +326,17 @@ describe("bringing an inventory in twice", () => {
     expect(verifyLotInvariant()).toEqual([]);
   });
 
-  it("follows a stack down when copies left by some route this app never saw", () => {
-    syncFromInventory(at(parseInventory(casesInventory(5), STEAM_ID).items, 0));
+  it("reports a stack Steam shows fewer of rather than shrinking it", () => {
+    const created = syncFromInventory(at(parseInventory(casesInventory(5), STEAM_ID).items, 0));
+    // The owner knows what these cost. Four of them going into a storage unit
+    // must not delete that.
+    updateItem(created.item.id, { purchasePrice: 1.4 });
     const outcome = syncFromInventory(at(parseInventory(casesInventory(1), STEAM_ID).items, 0));
-    expect(outcome).toMatchObject({ result: "decreased", by: 4 });
-    expect(listItems()[0]?.quantity).toBe(1);
+    expect(outcome).toMatchObject({ result: "fewer", held: 5, seen: 1 });
+    const item = getItem(created.item.id)!;
+    expect(item.quantity).toBe(5);
+    expect(item.purchasePrice).toBe(1.4);
+    expect(listLots(item.id).map((l) => [l.quantity, l.remaining, l.unitCost])).toEqual([[5, 5, 1.4]]);
     expect(verifyLotInvariant()).toEqual([]);
   });
 

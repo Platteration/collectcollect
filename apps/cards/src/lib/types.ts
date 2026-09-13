@@ -1,5 +1,13 @@
 // Shared domain types for the card catalog.
 
+/**
+ * Ceilings on what a count or a price may be. Nobody holds a million copies of
+ * one card and none sells for a billion dollars; a number past these is a typo
+ * or a bad column mapping, and taking it would swamp every total on every page.
+ */
+export const MAX_QUANTITY = 1_000_000;
+export const MAX_MONEY = 1_000_000_000;
+
 export type Game = "pokemon" | "yugioh" | "mtg" | "sports" | "other";
 
 export const GAMES: Record<Game, string> = {

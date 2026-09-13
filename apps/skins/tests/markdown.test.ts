@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { openDatabase, setDb } from "@/lib/db";
 import { addAcquisition, getItem, latestSnapshot, listItems, updateItem } from "@/lib/items";
 import { listLots, listSaleLots, verifyLotInvariant } from "@/lib/acquisitions";
-import { listSalesForItem, recordSale } from "@/lib/sales";
+import { deleteSale, listSalesForItem, recordSale } from "@/lib/sales";
 import { itemFileName, itemMarkdown, parseItemMarkdown } from "@/lib/markdown/item";
 import { collectionDir, flushCollection, itemsDir, mirrorEnabled, readItemFiles, rebuildCollection } from "@/lib/markdown/mirror";
 import { importFromDisk, importItemFiles } from "@/lib/markdown/restore";
@@ -298,6 +298,71 @@ describe("rebuilding an inventory from nothing but its files", () => {
     ].join("\n");
     importItemFiles([{ name: "x.md", text }]);
     expect(latestSnapshot(item.id)!.summary.yourCopyValue).toBe(9);
+  });
+});
+
+describe("what a rebuild puts right", () => {
+  it("lets the restored purchases decide the purchase price, not the front matter", () => {
+    const item = seedCase({ quantity: 2, purchasePrice: 1 });
+    flushCollection();
+    // A hand edit to the summary line, which is derived from the lots below it.
+    const files = readItemFiles().map((f) => ({ ...f, text: f.text.replace(/^purchase_price: .*$/m, "purchase_price: 99") }));
+    setDb(openDatabase(":memory:"));
+    importItemFiles(files);
+    expect(getItem(item.id)!.purchasePrice).toBe(1);
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
+  it("matches a sale to a lot that still has copies to give back", () => {
+    // Two lots bought the same day at the same price. Matching by day and cost
+    // alone would pin both sales on the first lot, and undoing them would hand
+    // it back more copies than it ever had.
+    const item = seedCase({ quantity: 2, purchasePrice: 1 });
+    addAcquisition(item.id, { quantity: 2, unitCost: 1 });
+    recordSale(item.id, { quantity: 2, unitPrice: 5 });
+    recordSale(item.id, { quantity: 1, unitPrice: 5 });
+    flushCollection();
+    const files = readItemFiles();
+
+    setDb(openDatabase(":memory:"));
+    importItemFiles(files);
+    const [first, second] = listLots(item.id);
+    const bigger = listSalesForItem(item.id).find((s) => s.quantity === 2)!;
+    const smaller = listSalesForItem(item.id).find((s) => s.quantity === 1)!;
+    expect(listSaleLots(bigger.id).map((l) => l.acquisitionId)).toEqual([first!.id]);
+    expect(listSaleLots(smaller.id).map((l) => l.acquisitionId)).toEqual([second!.id]);
+    deleteSale(bigger.id);
+    deleteSale(smaller.id);
+    expect(listLots(item.id).map((l) => [l.quantity, l.remaining])).toEqual([
+      [2, 2],
+      [2, 2],
+    ]);
+    expect(getItem(item.id)!.quantity).toBe(4);
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
+  it("skips a sale row whose date is not a date", () => {
+    const text = [
+      "---",
+      "id: 1",
+      'market_hash_name: "Clutch Case"',
+      'category: "case"',
+      "quantity: 1",
+      "---",
+      "",
+      "# Clutch Case",
+      "",
+      "## Sales",
+      "",
+      "| Sold | Copies | Each | Fees | Cost each | Venue | Notes | Lots |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+      "| yesterday | 1 | $5.00 | $0.00 | $1.00 | Steam |  |  |",
+      "| 2026-02-01T00:00:00.000Z | 1 | $5.00 | $0.00 | $1.00 | Steam |  |  |",
+      "",
+    ].join("\n");
+    const parsed = parseItemMarkdown(text)!;
+    expect(parsed.sales).toHaveLength(1);
+    expect(parsed.warnings.some((w) => /unreadable sale row: yesterday/.test(w))).toBe(true);
   });
 });
 

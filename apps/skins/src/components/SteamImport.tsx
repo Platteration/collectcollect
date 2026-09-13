@@ -134,8 +134,7 @@ export function SteamImport() {
         <div className="card-surface space-y-2 p-4 text-sm">
           <p>
             <strong>{result.created}</strong> added, <strong>{result.updated}</strong> already known,{" "}
-            <strong>{result.increased}</strong> gone up, <strong>{result.decreased}</strong> gone down,{" "}
-            <strong>{result.unchanged}</strong> unchanged.
+            <strong>{result.increased}</strong> gone up, <strong>{result.unchanged}</strong> unchanged.
           </p>
           {result.unmatched > 0 && (
             <p style={{ color: "var(--muted)" }}>
@@ -152,6 +151,22 @@ export function SteamImport() {
               <ul className="mt-1 list-inside list-disc" style={{ color: "var(--muted)" }}>
                 {result.missing.slice(0, 10).map((item) => (
                   <li key={item.id}>{item.name}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {result.fewer.length > 0 && (
+            <div>
+              <p>
+                Steam shows fewer of {result.fewer.length === 1 ? "one stack" : `${result.fewer.length} stacks`} than
+                you hold here. Nothing was changed — the rest may be in a storage unit, which Steam does not show.
+                Edit the count on the item if they really are gone.
+              </p>
+              <ul className="mt-1 list-inside list-disc" style={{ color: "var(--muted)" }}>
+                {result.fewer.slice(0, 10).map((item) => (
+                  <li key={item.id}>
+                    {item.name}: {item.seen} of {item.held}
+                  </li>
                 ))}
               </ul>
             </div>

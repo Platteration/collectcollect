@@ -38,7 +38,10 @@ const COLUMNS: Record<string, string[]> = {
   purchasePrice: ["purchaseprice", "pricepaid", "cost", "paid", "buyprice", "boughtfor"],
   storageUnit: ["storageunit", "storage", "location", "keptin", "storedin", "account", "where", "unit"],
   tradableAfter: ["tradableafter", "tradelock", "tradelockuntil", "lockeduntil", "tradableon"],
-  assetId: ["assetid", "asset", "id"],
+  // Not "id": this app's own CSV export has an `id` column holding row numbers,
+  // and reading those as asset ids would pin every later import to the wrong
+  // objects.
+  assetId: ["assetid", "asset"],
   imageUrl: ["image", "imageurl", "icon", "iconurl"],
   notes: ["notes", "comment", "comments", "description"],
 };

@@ -9,12 +9,16 @@ export interface SteamImportResult {
   created: number;
   updated: number;
   increased: number;
-  decreased: number;
   unchanged: number;
   /** Assets Steam sent with no description, so nothing is known about them. */
   unmatched: number;
   /** Objects this app holds that the inventory did not mention. Nothing is removed. */
   missing: Array<{ id: number; name: string }>;
+  /**
+   * Stacks the inventory showed fewer of than are held here. Nothing is
+   * changed: the rest may be in a storage unit, which Steam does not show.
+   */
+  fewer: Array<{ id: number; name: string; held: number; seen: number }>;
   failed: Array<{ name: string; reason: string }>;
 }
 
@@ -27,7 +31,9 @@ export interface SteamImportResult {
  * This is a reading of a whole inventory, so what it says is the truth about
  * how many of a thing you hold rather than an amount to add. Running it twice
  * on an unchanged inventory therefore changes nothing — which matters, because
- * an import is exactly the thing people run more than once.
+ * an import is exactly the thing people run more than once. It only ever adds:
+ * a stack the inventory shows fewer of is reported, never shrunk, because the
+ * copies are as likely to be in a storage unit as gone.
  *
  * Nothing here invents a purchase price. Steam knows what you own, not what you
  * paid, and filling that in with the market price would turn every item into an
@@ -71,15 +77,20 @@ export async function POST(request: Request) {
     created: 0,
     updated: 0,
     increased: 0,
-    decreased: 0,
     unchanged: 0,
     unmatched,
     missing: [],
+    fewer: [],
     failed: [],
   };
   for (const item of items) {
     try {
-      result[syncFromInventory(item).result]++;
+      const outcome = syncFromInventory(item);
+      if (outcome.result === "fewer") {
+        result.fewer.push({ id: outcome.item.id, name: outcome.item.marketHashName, held: outcome.held, seen: outcome.seen });
+      } else {
+        result[outcome.result]++;
+      }
     } catch (e) {
       // One unreadable item must not cost the other four hundred.
       result.failed.push({ name: item.marketHashName, reason: errorMessage(e) });

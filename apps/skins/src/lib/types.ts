@@ -1,6 +1,14 @@
 // Shared domain types for the CS2 inventory.
 
 /**
+ * Ceilings on what a count or a price may be. Nobody holds a million of one
+ * case and nothing sells for a billion dollars; a number past these is a typo
+ * or a bad column mapping, and taking it would swamp every total on every page.
+ */
+export const MAX_QUANTITY = 1_000_000;
+export const MAX_MONEY = 1_000_000_000;
+
+/**
  * What kind of thing this is.
  *
  * The split that matters is not cosmetic: a weapon, knife or glove carries a

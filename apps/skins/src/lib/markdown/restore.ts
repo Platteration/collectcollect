@@ -1,4 +1,4 @@
-import { reconcileToQuantity } from "../acquisitions";
+import { reconcileToQuantity, recomputePurchasePrice } from "../acquisitions";
 import { getDb } from "../db";
 import {
   createItem,
@@ -102,7 +102,9 @@ export function importItemFiles(files: Array<{ name: string; text: string }>): C
       // file records how many copies each lot has left, so they go in exactly
       // as written rather than being replayed against the sales.
       db.prepare("DELETE FROM acquisitions WHERE item_id = ?").run(item.id);
-      const restoredLots: Array<{ id: number; day: string; unitCost: number | null }> = [];
+      // `sold` is how many copies each lot has given up, which is the most its
+      // sales may claim to have taken from it.
+      const restoredLots: Array<{ id: number; day: string; unitCost: number | null; sold: number }> = [];
       for (const lot of parsed.acquisitions) {
         const inserted = db
           .prepare(
@@ -110,12 +112,25 @@ export function importItemFiles(files: Array<{ name: string; text: string }>): C
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(item.id, lot.quantity, lot.remaining, lot.unitCost, lot.acquiredAt, lot.source, lot.notes, lot.acquiredAt);
-        restoredLots.push({ id: Number(inserted.lastInsertRowid), day: lot.acquiredAt.slice(0, 10), unitCost: lot.unitCost });
+        restoredLots.push({
+          id: Number(inserted.lastInsertRowid),
+          day: lot.acquiredAt.slice(0, 10),
+          unitCost: lot.unitCost,
+          sold: lot.quantity - lot.remaining,
+        });
         result.acquisitions++;
       }
 
       db.prepare("DELETE FROM sales WHERE item_id = ?").run(item.id);
-      for (const sale of parsed.sales) {
+      // Oldest first, the order the sales actually consumed the lots in, so
+      // that the capacity check below pins each one on the lot it really took
+      // from. The file lists them newest first; equal timestamps keep that
+      // order reversed too.
+      const salesOldestFirst = parsed.sales
+        .map((sale, index) => ({ sale, index }))
+        .sort((a, b) => a.sale.soldAt.localeCompare(b.sale.soldAt) || b.index - a.index)
+        .map((entry) => entry.sale);
+      for (const sale of salesOldestFirst) {
         const inserted = db
           .prepare(
             `INSERT INTO sales (item_id, quantity, unit_price, fees, unit_cost, sold_at, venue, notes, created_at)
@@ -128,7 +143,11 @@ export function importItemFiles(files: Array<{ name: string; text: string }>): C
         // provenance column simply has none, and undoing such a sale
         // reconstructs a lot instead of restoring one.
         for (const took of sale.lots) {
-          const lot = restoredLots.find((l) => l.day === took.acquiredOn && l.unitCost === took.unitCost);
+          // Only a lot that still has that many sold copies unaccounted for:
+          // two same-day, same-price lots must not both be pinned on the first,
+          // or undoing the sales would hand it back more than it ever had.
+          const lot = restoredLots.find((l) => l.day === took.acquiredOn && l.unitCost === took.unitCost && l.sold >= took.quantity);
+          if (lot) lot.sold -= took.quantity;
           db.prepare("INSERT INTO sale_lots (sale_id, acquisition_id, quantity, unit_cost) VALUES (?, ?, ?, ?)").run(
             saleId,
             lot?.id ?? null,
@@ -166,6 +185,9 @@ export function importItemFiles(files: Array<{ name: string; text: string }>): C
         });
         reconcileToQuantity(item.id, item.quantity);
       }
+      // The front matter's purchase price was written from the lots the file
+      // used to have; now that the lots are back, it follows them again.
+      recomputePurchasePrice(item.id);
     }
   });
 

@@ -2,6 +2,7 @@ import { consumeFifo, recordSaleLots, restoreForSale, syncQuantityFromLots } fro
 import { discardDeferredMirror, flushDeferredMirror, getCard, refreshMirror } from "./cards";
 import { getDb } from "./db";
 import type { Game, Sale, SaleWithCard } from "./types";
+import { MAX_MONEY } from "./types";
 
 interface SaleRow {
   id: number;
@@ -58,8 +59,10 @@ export function recordSale(cardId: number, input: SaleInput): Sale {
   }
   const unitPrice = Number(input.unitPrice);
   if (!Number.isFinite(unitPrice) || unitPrice < 0) throw new Error("Sale price must be a number");
+  if (unitPrice > MAX_MONEY) throw new Error("Sale price is larger than anything this app will record");
   const fees = input.fees === null || input.fees === undefined ? 0 : Number(input.fees);
   if (!Number.isFinite(fees) || fees < 0) throw new Error("Fees must be a number");
+  if (fees > MAX_MONEY) throw new Error("Fees are larger than anything this app will record");
   const soldAt = input.soldAt ? new Date(input.soldAt) : new Date();
   if (Number.isNaN(soldAt.getTime())) throw new Error("Sale date is not a valid date");
 

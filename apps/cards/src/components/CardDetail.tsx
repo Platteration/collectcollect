@@ -211,6 +211,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
 
   const undoSale = async (sale: Sale) => {
     if (!confirm(`Undo this sale? ${sale.quantity} cop${sale.quantity === 1 ? "y" : "ies"} will go back into your collection.`)) return;
+    setError(null);
     try {
       await api(`/api/sales/${sale.id}`, { method: "DELETE" });
       setSales((prev) => prev.filter((s) => s.id !== sale.id));
@@ -226,6 +227,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
   const remove = async () => {
     if (!confirm(`Delete ${card.name} from your collection?`)) return;
     setBusy("delete");
+    setError(null);
     try {
       await api(`/api/cards/${card.id}`, { method: "DELETE" });
       router.push("/");

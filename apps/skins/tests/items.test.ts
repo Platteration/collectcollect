@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb, openDatabase, setDb } from "@/lib/db";
 import {
+  HasSalesError,
   addAcquisition,
   createItem,
   deleteItem,
@@ -14,6 +15,7 @@ import {
   updateItem,
 } from "@/lib/items";
 import { listLots, verifyLotInvariant } from "@/lib/acquisitions";
+import { deleteSale, recordSale } from "@/lib/sales";
 import { clutchCase, redline, seedCase, seedRedline } from "./helpers";
 
 beforeEach(() => setDb(openDatabase(":memory:")));
@@ -271,5 +273,46 @@ describe("the asset id index", () => {
     seedRedline();
     expect(() => seedRedline({ floatValue: 0.3 })).not.toThrow();
     expect(listItems()).toHaveLength(2);
+  });
+});
+
+describe("what the ledger refuses", () => {
+  it("refuses a negative price and an absurd quantity", () => {
+    expect(() => normalizeInput({ marketHashName: "x", purchasePrice: -5 })).toThrow(/cannot be negative/);
+    expect(() => normalizeInput({ marketHashName: "x", manualPrice: -1 })).toThrow(/cannot be negative/);
+    expect(() => normalizeInput({ marketHashName: "x", purchasePrice: 1e12 })).toThrow(/larger than anything/);
+    expect(() => normalizeInput({ marketHashName: "x", category: "case", quantity: 5_000_000 })).toThrow(/larger than anything/);
+    const item = seedCase({ quantity: 1 });
+    // The same rule for a later purchase: a negative cost used to be filed
+    // silently as "unknown", which read as a gift.
+    expect(() => addAcquisition(item.id, { quantity: 1, unitCost: -2 })).toThrow(/cannot be negative/);
+    expect(getItem(item.id)!.quantity).toBe(1);
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
+  it("leaves quantity and lots agreeing when an update fails half way", () => {
+    const item = seedCase({ quantity: 2, purchasePrice: 3 });
+    // The row would be updated first and the lots second. Make the second step
+    // fail and check the first is undone with it.
+    getDb().exec(
+      "CREATE TRIGGER no_adjustments BEFORE INSERT ON acquisitions WHEN NEW.source = 'adjustment' BEGIN SELECT RAISE(ABORT, 'no adjustments today'); END",
+    );
+    expect(() => updateItem(item.id, { quantity: 10, notes: "changed" })).toThrow(/no adjustments/);
+    expect(getItem(item.id)).toMatchObject({ quantity: 2, notes: null });
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
+  it("will not delete an item that has sales, until they are undone", () => {
+    // The sales table cascades from the item, and a sale is money that changed
+    // hands. Deleting the item would erase it from the report and the tax year.
+    const item = seedCase({ quantity: 2, purchasePrice: 1 });
+    const sale = recordSale(item.id, { quantity: 1, unitPrice: 10 });
+    expect(() => deleteItem(item.id)).toThrow(HasSalesError);
+    expect(() => deleteItem(item.id)).toThrow(/1 recorded sale\. Undo it first/);
+    expect(getItem(item.id)).not.toBeNull();
+    expect(getDb().prepare("SELECT COUNT(*) AS n FROM sales").get()).toEqual({ n: 1 });
+    deleteSale(sale.id);
+    expect(deleteItem(item.id)).toBe(true);
+    expect(getItem(item.id)).toBeNull();
   });
 });

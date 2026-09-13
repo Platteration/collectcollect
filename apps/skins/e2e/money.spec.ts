@@ -101,6 +101,21 @@ test.describe("money", () => {
     await expect(purchases.getByRole("button", { name: "Undo" })).toHaveCount(0);
   });
 
+  test("an item that has been sold from cannot be removed, and says why", async ({ page }) => {
+    await add(page, "Dreams & Nightmares Case", { "How many": "2", "Paid, each": "1.00" });
+    await page.getByRole("button", { name: "Sold some" }).click();
+    await page.getByLabel("Sold for, each").fill("2.00");
+    await page.getByRole("button", { name: "Record the sale" }).click();
+    await expect(page.getByRole("cell", { name: "$2.00" }).first()).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await page.getByRole("button", { name: "Remove this item" }).click();
+    await page.getByRole("button", { name: "Yes, remove it" }).click();
+    // The sale is money that changed hands; the item stays with it.
+    await expect(page.getByText(/1 recorded sale\. Undo it first/)).toBeVisible();
+    await expect(page).toHaveURL(/\/items\/\d+$/);
+  });
+
   test("a unique object is sold once and keeps its history", async ({ page }) => {
     await add(page, "Glock-18 | Fade (Factory New)", { Float: "0.01", "Paid, each": "400" });
     // One object, so no count to choose.

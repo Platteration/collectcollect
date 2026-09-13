@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb, openDatabase, setDb } from "@/lib/db";
-import { addSnapshot, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
-import { recordSale } from "@/lib/sales";
+import { HasSalesError, addAcquisition, addSnapshot, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
+import { verifyLotInvariant } from "@/lib/acquisitions";
+import { deleteSale, recordSale } from "@/lib/sales";
 import { createAlert } from "@/lib/alerts";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { DEFAULT_SETTINGS, type PriceSummary } from "@/lib/types";
@@ -209,17 +210,55 @@ describe("what the repository refuses and what it matches", () => {
     expect(findSimilar({ game: "pokemon", name: "Charizard", setName: "Base Set 2" })).toHaveLength(0);
   });
 
-  it("takes a card's prices, sales and alerts with it when it goes", () => {
+  it("takes a card's prices and alerts with it when it goes", () => {
     const card = createCard({ game: "pokemon", name: "Doomed", quantity: 2 });
     addSnapshot(card.id, summary(5));
-    recordSale(card.id, { quantity: 1, unitPrice: 10 });
     createAlert({ kind: "price_move", cardId: card.id, title: "Moved", body: "up" });
     const db = getDb();
     expect(db.prepare("SELECT COUNT(*) AS n FROM price_snapshots").get()).toEqual({ n: 1 });
     deleteCard(card.id);
     expect(db.prepare("SELECT COUNT(*) AS n FROM price_snapshots").get()).toEqual({ n: 0 });
-    expect(db.prepare("SELECT COUNT(*) AS n FROM sales").get()).toEqual({ n: 0 });
     expect(db.prepare("SELECT COUNT(*) AS n FROM alerts").get()).toEqual({ n: 0 });
+  });
+
+  it("will not delete a card that has sales, until they are undone", () => {
+    // The sales table cascades from the card, and a sale is money that changed
+    // hands. Deleting the card would erase it from the report and the tax year.
+    const card = createCard({ game: "pokemon", name: "Sold once", quantity: 2 });
+    const sale = recordSale(card.id, { quantity: 1, unitPrice: 10 });
+    expect(() => deleteCard(card.id)).toThrow(HasSalesError);
+    expect(() => deleteCard(card.id)).toThrow(/1 recorded sale\. Undo it first/);
+    expect(getCard(card.id)).not.toBeNull();
+    expect(getDb().prepare("SELECT COUNT(*) AS n FROM sales").get()).toEqual({ n: 1 });
+    deleteSale(sale.id);
+    expect(deleteCard(card.id)).toBe(true);
+    expect(getCard(card.id)).toBeNull();
+  });
+
+  it("refuses a negative price and an absurd quantity", () => {
+    expect(() => createCard({ game: "pokemon", name: "x", purchasePrice: -5 })).toThrow(/cannot be negative/);
+    expect(() => createCard({ game: "pokemon", name: "x", manualUngraded: -1 })).toThrow(/cannot be negative/);
+    expect(() => createCard({ game: "pokemon", name: "x", manualGraded: { "PSA 10": -1 } })).toThrow(/cannot be negative/);
+    expect(() => createCard({ game: "pokemon", name: "x", purchasePrice: 1e12 })).toThrow(/larger than anything/);
+    expect(() => createCard({ game: "pokemon", name: "x", quantity: 5_000_000 })).toThrow(/larger than anything/);
+    const card = createCard({ game: "pokemon", name: "x", quantity: 1 });
+    // The same rule for a later purchase: a negative cost used to be filed
+    // silently as "unknown", which read as a gift.
+    expect(() => addAcquisition(card.id, { quantity: 1, unitCost: -2 })).toThrow(/cannot be negative/);
+    expect(getCard(card.id)!.quantity).toBe(1);
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
+  it("leaves quantity and lots agreeing when an update fails half way", () => {
+    const card = createCard({ game: "pokemon", name: "Half", quantity: 2, purchasePrice: 3 });
+    // The row would be updated first and the lots second. Make the second step
+    // fail and check the first is undone with it.
+    getDb().exec(
+      "CREATE TRIGGER no_adjustments BEFORE INSERT ON acquisitions WHEN NEW.source = 'adjustment' BEGIN SELECT RAISE(ABORT, 'no adjustments today'); END",
+    );
+    expect(() => updateCard(card.id, { quantity: 10, notes: "changed" })).toThrow(/no adjustments/);
+    expect(getCard(card.id)).toMatchObject({ quantity: 2, notes: null });
+    expect(verifyLotInvariant()).toEqual([]);
   });
 });
 

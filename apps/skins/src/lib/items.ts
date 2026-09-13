@@ -1,6 +1,6 @@
 import { getDb } from "./db";
 import type { AppliedSticker, Category, Exterior, ItemInput, ItemRecord, PriceSnapshot, PriceSummary, Rarity } from "./types";
-import { CATEGORIES, EXTERIORS, RARITIES, exteriorForFloat, isStackable } from "./types";
+import { CATEGORIES, EXTERIORS, MAX_MONEY, MAX_QUANTITY, RARITIES, exteriorForFloat, isStackable } from "./types";
 import {
   addLot,
   costBasisByItem,
@@ -128,6 +128,19 @@ const num = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+/**
+ * A price someone typed or a column supplied. Blank is "not known", which is a
+ * real answer; a negative or an absurd figure is a mistake, and refusing it
+ * here is what keeps it out of every total downstream.
+ */
+export const price = (v: unknown, what: string): number | null => {
+  const n = num(v);
+  if (n === null) return null;
+  if (n < 0) throw new Error(`${what} cannot be negative`);
+  if (n > MAX_MONEY) throw new Error(`${what} is larger than anything this app will record`);
+  return n;
+};
+
 /** A float is only meaningful inside 0..1; anything else is not a wear value. */
 const floatValue = (v: unknown): number | null => {
   const n = num(v);
@@ -190,7 +203,9 @@ export function normalizeInput(input: ItemInput): NormalizedItem {
 
   // A unique object is one object. Letting a quantity of 3 through would put
   // three copies of one float and one pattern in the ledger.
-  const quantity = stackable ? Math.max(0, Math.floor(num(input.quantity) ?? 1)) : Math.min(1, Math.max(0, Math.floor(num(input.quantity) ?? 1)));
+  const asked = Math.max(0, Math.floor(num(input.quantity) ?? 1));
+  if (asked > MAX_QUANTITY) throw new Error(`A quantity of ${asked} is larger than anything this app will record`);
+  const quantity = stackable ? asked : Math.min(1, asked);
 
   return {
     marketHashName,
@@ -208,7 +223,7 @@ export function normalizeInput(input: ItemInput): NormalizedItem {
     paintIndex: num(input.paintIndex) === null ? null : Math.floor(num(input.paintIndex)!),
     nameTag: str(input.nameTag),
     quantity,
-    purchasePrice: num(input.purchasePrice),
+    purchasePrice: price(input.purchasePrice, "The purchase price"),
     assetId: str(input.assetId),
     inspectLink: inspectUrl(input.inspectLink),
     tradableAfter: isoDate(input.tradableAfter),
@@ -218,7 +233,7 @@ export function normalizeInput(input: ItemInput): NormalizedItem {
     externalIds: Object.fromEntries(
       Object.entries(input.externalIds ?? {}).filter(([, v]) => str(v)),
     ) as Record<string, string>,
-    manualPrice: num(input.manualPrice),
+    manualPrice: price(input.manualPrice, "The manual price"),
     stickers: normalizeStickers(input.stickers),
   };
 }
@@ -317,48 +332,64 @@ export function createItem(input: ItemInput): ItemRecord {
 }
 
 export function updateItem(id: number, patch: Partial<ItemInput>): ItemRecord | null {
-  const existing = getItem(id);
-  if (!existing) return null;
-  const merged = normalizeInput({
-    ...existing,
-    ...patch,
-    marketHashName: patch.marketHashName ?? existing.marketHashName,
-  });
-  getDb()
-    .prepare(
-      `UPDATE items SET market_hash_name=@marketHashName, category=@category, stackable=@stackable, weapon=@weapon,
-        finish=@finish, exterior=@exterior, rarity=@rarity, collection=@collection, stattrak=@stattrak,
-        souvenir=@souvenir, float_value=@floatValue, paint_seed=@paintSeed, paint_index=@paintIndex,
-        name_tag=@nameTag, quantity=@quantity, purchase_price=@purchasePrice, asset_id=@assetId,
-        inspect_link=@inspectLink, tradable_after=@tradableAfter, storage_unit=@storageUnit, image_url=@imageUrl,
-        notes=@notes, external_ids=@externalIds, manual_price=@manualPrice, updated_at=@now
-       WHERE id=@id`,
-    )
-    .run({
-      ...merged,
-      id,
-      stackable: merged.stackable ? 1 : 0,
-      stattrak: merged.stattrak ? 1 : 0,
-      souvenir: merged.souvenir ? 1 : 0,
-      externalIds: JSON.stringify(merged.externalIds),
-      now: new Date().toISOString(),
+  // One transaction: the row, its stickers, its lots and the price derived from
+  // them change together or not at all. A failure between the row and the lots
+  // would leave a quantity the ledger does not account for.
+  const run = getDb().transaction((): ItemRecord | null => {
+    const existing = getItem(id);
+    if (!existing) return null;
+    const merged = normalizeInput({
+      ...existing,
+      ...patch,
+      marketHashName: patch.marketHashName ?? existing.marketHashName,
     });
-  if (patch.stickers !== undefined) writeStickers(id, merged.stickers);
-  if (merged.quantity !== existing.quantity) reconcileToQuantity(id, merged.quantity);
-  if (patch.purchasePrice !== undefined) {
-    // With one lot the purchase price is still something the owner sets
-    // directly. With several it is an average of them, so the edit is ignored
-    // and the recompute below puts the average back.
-    const lots = listLots(id);
-    const only = lots.length === 1 ? lots[0] : undefined;
-    if (only) {
-      getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, only.id);
+    getDb()
+      .prepare(
+        `UPDATE items SET market_hash_name=@marketHashName, category=@category, stackable=@stackable, weapon=@weapon,
+          finish=@finish, exterior=@exterior, rarity=@rarity, collection=@collection, stattrak=@stattrak,
+          souvenir=@souvenir, float_value=@floatValue, paint_seed=@paintSeed, paint_index=@paintIndex,
+          name_tag=@nameTag, quantity=@quantity, purchase_price=@purchasePrice, asset_id=@assetId,
+          inspect_link=@inspectLink, tradable_after=@tradableAfter, storage_unit=@storageUnit, image_url=@imageUrl,
+          notes=@notes, external_ids=@externalIds, manual_price=@manualPrice, updated_at=@now
+         WHERE id=@id`,
+      )
+      .run({
+        ...merged,
+        id,
+        stackable: merged.stackable ? 1 : 0,
+        stattrak: merged.stattrak ? 1 : 0,
+        souvenir: merged.souvenir ? 1 : 0,
+        externalIds: JSON.stringify(merged.externalIds),
+        now: new Date().toISOString(),
+      });
+    if (patch.stickers !== undefined) writeStickers(id, merged.stickers);
+    if (merged.quantity !== existing.quantity) reconcileToQuantity(id, merged.quantity);
+    if (patch.purchasePrice !== undefined) {
+      // With one lot the purchase price is still something the owner sets
+      // directly. With several it is an average of them, so the edit is ignored
+      // and the recompute below puts the average back.
+      const lots = listLots(id);
+      const only = lots.length === 1 ? lots[0] : undefined;
+      if (only) {
+        getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, only.id);
+      }
     }
-  }
-  recomputePurchasePrice(id);
-  const item = getItem(id);
+    recomputePurchasePrice(id);
+    return getItem(id);
+  });
+  const item = run();
   touch(item);
   return item;
+}
+
+/** Thrown when an item that has sales on record is asked to go. */
+export class HasSalesError extends Error {
+  constructor(public readonly sales: number) {
+    super(
+      `This item has ${sales} recorded sale${sales === 1 ? "" : "s"}. Undo ${sales === 1 ? "it" : "them"} first, or keep the item: one that has sold out stays with its history.`,
+    );
+    this.name = "HasSalesError";
+  }
 }
 
 /** Record another purchase of an item already held. */
@@ -532,7 +563,7 @@ export type SyncOutcome =
   | { result: "created"; item: ItemRecord }
   | { result: "updated"; item: ItemRecord }
   | { result: "increased"; item: ItemRecord; by: number }
-  | { result: "decreased"; item: ItemRecord; by: number }
+  | { result: "fewer"; item: ItemRecord; held: number; seen: number }
   | { result: "unchanged"; item: ItemRecord };
 
 /**
@@ -544,11 +575,14 @@ export type SyncOutcome =
  * second: reading the same inventory twice would double every stack, and a
  * whole-inventory import is exactly the thing people run more than once.
  *
- * So a stack is reconciled to what the source says. More than is held is a
- * purchase nobody recorded, and gets a lot with an unknown cost; fewer means
- * copies left by some route this app never saw, and the newest lots give them
- * up. A unique object needs none of this — its asset id already says whether
- * it is the same object — so it is simply updated.
+ * So a stack is reconciled upwards to what the source says: more than is held
+ * is a purchase nobody recorded, and gets a lot with an unknown cost. Fewer is
+ * only reported. The public endpoint does not see inside storage units, so
+ * "Steam shows fifteen" is at least as likely to mean five were put away as
+ * five were sold — and shrinking the stack would delete the lots that remember
+ * what those copies cost. The owner edits the count if they really are gone.
+ * A unique object needs none of this — its asset id already says whether it is
+ * the same object — so it is simply updated.
  */
 export function syncFromInventory(input: ItemInput): SyncOutcome {
   const clean = normalizeInput(input);
@@ -568,7 +602,7 @@ export function syncFromInventory(input: ItemInput): SyncOutcome {
       addLot(stack.id, { quantity: wanted - stack.quantity, unitCost: null, source: "steam" });
       return { result: "increased", item: updateItem(stack.id, { quantity: wanted })!, by: wanted - stack.quantity };
     }
-    return { result: "decreased", item: updateItem(stack.id, { quantity: wanted })!, by: stack.quantity - wanted };
+    return { result: "fewer", item: stack, held: stack.quantity, seen: wanted };
   });
   try {
     const outcome = run();
@@ -594,7 +628,21 @@ export function itemsMissingFrom(assetIds: Iterable<string>): ItemRecord[] {
   return listItems().filter((item) => item.assetId !== null && item.quantity > 0 && !seen.has(item.assetId));
 }
 
+/** How many sales are on record for an item. */
+export function countSales(itemId: number): number {
+  const row = getDb().prepare("SELECT COUNT(*) AS n FROM sales WHERE item_id = ?").get(itemId) as { n: number } | undefined;
+  return row?.n ?? 0;
+}
+
+/**
+ * Remove an item and everything recorded about it — except that an item with
+ * sales on record is refused. The sales table cascades from the item, so
+ * deleting it would erase money that changed hands, which the report and the
+ * tax year both still need. Throws `HasSalesError` in that case.
+ */
 export function deleteItem(id: number): boolean {
+  const sales = countSales(id);
+  if (sales > 0) throw new HasSalesError(sales);
   const gone = getDb().prepare("DELETE FROM items WHERE id = ?").run(id).changes > 0;
   if (gone) unmirrorItem(id);
   return gone;

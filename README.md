@@ -270,8 +270,10 @@ you have seen what would arrive:
 - **From Steam**, by SteamID64, for any inventory set to Public. An import is a
   statement of what you hold *now* rather than a pile of new purchases, so
   running it again on an unchanged inventory changes nothing; a stack that has
-  grown gains a purchase of unknown cost, one that has shrunk gives up its
-  newest lots, and an object Steam stopped listing is named rather than deleted.
+  grown gains a purchase of unknown cost, one Steam shows fewer of is named
+  rather than shrunk (the rest are as likely in a storage unit, which Steam does
+  not show, as gone), and an object Steam stopped listing is named rather than
+  deleted. Nothing an import does can lose what a copy cost.
   What a re-read does not mention, it does not forget: a public read carries no
   trade lock and a bare description carries no stickers, and neither wipes the
   lock, the stickers, the name tag, or the notes and price you filled in.

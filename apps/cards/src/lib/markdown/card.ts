@@ -462,7 +462,7 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
     const [soldAt, copies, each, fees, cost, venue, notes] = row;
     const unitPrice = readMoney(each ?? "");
     const quantitySold = num(copies);
-    if (!soldAt || unitPrice === null || quantitySold === null || quantitySold < 1) {
+    if (!soldAt || Number.isNaN(Date.parse(soldAt)) || unitPrice === null || quantitySold === null || quantitySold < 1) {
       warnings.push(`Skipped an unreadable sale row: ${row.join(" | ")}`);
       continue;
     }

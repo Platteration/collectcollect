@@ -16,12 +16,15 @@ test.describe("taking the collection out as a spreadsheet", () => {
     const { card } = (await created.json()) as { card: { id: number } };
 
     // Every test shares one collection, and a sale left behind would turn up
-    // in another test's realized-gain figures, so this card goes at the end.
+    // in another test's realized-gain figures, so the sale is undone and the
+    // card removed at the end.
+    let saleId: number | null = null;
     try {
       const sold = await page.request.post(`/api/cards/${card.id}/sales`, {
         data: { quantity: 1, unitPrice: 40, fees: 2, venue: "eBay" },
       });
       expect(sold.ok()).toBe(true);
+      saleId = ((await sold.json()) as { sale: { id: number } }).sale.id;
 
       const collection = await page.request.get("/api/export");
       expect(collection.ok()).toBe(true);
@@ -43,8 +46,10 @@ test.describe("taking the collection out as a spreadsheet", () => {
       expect(ledger).toContain(",38,");
       expect(ledger).toContain(",28,");
     } finally {
-      // Deleting the card takes its sale with it.
-      await page.request.delete(`/api/cards/${card.id}`);
+      // A card with a sale on record refuses to go, so the sale goes first.
+      if (saleId !== null) await page.request.delete(`/api/sales/${saleId}`);
+      const gone = await page.request.delete(`/api/cards/${card.id}`);
+      expect(gone.ok()).toBe(true);
     }
   });
 });

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteItem, getItem, latestSnapshot, updateItem } from "@/lib/items";
+import { HasSalesError, deleteItem, getItem, latestSnapshot, updateItem } from "@/lib/items";
 import { errorMessage, jsonError, parseId } from "@collectcollect/core/http";
 import type { ItemInput } from "@/lib/types";
 
@@ -32,6 +32,12 @@ export async function DELETE(_request: Request, ctx: RouteContext<"/api/items/[i
   const id = parseId((await ctx.params).id);
   const item = id ? getItem(id) : null;
   if (!item) return jsonError("Item not found", 404);
-  deleteItem(item.id);
+  try {
+    deleteItem(item.id);
+  } catch (e) {
+    // A sold item keeps its history; the answer is a reason, not a 500.
+    if (e instanceof HasSalesError) return jsonError(e.message, 409);
+    throw e;
+  }
   return NextResponse.json({ ok: true });
 }

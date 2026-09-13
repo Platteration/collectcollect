@@ -173,6 +173,16 @@ describe("applying a file", () => {
     expect(listItems().map((i) => i.floatValue).sort()).toEqual([0.1601, 0.3702]);
   });
 
+  it("does not read an export's own id column as an asset id", () => {
+    // This app's CSV export carries a row id. Read back as an asset id it would
+    // pin every later import of those rows to the wrong objects.
+    applyImport(previewImport(csv("id,name,qty,cost", "7,Clutch Case,2,0.5", "8,AK-47 | Redline (Field-Tested),1,12")));
+    expect(listItems().map((i) => i.assetId)).toEqual([null, null]);
+    // The spelled-out column still works.
+    applyImport(previewImport(csv("assetid,name", "123456789,★ Karambit | Doppler (Factory New)")));
+    expect(listItems().find((i) => i.category === "knife")?.assetId).toBe("123456789");
+  });
+
   it("reports the rows it skipped rather than failing the whole file", () => {
     const result = applyImport(previewImport(csv("name,cost", "Clutch Case,1", ",2", "Clutch Case,3")));
     expect(result.created).toBe(1);

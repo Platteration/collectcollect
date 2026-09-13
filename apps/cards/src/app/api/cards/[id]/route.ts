@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteCard, getCard, latestSnapshot, updateCard } from "@/lib/cards";
+import { HasSalesError, deleteCard, getCard, latestSnapshot, updateCard } from "@/lib/cards";
 import { deleteUpload } from "@/lib/images";
 import { errorMessage, jsonError, parseId } from "@/lib/http";
 import type { CardInput } from "@/lib/types";
@@ -33,7 +33,13 @@ export async function DELETE(_request: Request, ctx: RouteContext<"/api/cards/[i
   const id = parseId((await ctx.params).id);
   const card = id ? getCard(id) : null;
   if (!card) return jsonError("Card not found", 404);
-  deleteCard(card.id);
+  try {
+    deleteCard(card.id);
+  } catch (e) {
+    // A sold card keeps its history; the answer is a reason, not a 500.
+    if (e instanceof HasSalesError) return jsonError(e.message, 409);
+    throw e;
+  }
   if (card.imagePath) await deleteUpload(card.imagePath);
   return NextResponse.json({ ok: true });
 }

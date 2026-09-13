@@ -23,7 +23,7 @@ test("a sale removes the copy and books a realized gain", async ({ page }) => {
   await expect(page.getByText(/from 1 copy sold for \$180\.00/)).toBeVisible();
 });
 
-test("an undone sale puts the copy back", async ({ page }) => {
+test("a sold card cannot be deleted until the sale is undone, and undoing puts the copy back", async ({ page }) => {
   await addCardByHand(page, { name: "Returnable Ditto", set: "Fossil", quantity: "1" });
   await page.goto("/collection?q=Returnable");
   await page.getByRole("link", { name: /Returnable Ditto/ }).click();
@@ -32,6 +32,12 @@ test("an undone sale puts the copy back", async ({ page }) => {
   await page.getByLabel("Price each (USD)").fill("25");
   await page.getByRole("button", { name: "Record sale" }).click();
   await expect(page.getByText("Sold")).toBeVisible();
+
+  // The sale is money that changed hands; the card stays with it.
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Delete card" }).click();
+  await expect(page.getByText(/1 recorded sale\. Undo it first/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
 
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Undo" }).click();

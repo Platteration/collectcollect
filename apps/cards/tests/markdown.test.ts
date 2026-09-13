@@ -6,8 +6,8 @@ import { addAcquisition, addSnapshot, createCard, deleteCard, listCards, listSna
 import { deleteSale, recordSale } from "@/lib/sales";
 import { cardsDir, collectionDir, collectionStatus, flushCollection, readCardFiles, rebuildCollection } from "@/lib/markdown/mirror";
 import { importCardFiles } from "@/lib/markdown/restore";
-import { costBasis, listLots, verifyLotInvariant } from "@/lib/acquisitions";
-import { listSales } from "@/lib/sales";
+import { costBasis, listLots, listSaleLots, verifyLotInvariant } from "@/lib/acquisitions";
+import { listSales, listSalesForCard } from "@/lib/sales";
 import { realizedReturn } from "@/lib/analytics";
 import { latestSnapshotsByCard } from "@/lib/cards";
 import { parseCardMarkdown } from "@/lib/markdown/card";
@@ -613,6 +613,73 @@ describe("recovering a collection from its files", () => {
 });
 
 /** What the portfolio is worth, the way the app totals it. */
+describe("what a rebuild puts right", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("lets the restored purchases decide the purchase price, not the front matter", () => {
+    const card = createCard({ game: "pokemon", name: "Priced", quantity: 2, purchasePrice: 1 });
+    flushCollection();
+    // A hand edit to the summary line, which is derived from the lots below it.
+    const files = readCardFiles().map((f) => ({ ...f, text: f.text.replace(/^purchase_price: .*$/m, "purchase_price: 99") }));
+    setDb(openDatabase(":memory:"));
+    importCardFiles(files);
+    expect(listCards()[0]).toMatchObject({ id: card.id, purchasePrice: 1 });
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
+  it("matches a sale to a lot that still has copies to give back", () => {
+    // Two lots bought the same day at the same price. Matching by day and cost
+    // alone would pin both sales on the first lot, and undoing them would hand
+    // it back more copies than it ever had.
+    const card = createCard({ game: "pokemon", name: "Lotted", quantity: 2, purchasePrice: 1 });
+    addAcquisition(card.id, { quantity: 2, unitCost: 1 });
+    recordSale(card.id, { quantity: 2, unitPrice: 5 });
+    recordSale(card.id, { quantity: 1, unitPrice: 5 });
+    flushCollection();
+    const files = readCardFiles();
+
+    setDb(openDatabase(":memory:"));
+    importCardFiles(files);
+    const [first, second] = listLots(card.id);
+    const bigger = listSalesForCard(card.id).find((s) => s.quantity === 2)!;
+    const smaller = listSalesForCard(card.id).find((s) => s.quantity === 1)!;
+    expect(listSaleLots(bigger.id).map((l) => l.acquisitionId)).toEqual([first!.id]);
+    expect(listSaleLots(smaller.id).map((l) => l.acquisitionId)).toEqual([second!.id]);
+    deleteSale(bigger.id);
+    deleteSale(smaller.id);
+    expect(listLots(card.id).map((l) => [l.quantity, l.remaining])).toEqual([
+      [2, 2],
+      [2, 2],
+    ]);
+    expect(listCards()[0]?.quantity).toBe(4);
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
+  it("skips a sale row whose date is not a date", () => {
+    const text = [
+      "---",
+      "id: 1",
+      'game: "pokemon"',
+      'name: "Snorlax"',
+      "quantity: 1",
+      "---",
+      "",
+      "# Snorlax",
+      "",
+      "## Sales",
+      "",
+      "| Sold | Copies | Each | Fees | Cost each | Venue | Notes | Lots |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+      "| yesterday | 1 | $5.00 | $0.00 | $1.00 | eBay |  |  |",
+      "| 2026-02-01T00:00:00.000Z | 1 | $5.00 | $0.00 | $1.00 | eBay |  |  |",
+      "",
+    ].join("\n");
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.sales).toHaveLength(1);
+    expect(parsed.warnings.some((w) => /unreadable sale row: yesterday/.test(w))).toBe(true);
+  });
+});
+
 function totalValue(): number {
   const latest = latestSnapshotsByCard();
   return listCards().reduce((sum, card) => sum + (latest.get(card.id)?.summary.yourCopyValue ?? 0) * card.quantity, 0);

@@ -8,7 +8,7 @@ import type {
   PriceSnapshot,
   PriceSummary,
 } from "./types";
-import { CONDITIONS, GAMES, GRADING_STATUSES, type GradingStatus } from "./types";
+import { CONDITIONS, GAMES, GRADING_STATUSES, MAX_MONEY, MAX_QUANTITY, type GradingStatus } from "./types";
 import { addLot, costBasisByCard, deleteLot, getLot, listLots, reconcileToQuantity, recomputePurchasePrice, type AcquisitionInput } from "./acquisitions";
 import { isValidUploadName } from "./images";
 import { mirrorCard, unmirrorCard } from "./markdown/mirror";
@@ -117,6 +117,18 @@ const num = (v: unknown): number | null => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
+/**
+ * A price someone typed or a column supplied. Blank is "not known", which is a
+ * real answer; a negative or an absurd figure is a mistake, and refusing it
+ * here is what keeps it out of every total downstream.
+ */
+export const price = (v: unknown, what: string): number | null => {
+  const n = num(v);
+  if (n === null) return null;
+  if (n < 0) throw new Error(`${what} cannot be negative`);
+  if (n > MAX_MONEY) throw new Error(`${what} is larger than anything this app will record`);
+  return n;
+};
 
 /** Validate and normalize client input; throws on missing required fields. */
 export function normalizeInput(input: CardInput): Required<
@@ -131,11 +143,12 @@ export function normalizeInput(input: CardInput): Required<
   const condition = (str(input.condition) ?? "NM") as Condition;
   if (!Object.hasOwn(CONDITIONS, condition)) throw new Error(`Unknown condition: ${condition}`);
   const quantity = Math.max(0, Math.floor(num(input.quantity) ?? 1));
+  if (quantity > MAX_QUANTITY) throw new Error(`A quantity of ${quantity} is larger than anything this app will record`);
   const gradingStatus = (str(input.gradingStatus) ?? "undecided") as GradingStatus;
   if (!Object.hasOwn(GRADING_STATUSES, gradingStatus)) throw new Error(`Unknown grading status: ${gradingStatus}`);
   const gradedNums: Record<string, number> = {};
   for (const [k, v] of Object.entries(input.manualGraded ?? {})) {
-    const n = num(v);
+    const n = price(v, `The manual price for ${k.trim() || "a grade"}`);
     if (n !== null && k.trim()) gradedNums[k.trim()] = n;
   }
   return {
@@ -155,7 +168,7 @@ export function normalizeInput(input: CardInput): Required<
     gradingCompany: str(input.gradingCompany),
     grade: str(input.grade),
     certNumber: str(input.certNumber),
-    purchasePrice: num(input.purchasePrice),
+    purchasePrice: price(input.purchasePrice, "The purchase price"),
     notes: str(input.notes),
     imagePath: str(input.imagePath) && isValidUploadName(str(input.imagePath)!) ? str(input.imagePath) : null,
     referenceImageUrl: httpUrl(input.referenceImageUrl),
@@ -165,7 +178,7 @@ export function normalizeInput(input: CardInput): Required<
       Object.entries(input.externalIds ?? {}).filter(([, v]) => str(v)),
     ) as Record<string, string>,
     identification: input.identification ?? null,
-    manualUngraded: num(input.manualUngraded),
+    manualUngraded: price(input.manualUngraded, "The manual price"),
     manualGraded: gradedNums,
     gradingStatus,
   };
@@ -245,42 +258,58 @@ export function createCard(input: CardInput): CardRecord {
 }
 
 export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | null {
-  const existing = getCard(id);
-  if (!existing) return null;
-  const merged = normalizeInput({ ...existing, ...patch, game: patch.game ?? existing.game, name: patch.name ?? existing.name });
-  getDb()
-    .prepare(
-      `UPDATE cards SET game=@game, sport=@sport, name=@name, set_name=@setName, set_code=@setCode,
-        card_number=@cardNumber, year=@year, rarity=@rarity, variant=@variant, language=@language,
-        manufacturer=@manufacturer, quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
-        grade=@grade, cert_number=@certNumber, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
-        reference_image_url=@referenceImageUrl, accent_color=@accentColor, location=@location, external_ids=@externalIds, identification=@identification,
-        manual_ungraded=@manualUngraded, manual_graded=@manualGraded, grading_status=@gradingStatus, updated_at=@now
-       WHERE id=@id`,
-    )
-    .run({
-      ...merged,
-      id,
-      externalIds: JSON.stringify(merged.externalIds),
-      identification: merged.identification ? JSON.stringify(merged.identification) : null,
-      manualGraded: JSON.stringify(merged.manualGraded),
-      now: new Date().toISOString(),
-    });
-  if (merged.quantity !== existing.quantity) reconcileToQuantity(id, merged.quantity);
-  if (patch.purchasePrice !== undefined) {
-    // With one lot the purchase price is still something the owner sets
-    // directly. With several it is an average of them, so the edit is ignored
-    // and the recompute below puts the average back.
-    const lots = listLots(id);
-    const only = lots.length === 1 ? lots[0] : undefined;
-    if (only) {
-      getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, only.id);
+  // One transaction: the row, its lots and the price derived from them change
+  // together or not at all. A failure between the row and the lots would leave
+  // a quantity the ledger does not account for.
+  const run = getDb().transaction((): CardRecord | null => {
+    const existing = getCard(id);
+    if (!existing) return null;
+    const merged = normalizeInput({ ...existing, ...patch, game: patch.game ?? existing.game, name: patch.name ?? existing.name });
+    getDb()
+      .prepare(
+        `UPDATE cards SET game=@game, sport=@sport, name=@name, set_name=@setName, set_code=@setCode,
+          card_number=@cardNumber, year=@year, rarity=@rarity, variant=@variant, language=@language,
+          manufacturer=@manufacturer, quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
+          grade=@grade, cert_number=@certNumber, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
+          reference_image_url=@referenceImageUrl, accent_color=@accentColor, location=@location, external_ids=@externalIds, identification=@identification,
+          manual_ungraded=@manualUngraded, manual_graded=@manualGraded, grading_status=@gradingStatus, updated_at=@now
+         WHERE id=@id`,
+      )
+      .run({
+        ...merged,
+        id,
+        externalIds: JSON.stringify(merged.externalIds),
+        identification: merged.identification ? JSON.stringify(merged.identification) : null,
+        manualGraded: JSON.stringify(merged.manualGraded),
+        now: new Date().toISOString(),
+      });
+    if (merged.quantity !== existing.quantity) reconcileToQuantity(id, merged.quantity);
+    if (patch.purchasePrice !== undefined) {
+      // With one lot the purchase price is still something the owner sets
+      // directly. With several it is an average of them, so the edit is ignored
+      // and the recompute below puts the average back.
+      const lots = listLots(id);
+      const only = lots.length === 1 ? lots[0] : undefined;
+      if (only) {
+        getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, only.id);
+      }
     }
-  }
-  recomputePurchasePrice(id);
-  const card = getCard(id);
+    recomputePurchasePrice(id);
+    return getCard(id);
+  });
+  const card = run();
   touch(card);
   return card;
+}
+
+/** Thrown when a card that has sales on record is asked to go. */
+export class HasSalesError extends Error {
+  constructor(public readonly sales: number) {
+    super(
+      `This card has ${sales} recorded sale${sales === 1 ? "" : "s"}. Undo ${sales === 1 ? "it" : "them"} first, or keep the card: one that has sold out stays with its history.`,
+    );
+    this.name = "HasSalesError";
+  }
 }
 
 /** Record another purchase of a card already held. */
@@ -424,7 +453,21 @@ export function getCard(id: number): CardRecord | null {
   return row ? rowToCard(row) : null;
 }
 
+/** How many sales are on record for a card. */
+export function countSales(cardId: number): number {
+  const row = getDb().prepare("SELECT COUNT(*) AS n FROM sales WHERE card_id = ?").get(cardId) as { n: number } | undefined;
+  return row?.n ?? 0;
+}
+
+/**
+ * Remove a card and everything recorded about it — except that a card with
+ * sales on record is refused. The sales table cascades from the card, so
+ * deleting it would erase money that changed hands, which the report and the
+ * tax year both still need. Throws `HasSalesError` in that case.
+ */
 export function deleteCard(id: number): boolean {
+  const sales = countSales(id);
+  if (sales > 0) throw new HasSalesError(sales);
   const gone = getDb().prepare("DELETE FROM cards WHERE id = ?").run(id).changes > 0;
   if (gone) unmirrorCard(id);
   return gone;

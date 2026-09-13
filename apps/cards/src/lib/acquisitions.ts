@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { MAX_MONEY, MAX_QUANTITY } from "./types";
 
 /**
  * Where each copy of a card came from and what it cost.
@@ -88,15 +89,24 @@ export function getLot(id: number): Acquisition | null {
   return row ? rowToLot(row) : null;
 }
 
+/**
+ * What a copy cost, or null when nobody knows. A negative or absurd figure is
+ * refused rather than quietly filed as "unknown": the person typed a number,
+ * and turning it into a blank would make the purchase look like a gift.
+ */
 function money(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
-  return Number.isFinite(n) && n >= 0 ? n : null;
+  if (!Number.isFinite(n)) throw new Error("The cost must be a number");
+  if (n < 0) throw new Error("The cost cannot be negative");
+  if (n > MAX_MONEY) throw new Error("The cost is larger than anything this app will record");
+  return n;
 }
 
 /** Record a purchase. Returns the lot as stored. */
 export function addLot(cardId: number, input: AcquisitionInput = {}): Acquisition {
   const quantity = Math.max(1, Math.floor(Number(input.quantity ?? 1)) || 1);
+  if (quantity > MAX_QUANTITY) throw new Error(`A purchase of ${quantity} copies is larger than anything this app will record`);
   const when = input.acquiredAt ? new Date(input.acquiredAt) : new Date();
   if (Number.isNaN(when.getTime())) throw new Error("Acquisition date is not a valid date");
   const now = new Date().toISOString();
