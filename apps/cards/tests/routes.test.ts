@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { openDatabase, setDb } from "@/lib/db";
-import { createCard } from "@/lib/cards";
+import { createCard, getCard } from "@/lib/cards";
 import { createAlert } from "@/lib/alerts";
 import { recordSale } from "@/lib/sales";
 
@@ -321,5 +321,47 @@ describe("where cards are kept", () => {
       { location: "Binder 1", cards: 1 },
       { location: "Box A", cards: 2 },
     ]);
+  });
+});
+
+describe("a card's photo, after the card exists", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("is attached, replaced and removed, and the file that is no longer needed goes with it", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { uploadsDir } = await import("@/lib/db");
+    const { PATCH } = await import("@/app/api/cards/[id]/route");
+    const card = createCard({ game: "pokemon", name: "Pictured" });
+    const first = "11111111-2222-4333-8444-555555555555.jpg";
+    const second = "22222222-2222-4333-8444-555555555555.jpg";
+    for (const name of [first, second]) fs.writeFileSync(path.join(uploadsDir(), name), "jpeg bytes");
+    const patch = (body: unknown) => PATCH(json(`http://localhost/api/cards/${card.id}`, "PATCH", body), ctx({ id: String(card.id) }) as never);
+
+    // A name of the wrong shape, or one nothing was uploaded under, is said no to.
+    expect((await patch({ imagePath: "../etc/passwd" })).status).toBe(400);
+    const missing = await patch({ imagePath: "33333333-2222-4333-8444-555555555555.jpg" });
+    expect(missing.status).toBe(400);
+    expect(((await missing.json()) as { error: string }).error).toMatch(/not one this app stored/);
+
+    expect((await patch({ imagePath: first, accentColor: "#123456" })).status).toBe(200);
+    expect(getCard(card.id)).toMatchObject({ imagePath: first, accentColor: "#123456" });
+
+    // Replacing removes the old file; the new one is untouched.
+    expect((await patch({ imagePath: second })).status).toBe(200);
+    expect(fs.existsSync(path.join(uploadsDir(), first))).toBe(false);
+    expect(fs.existsSync(path.join(uploadsDir(), second))).toBe(true);
+
+    // Removing clears both columns and the file.
+    expect((await patch({ imagePath: null, accentColor: null })).status).toBe(200);
+    expect(getCard(card.id)).toMatchObject({ imagePath: null, accentColor: null });
+    expect(fs.existsSync(path.join(uploadsDir(), second))).toBe(false);
+
+    // An edit that does not mention the photo leaves it alone.
+    fs.writeFileSync(path.join(uploadsDir(), first), "jpeg bytes");
+    await patch({ imagePath: first });
+    await patch({ notes: "still pictured" });
+    expect(getCard(card.id)?.imagePath).toBe(first);
+    expect(fs.existsSync(path.join(uploadsDir(), first))).toBe(true);
   });
 });

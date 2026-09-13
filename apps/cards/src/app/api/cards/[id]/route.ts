@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { HasSalesError, deleteCard, getCard, latestSnapshot, updateCard } from "@/lib/cards";
-import { deleteUpload } from "@/lib/images";
+import fs from "node:fs";
+import { deleteUpload, isValidUploadName, uploadPath } from "@/lib/images";
 import { errorMessage, jsonError, parseId } from "@/lib/http";
 import type { CardInput } from "@/lib/types";
 
@@ -20,9 +21,22 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/cards/[id]
   } catch {
     return jsonError("Expected a JSON body");
   }
+  // A photo has to be one this app stored: a name of the wrong shape, or one
+  // nothing was uploaded under, is refused by name rather than quietly
+  // dropped, so a page that set it finds out.
+  if (typeof body.imagePath === "string" && body.imagePath) {
+    if (!isValidUploadName(body.imagePath) || !fs.existsSync(uploadPath(body.imagePath))) {
+      return jsonError("That photo is not one this app stored; upload it first");
+    }
+  }
+  const previous = getCard(id);
+  if (!previous) return jsonError("Card not found", 404);
   try {
     const card = updateCard(id, body);
     if (!card) return jsonError("Card not found", 404);
+    // A photo replaced or removed has no card left to belong to; the file goes
+    // once the row is written, never before.
+    if (previous.imagePath && previous.imagePath !== card.imagePath) await deleteUpload(previous.imagePath);
     return NextResponse.json({ card });
   } catch (e) {
     return jsonError(errorMessage(e));

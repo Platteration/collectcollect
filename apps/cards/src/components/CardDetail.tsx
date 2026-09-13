@@ -8,6 +8,7 @@ import { GAMES, GRADING_STATUSES, type CardRecord, type GradingStatus, type Pric
 import { gradingVerdict, isReadyToGrade, outlookSeries } from "@/lib/analytics";
 import { OutlookChart } from "./charts/OutlookChart";
 import { PortfolioChart } from "./charts/PortfolioChart";
+import { CardPhoto } from "./CardPhoto";
 import { Slab } from "./Slab";
 import { VERDICT_STYLE } from "./verdict";
 import { CardForm, formFromCard, formToInput } from "./CardForm";
@@ -305,6 +306,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             Reference image from price source
           </a>
         )}
+        <CardPhoto card={card} onUpdated={setCard} />
       </div>
 
       <div className="space-y-4">
