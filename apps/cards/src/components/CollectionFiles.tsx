@@ -12,7 +12,7 @@ interface Props {
 export function CollectionFiles({ enabled }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState<"rebuild" | "import" | null>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [rebuilt, setRebuilt] = useState<{ written: number; orphans: number } | null>(null);
   const [imported, setImported] = useState<CollectionImport | null>(null);
@@ -35,20 +35,25 @@ export function CollectionFiles({ enabled }: Props) {
   };
 
   const restore = async () => {
-    if (!file) return;
-    if (!confirm(`Read ${file.name} back into the collection? Cards whose files match one you already have are replaced by what the file says.`)) return;
+    if (files.length === 0) return;
+    const what = files.length === 1 ? files[0]!.name : `${files.length} files`;
+    if (!confirm(`Read ${what} back into the collection? Cards whose files match one you already have are replaced by what the files say.`)) return;
     setBusy("import");
     setError(null);
     setRebuilt(null);
     try {
       const body = new FormData();
-      if (file.name.toLowerCase().endsWith(".zip")) body.append("archive", file);
-      else body.append("files", file);
+      // Any number of card files, and at most one zip of a folder; the route
+      // takes both in one request.
+      for (const f of files) {
+        if (f.name.toLowerCase().endsWith(".zip")) body.append("archive", f);
+        else body.append("files", f);
+      }
       const res = await fetch("/api/collection/import", { method: "POST", body });
       const json = (await res.json()) as { result?: CollectionImport; error?: string };
       if (!res.ok) throw new Error(json.error ?? `Import failed (${res.status})`);
       setImported(json.result!);
-      setFile(null);
+      setFiles([]);
       router.refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -71,7 +76,7 @@ export function CollectionFiles({ enabled }: Props) {
       <div className="border-t border-black/10 pt-3 dark:border-white/10">
         <h3 className="text-sm font-medium">Rebuild from these files</h3>
         <p className="mt-1 text-sm text-neutral-500">
-          Point this at a folder of card files (as a zip) or a single <code>.md</code> file. Cards are matched on the id
+          Point this at a folder of card files (as a zip) or at one or more <code>.md</code> files. Cards are matched on the id
           inside each file, so doing it twice changes nothing the second time.
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -82,10 +87,11 @@ export function CollectionFiles({ enabled }: Props) {
               type="file"
               accept=".zip,.md,text/markdown,application/zip"
               className="text-sm"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              multiple
+              onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
             />
           </label>
-          <button type="button" className="btn-secondary" onClick={restore} disabled={!file || busy !== null}>
+          <button type="button" className="btn-secondary" onClick={restore} disabled={files.length === 0 || busy !== null}>
             {busy === "import" ? "Reading…" : "Read them back in"}
           </button>
         </div>

@@ -66,6 +66,28 @@ export function ThemeToggle({ themeColor }: { themeColor: { light: string; dark:
     setThemeColor(themeColor);
   }, [preference, themeColor]);
 
+  // Paper is white. The dark theme's colours are chosen for a dark ground and
+  // print as pale grey on white, so the light theme is applied for the length
+  // of the print and the chosen one put back afterwards. This covers the
+  // Print button and Ctrl+P alike, since both fire the same events.
+  useEffect(() => {
+    let before: string | null = null;
+    const onBefore = () => {
+      before = document.documentElement.getAttribute("data-theme");
+      document.documentElement.setAttribute("data-theme", "light");
+    };
+    const onAfter = () => {
+      if (before) document.documentElement.setAttribute("data-theme", before);
+      before = null;
+    };
+    addEventListener("beforeprint", onBefore);
+    addEventListener("afterprint", onAfter);
+    return () => {
+      removeEventListener("beforeprint", onBefore);
+      removeEventListener("afterprint", onAfter);
+    };
+  }, []);
+
   // While following the system, follow it as it changes.
   useEffect(() => {
     if (preference !== "system") return;

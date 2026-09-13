@@ -30,7 +30,9 @@ test("cards can be selected and acted on together", async ({ page }) => {
   // Removing the last match swaps the grid for the empty state, so the outcome
   // is what to assert on rather than the transient progress line.
   await expect(page.getByRole("link", { name: /Bulk One/ })).toHaveCount(0);
-  await expect(page.getByText("No cards yet")).toBeVisible();
+  // The search is still applied, so the page says nothing matches it — not
+  // that the collection is empty, which it is not.
+  await expect(page.getByText("Nothing matches")).toBeVisible();
 });
 
 test("a backup downloads as a readable archive", async ({ page }) => {

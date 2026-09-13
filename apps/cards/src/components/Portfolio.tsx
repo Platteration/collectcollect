@@ -78,6 +78,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
   const [hover, setHover] = useState<PortfolioPoint | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const visible = useMemo(() => thinPoints(sliceRange(points, range)), [points, range]);
   const latest = points[points.length - 1] ?? null;
@@ -92,6 +93,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
   const refreshAll = async () => {
     setRefreshing(true);
     setMessage(null);
+    setError(null);
     try {
       const r = await api<{ refreshed: number; unpriced: number; failed: Array<{ cardId: number; message: string }> }>("/api/prices/refresh", { method: "POST" });
       const parts = [`Refreshed ${r.refreshed} card${r.refreshed === 1 ? "" : "s"}`];
@@ -100,7 +102,8 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
       setMessage(parts.join(", ") + ".");
       router.refresh();
     } catch (e) {
-      setMessage((e as Error).message);
+      // A refusal is not a result, and must not wear the same grey as one.
+      setError((e as Error).message);
     } finally {
       setRefreshing(false);
     }
@@ -196,9 +199,15 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
             <button type="button" className="btn-secondary" onClick={refreshAll} disabled={refreshing || cardCount === 0}>
               {refreshing ? "Refreshing…" : "Refresh all prices"}
             </button>
-            <span className="text-xs" style={{ color: "var(--muted)" }}>
-              {message ?? (lastRefreshed ? `Last refresh ${when(lastRefreshed)}` : "Never refreshed")}
-            </span>
+            {error ? (
+              <span role="alert" className="text-xs font-medium" style={{ color: "var(--chart-bad-text)" }}>
+                {error}
+              </span>
+            ) : (
+              <span role="status" className="text-xs" style={{ color: "var(--muted)" }}>
+                {message ?? (lastRefreshed ? `Last refresh ${when(lastRefreshed)}` : "Never refreshed")}
+              </span>
+            )}
           </div>
         </div>
 

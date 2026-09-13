@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { imageSrc, money, when } from "@/lib/format";
@@ -24,6 +24,24 @@ interface Props {
   sales: Sale[];
 }
 
+/**
+ * Keyboard and screen-reader users lose their place when an inline form
+ * appears or goes: focus stays on a button that has just unmounted, which is
+ * nowhere. So an opened form takes focus on its first field, and a closed one
+ * hands it back to the button that opens it.
+ */
+function useFormFocus(open: boolean, opener: RefObject<HTMLButtonElement | null>): RefObject<HTMLDivElement | null> {
+  const container = useRef<HTMLDivElement>(null);
+  const previous = useRef(open);
+  useEffect(() => {
+    if (open === previous.current) return;
+    previous.current = open;
+    if (open) container.current?.querySelector<HTMLElement>("input, select, textarea")?.focus();
+    else opener.current?.focus();
+  }, [open, opener]);
+  return container;
+}
+
 export function CardDetail({ card: initial, latest: initialLatest, history: initialHistory, settings, sales: initialSales, acquisitions: initialAcquisitions }: Props) {
   const router = useRouter();
   const [card, setCard] = useState(initial);
@@ -45,6 +63,18 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
   const [saleForm, setSaleForm] = useState({ quantity: "1", unitPrice: "", fees: "", soldAt: new Date().toISOString().slice(0, 10), venue: "", notes: "" });
   const [busy, setBusy] = useState<"" | "price" | "save" | "delete" | "sell" | "buy">("");
   const [error, setError] = useState<string | null>(null);
+  // An error can arrive while the page is scrolled to a form far below the
+  // block it renders in; it is brought into view when it appears.
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ block: "nearest" });
+  }, [error]);
+  const editButton = useRef<HTMLButtonElement>(null);
+  const buyButton = useRef<HTMLButtonElement>(null);
+  const sellButton = useRef<HTMLButtonElement>(null);
+  const editBox = useFormFocus(editing, editButton);
+  const buyBox = useFormFocus(buying, buyButton);
+  const sellBox = useFormFocus(selling, sellButton);
 
   const refreshPrice = async () => {
     setBusy("price");
@@ -275,9 +305,6 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             Reference image from price source
           </a>
         )}
-        <button type="button" className="btn-danger w-full" onClick={remove} disabled={busy !== ""}>
-          {busy === "delete" ? "Deleting…" : "Delete card"}
-        </button>
       </div>
 
       <div className="space-y-4">
@@ -296,7 +323,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             </p>
           </div>
           {!editing ? (
-            <button type="button" className="btn-secondary" onClick={() => setEditing(true)}>
+            <button ref={editButton} type="button" className="btn-secondary" onClick={() => setEditing(true)}>
               Edit
             </button>
           ) : (
@@ -318,10 +345,14 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
           )}
         </div>
 
-        {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-200">{error}</div>}
+        {error && (
+          <div ref={errorRef} role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-200">
+            {error}
+          </div>
+        )}
 
         {editing ? (
-          <div className="card-surface space-y-4 p-4">
+          <div ref={editBox} className="card-surface space-y-4 p-4">
             <CardForm value={form} onChange={setForm} />
             <div className="border-t border-black/10 pt-3 dark:border-white/10">
               <div className="mb-2 text-sm font-medium">Manual price overrides (USD)</div>
@@ -336,6 +367,14 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
                 </label>
               </div>
               <p className="mt-1 text-xs text-neutral-500">Manual entries take priority over provider data the next time prices are refreshed.</p>
+            </div>
+            {/* Last, behind Edit, and never the first thing a thumb lands on: a
+                deleted card takes its photo, prices and purchases with it. */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-black/10 pt-3 dark:border-white/10">
+              <p className="text-xs text-neutral-500">Removing a card takes its photo, prices and purchases with it. A card that has been sold from cannot be removed.</p>
+              <button type="button" className="btn-danger" onClick={remove} disabled={busy !== ""}>
+                {busy === "delete" ? "Deleting…" : "Delete card"}
+              </button>
             </div>
           </div>
         ) : (
@@ -502,14 +541,14 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-semibold">What you paid</h3>
             {!buying && (
-              <button type="button" className="btn-secondary" onClick={() => setBuying(true)}>
+              <button ref={buyButton} type="button" className="btn-secondary" onClick={() => setBuying(true)}>
                 Add copies
               </button>
             )}
           </div>
 
           {buying && (
-            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div ref={buyBox} className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
               <label className="block">
                 <span className="label">Copies</span>
                 <input className="input" value={buyForm.quantity} onChange={(e) => setBuyForm({ ...buyForm, quantity: e.target.value })} inputMode="numeric" />
@@ -580,14 +619,14 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-semibold">Sales</h3>
             {card.quantity > 0 && !selling && (
-              <button type="button" className="btn-secondary" onClick={() => setSelling(true)}>
+              <button ref={sellButton} type="button" className="btn-secondary" onClick={() => setSelling(true)}>
                 Log a sale
               </button>
             )}
           </div>
 
           {selling && (
-            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div ref={sellBox} className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
               <label className="block">
                 <span className="label">Copies</span>
                 <input className="input" value={saleForm.quantity} onChange={(e) => setSaleForm({ ...saleForm, quantity: e.target.value })} inputMode="numeric" />

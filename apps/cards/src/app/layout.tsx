@@ -96,7 +96,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               <ThemeToggle />
               {authEnabled() && <SignOut />}
               <Link href="/add" className="btn-primary whitespace-nowrap">
-                + Add<span className="hidden sm:inline">cards</span>
+                + Add<span className="hidden sm:inline"> cards</span>
               </Link>
             </div>
           </nav>

@@ -1,3 +1,3 @@
 "use client";
 
-export { api } from "@collectcollect/core/api-client";
+export { ApiError, api, runQueue, withRetryAfter } from "@collectcollect/core/api-client";

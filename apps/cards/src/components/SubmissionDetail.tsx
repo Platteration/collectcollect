@@ -183,9 +183,17 @@ export function SubmissionDetail({ submission: initial, candidates }: { submissi
       {editable && (
         <section className="card-surface p-4">
           <h2 className="font-semibold">Add raw cards</h2>
-          <input className="input mt-2 max-w-sm" placeholder="Search your raw cards…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input
+            className="input mt-2 max-w-sm"
+            aria-label="Search your raw cards"
+            placeholder="Search your raw cards…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
           {filtered.length === 0 ? (
-            <p className="mt-2 text-sm text-neutral-500">No raw cards left to add.</p>
+            <p className="mt-2 text-sm text-neutral-500">
+              {search.trim() ? `No raw cards match “${search.trim()}”.` : "No raw cards left to add."}
+            </p>
           ) : (
             <ul className="mt-3 max-h-96 divide-y divide-black/5 overflow-y-auto dark:divide-white/5">
               {filtered.map((c) => (

@@ -38,6 +38,19 @@ test.describe("what every response carries", () => {
 });
 
 test.describe("a page that is not there", () => {
+  test("printing happens in the light theme whatever is chosen on screen", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Dark" }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    // The browser fires these around its print dialog; the page listens for
+    // them rather than for the media query, so Ctrl+P is covered too.
+    await page.evaluate(() => window.dispatchEvent(new Event("beforeprint")));
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await page.getByRole("button", { name: "System" }).click();
+  });
+
   test("is a 404 with the app still around it", async ({ page }) => {
     const response = await page.goto("/no-such-page");
     expect(response?.status()).toBe(404);

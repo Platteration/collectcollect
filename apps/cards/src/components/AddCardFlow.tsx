@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api-client";
+import { ApiError, api, runQueue, withRetryAfter } from "@/lib/api-client";
 import type { CardRecord, Identification, PriceSummary } from "@/lib/types";
 import { CardForm, emptyForm, formToInput, type CardFormState } from "./CardForm";
 import { PricePanel } from "./PricePanel";
@@ -74,13 +74,26 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
     async (key: string, uploads: string[], hint: string) => {
       patch(key, { status: "identifying", error: null });
       try {
-        const { identification } = await api<{ identification: Identification }>("/api/identify", {
-          method: "POST",
-          body: JSON.stringify({ uploads, hint: hint || undefined }),
-        });
-        patch(key, { status: "review", identification, form: formFromIdentification(identification), price: null });
+        // The identifier is limited per minute; a stack of photos can reach
+        // that on its own. It says how long to wait, so wait and go again
+        // rather than giving up on the photo.
+        const { identification } = await withRetryAfter(
+          () =>
+            api<{ identification: Identification }>("/api/identify", {
+              method: "POST",
+              body: JSON.stringify({ uploads, hint: hint || undefined }),
+            }),
+          { onWait: (seconds) => patch(key, { error: `The identifier is busy; waiting ${seconds}s before trying again…` }) },
+        );
+        patch(key, { status: "review", identification, form: formFromIdentification(identification), price: null, error: null });
       } catch (e) {
-        patch(key, { status: "review", error: `Identification failed: ${(e as Error).message}. Fill in the details by hand.` });
+        const busy = e instanceof ApiError && e.status === 429;
+        patch(key, {
+          status: "review",
+          error: busy
+            ? `The identifier is still busy. Wait ${e.retryAfter ?? "a few"} seconds and press Re-identify, or fill in the details by hand.`
+            : `Identification failed: ${(e as Error).message}. Fill in the details by hand.`,
+        });
       }
     },
     [patch],
@@ -111,12 +124,16 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
         },
       }));
       setItems((prev) => [...fresh.map((f) => f.item), ...prev]);
-      await Promise.all(
-        fresh.map(async ({ item, file }) => {
+      // Two at a time, not all at once: a folder of thirty photos dropped in
+      // together would otherwise hit the upload and identify limits on its own.
+      await runQueue(
+        fresh.map(({ item, file }) => async () => {
           const fd = new FormData();
           fd.append("files", file);
           try {
-            const { uploads } = await api<{ uploads: Array<{ name: string; color: string | null }> }>("/api/uploads", { method: "POST", body: fd });
+            const { uploads } = await withRetryAfter(() =>
+              api<{ uploads: Array<{ name: string; color: string | null }> }>("/api/uploads", { method: "POST", body: fd }),
+            );
             const names = uploads.map((u) => u.name);
             patch(item.key, { uploads: names, previews: names.map((n) => `/api/uploads/${n}`), accentColor: uploads[0]?.color ?? null });
             if (claudeConfigured) await identify(item.key, names, "");
@@ -264,7 +281,6 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
           type="file"
           accept="image/*"
           multiple
-          capture="environment"
           className="hidden"
           onChange={(e) => {
             void addFiles(Array.from(e.target.files ?? []));

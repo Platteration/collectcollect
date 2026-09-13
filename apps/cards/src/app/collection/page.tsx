@@ -90,7 +90,17 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
         </Link>
       </form>
 
-      {cards.length === 0 ? (
+      {cards.length === 0 && (q || gameParam || locationParam !== undefined) ? (
+        // A filter that matched nothing is not an empty collection, and must
+        // not read as one: the way out is to clear it, not to add a card.
+        <div className="card-surface flex flex-col items-center gap-3 p-12 text-center">
+          <p className="text-lg font-medium">Nothing matches</p>
+          <p className="max-w-md text-sm text-neutral-500">No card matches that search or those filters.</p>
+          <Link href="/collection" className="btn-secondary">
+            Clear the filters
+          </Link>
+        </div>
+      ) : cards.length === 0 ? (
         <div className="card-surface flex flex-col items-center gap-3 p-12 text-center">
           <p className="text-lg font-medium">No cards yet</p>
           <p className="max-w-md text-sm text-neutral-500">

@@ -32,13 +32,16 @@ export function CollectionGrid({
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const toggle = (id: number) =>
+  const toggle = (id: number) => {
+    // A new selection is a new job; the last job's tally would be read as this one's.
+    setProgress(null);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+  };
 
   const ids = [...selected];
 
@@ -80,7 +83,10 @@ export function CollectionGrid({
             ref={(el) => {
               if (el) el.indeterminate = selected.size > 0 && selected.size < cards.length;
             }}
-            onChange={(e) => setSelected(e.target.checked ? new Set(cards.map((c) => c.card.id)) : new Set())}
+            onChange={(e) => {
+              setProgress(null);
+              setSelected(e.target.checked ? new Set(cards.map((c) => c.card.id)) : new Set());
+            }}
           />
           {selected.size > 0 ? `${selected.size} selected` : "Select all"}
         </label>
@@ -156,7 +162,9 @@ export function CollectionGrid({
           </>
         )}
 
-        {progress && <span className="text-sm text-neutral-500">{progress}</span>}
+        <span role="status" aria-live="polite" className="text-sm text-neutral-500">
+          {progress}
+        </span>
       </div>
 
       {locations.length > 0 && (
@@ -173,11 +181,11 @@ export function CollectionGrid({
         {cards.map(({ card, price }) => (
           <div key={card.id} className="relative">
             <label
-              className="absolute left-2 top-2 z-10 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md shadow-sm"
+              className="absolute left-1 top-1 z-10 flex h-11 w-11 cursor-pointer items-center justify-center rounded-md"
               style={{ background: "color-mix(in srgb, var(--background) 85%, transparent)" }}
             >
               <span className="sr-only">Select {card.name}</span>
-              <input type="checkbox" className="h-4 w-4" checked={selected.has(card.id)} onChange={() => toggle(card.id)} />
+              <input type="checkbox" className="h-5 w-5" checked={selected.has(card.id)} onChange={() => toggle(card.id)} />
             </label>
             <CardTile card={card} price={price} selected={selected.has(card.id)} />
           </div>

@@ -34,9 +34,11 @@ test("a sold card cannot be deleted until the sale is undone, and undoing puts t
   await expect(page.getByText("Sold")).toBeVisible();
 
   // The sale is money that changed hands; the card stays with it.
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Delete card" }).click();
-  await expect(page.getByText(/1 recorded sale\. Undo it first/)).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: /1 recorded sale\. Undo it first/ })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
 
   page.once("dialog", (d) => d.accept());

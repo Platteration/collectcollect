@@ -16,6 +16,16 @@ test.describe("adding and viewing cards", () => {
     await expect(page.getByText("$12.00", { exact: true })).toBeVisible();
   });
 
+  test("a search that matches nothing says so, rather than that there are no cards", async ({ page }) => {
+    await addCardByHand(page, { name: "Findable Fearow", set: "Jungle" });
+    await page.goto("/collection?q=nothinglikethisatall");
+    await expect(page.getByText("Nothing matches")).toBeVisible();
+    await expect(page.getByText("No cards yet")).toHaveCount(0);
+    await page.getByRole("link", { name: "Clear the filters" }).click();
+    await expect(page).toHaveURL(/\/collection$/);
+    await expect(page.getByRole("link", { name: /Findable Fearow/ })).toBeVisible();
+  });
+
   test("a card matching one already owned offers to become another copy", async ({ page }) => {
     await addCardByHand(page, { name: "Alakazam", set: "Base Set", number: "1/102" });
 

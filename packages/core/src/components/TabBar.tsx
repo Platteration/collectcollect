@@ -23,7 +23,7 @@ export function TabBar({ items }: { items: TabItem[] }) {
   const pathname = usePathname();
   return (
     <nav
-      className="tabbar fixed inset-x-0 bottom-0 z-30 border-t backdrop-blur md:hidden"
+      className="tabbar print:hidden fixed inset-x-0 bottom-0 z-30 border-t backdrop-blur md:hidden"
       style={{ borderColor: "var(--line)", background: "color-mix(in srgb, var(--background) 92%, transparent)" }}
       aria-label="Sections"
     >

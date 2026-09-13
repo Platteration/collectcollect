@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api-client";
+import { api, withRetryAfter } from "@/lib/api-client";
 import type { Game, Identification } from "@/lib/types";
 import type { IntakeOutcome } from "@/lib/cards";
 import { GAMES } from "@/lib/types";
 
-type ScanStatus = "queued" | "uploading" | "identifying" | "saving" | "added" | "merged" | "review" | "failed";
+type ScanStatus = "queued" | "uploading" | "identifying" | "waiting" | "saving" | "added" | "merged" | "review" | "failed";
 
 interface ScanItem {
   key: string;
@@ -33,6 +33,7 @@ const STATUS_LABEL: Record<ScanStatus, string> = {
   queued: "Waiting",
   uploading: "Uploading",
   identifying: "Reading",
+  waiting: "Waiting",
   saving: "Saving",
   added: "Added",
   merged: "Extra copy",
@@ -44,6 +45,7 @@ const STATUS_STYLE: Record<ScanStatus, string> = {
   queued: "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-100",
   uploading: "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-100",
   identifying: "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100",
+  waiting: "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100",
   saving: "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100",
   added: "bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-100",
   merged: "bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-100",
@@ -99,12 +101,21 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
           return;
         }
 
-        patch(item.key, { status: "identifying" });
-        const { identification } = await api<{ identification: Identification }>("/api/identify", {
-          method: "POST",
-          body: JSON.stringify({ uploads: [upload.name] }),
-        });
-        patch(item.key, { identification });
+        patch(item.key, { status: "identifying", message: null });
+        // Two workers on a stack can reach the identifier's per-minute limit
+        // by themselves. It says how long to wait; the tile says so, waits,
+        // and goes again rather than failing the photo.
+        const { identification } = await withRetryAfter(
+          () =>
+            api<{ identification: Identification }>("/api/identify", {
+              method: "POST",
+              body: JSON.stringify({ uploads: [upload.name] }),
+            }),
+          {
+            onWait: (seconds) => patch(item.key, { status: "waiting", message: `Waiting ${seconds}s for the identifier…` }),
+          },
+        );
+        patch(item.key, { status: "identifying", identification, message: null });
 
         if (identification.confidence < AUTO_SAVE_CONFIDENCE) {
           patch(item.key, {
@@ -195,6 +206,16 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
     })();
   }, [tick, processOne, router]);
 
+  /** Put a failed photo back on the queue; its file is still held, so nothing is asked for again. */
+  const retry = useCallback(
+    (item: ScanItem) => {
+      patch(item.key, { status: "queued", message: null });
+      queueRef.current.push({ ...item, status: "queued", message: null });
+      setTick((t) => t + 1);
+    },
+    [patch],
+  );
+
   const enqueue = useCallback(
     (files: File[]) => {
       const fresh = files
@@ -265,7 +286,7 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
     (acc, it) => ({ ...acc, [it.status]: (acc[it.status] ?? 0) + 1 }),
     {} as Record<ScanStatus, number>,
   );
-  const working = (counts.queued ?? 0) + (counts.uploading ?? 0) + (counts.identifying ?? 0) + (counts.saving ?? 0);
+  const working = (counts.queued ?? 0) + (counts.uploading ?? 0) + (counts.identifying ?? 0) + (counts.waiting ?? 0) + (counts.saving ?? 0);
   const needsReview = items.filter((i) => i.status === "review" || i.status === "failed");
 
   return (
@@ -367,6 +388,11 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
                     <div className="text-neutral-500">{STATUS_LABEL[it.status]}…</div>
                   )}
                   {it.message && <div className="mt-1 text-neutral-500">{it.message}</div>}
+                  {it.status === "failed" && (
+                    <button type="button" className="mt-1 underline decoration-dotted" onClick={() => retry(it)}>
+                      Retry
+                    </button>
+                  )}
                   {it.cardId && (
                     <Link href={`/cards/${it.cardId}`} className="mt-1 inline-block underline decoration-dotted">
                       Open card
