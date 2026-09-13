@@ -145,9 +145,24 @@ across all of them.
 ```
 apps/cards/              this app
 apps/skins/              the same idea for CS2 items — see its own section below
-packages/core/           code with no opinion about what is being collected:
-                         the Markdown codec, the zip writer, the CSV reader,
-                         chart geometry and the components both apps draw with
+packages/core/           code with no opinion about what is being collected
+```
+
+Inside `packages/core/src`:
+
+```
+markdown/                The Markdown codec: front matter, tables, money, slugs
+zip.ts, csv.ts           Dependency-free streaming zip writer and reader; RFC 4180 CSV reader
+auth.ts, auth-route.ts   The optional password gate and its sign-in routes
+proxy.ts                 The per-request gate: session check, CSP nonce, security headers
+net.ts, http.ts          What may be a webhook, whether a request came over TLS; route helpers
+webhook.ts               Resolves a webhook's host before posting to it
+throttle.ts, limiter.ts  Per-route request ceilings; per-source pacing for the price APIs
+gate.ts                  One-at-a-time for a refresh, a backup or a restore
+collection-swap.ts       Moving a database aside and another into place without a gap
+atomic-write.ts          Write-then-rename with fsync, for every file the mirror writes
+lookup.ts, series.ts     Prototype-safe table lookup; extent and thinning for long series
+charts/, components/     Chart geometry and the components both apps draw with
 ```
 
 Inside `apps/cards`:
@@ -187,10 +202,10 @@ src/components/charts/   Inline-SVG portfolio line and min/max outlook band char
 src/lib/acquisitions.ts  Purchase lots: what each copy cost, consumed oldest first on a sale
 src/lib/markdown/        The plain-text copy: format, one card as a document, the
                          on-disk mirror, and reading a collection back out of it
-src/lib/zip.ts           Dependency-free streaming zip writer used by the backup
-src/lib/csv.ts           RFC 4180 reader; src/lib/import.ts maps columns to cards
+src/lib/import.ts        Maps a spreadsheet's columns to cards, previews, then applies in one transaction
+src/lib/backup.ts        The zip of everything, and the restore that swaps it in
 src/lib/sets/            Set checklist providers, caching and completion matching
-src/lib/auth.ts          Optional password gate (Web Crypto, shared by proxy and routes)
+src/lib/auth.ts          This app's cookie name and variables for the shared password gate
 src/proxy.ts             Guards every route when APP_PASSWORD is set
 e2e/                     Playwright suite driving a real build
 src/lib/cards.ts, db.ts  SQLite (better-sqlite3) repository and schema
@@ -205,7 +220,7 @@ npm run dev         # the card app's development server (npm run skins for the o
 npm run build       # production build of every workspace
 npm start           # the card app from its build; npm run start:skins for the other
 npm test            # unit tests (vitest)
-npm run e2e         # end-to-end tests (playwright, boots its own servers, cleans up after)
+npm run e2e         # end-to-end tests (playwright; needs `npm run build` first, boots its own servers, cleans up after)
 npm run typecheck   # tsc in every workspace, after generating Next route types
 npm run lint        # eslint in every workspace, the shared package included
 ```
@@ -216,7 +231,9 @@ reach the app-only scripts, such as `npm run e2e:ui -w @collectcollect/cards`
 for the Playwright suite in UI mode, or `npm run icons -w @collectcollect/skins`
 to re-render that app's icons from its SVG.
 
-Node 22 or later; `.nvmrc` says so for version managers. CI runs the checks,
+Node 22 or later; `.nvmrc` says so for version managers, and `.npmrc` makes
+`npm install` refuse an older one. `CONTRIBUTING.md` has the checks a change is
+expected to pass. CI runs the checks,
 both end-to-end suites, both Docker images (booting each and asking it how it
 is) and an advisory dependency audit, as separate jobs.
 

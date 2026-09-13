@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -43,8 +43,11 @@ async function zipOf(entries: Array<[string, Uint8Array]>): Promise<Uint8Array> 
 
 afterEach(() => setDb(undefined));
 
+/** Whether unzip is installed; without it the archive is still checked by this app's own reader elsewhere. */
+const HAS_UNZIP = spawnSync("unzip", ["-v"], { stdio: "ignore" }).status === 0;
+
 describe("the archive", () => {
-  it("holds a working database copy and the plain-text inventory", async () => {
+  it.skipIf(!HAS_UNZIP)("holds a working database copy and the plain-text inventory", async () => {
     const dir = inventory();
     flushCollection();
     const { filename, stream } = await buildBackup();

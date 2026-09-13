@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { assertZippable, crc32, zipStream } from "@collectcollect/core/zip";
+
+/** Whether a command-line tool the test leans on is installed; a missing one skips the test rather than failing it. */
+function hasTool(name: string): boolean {
+  return spawnSync(name, ["--version"], { stdio: "ignore" }).status === 0 || spawnSync(name, ["-v"], { stdio: "ignore" }).status === 0;
+}
+const HAS_UNZIP = hasTool("unzip");
+const HAS_ZIP = hasTool("zip");
+const HAS_PYTHON = hasTool("python3");
 
 function at<T>(xs: readonly T[], i: number): T {
   const x = xs[i];
@@ -35,7 +43,7 @@ describe("zip writer", () => {
     expect(crc32(new Uint8Array())).toBe(0);
   });
 
-  it("produces an archive that real tools accept and read back byte for byte", async () => {
+  it.skipIf(!HAS_UNZIP || !HAS_PYTHON)("produces an archive that real tools accept and read back byte for byte", async () => {
     const text = new TextEncoder().encode("hello, collection\n".repeat(50));
     const binary = new Uint8Array(5000).map((_, i) => (i * 31) % 256);
     const zip = await build([
@@ -67,7 +75,7 @@ describe("zip writer", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it("writes a readable archive with no entries", async () => {
+  it.skipIf(!HAS_PYTHON)("writes a readable archive with no entries", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zip-empty-"));
     const file = path.join(dir, "empty.zip");
     fs.writeFileSync(file, await build([]));
@@ -84,7 +92,7 @@ describe("zip writer", () => {
     ).toThrow(/exceed 4 GB/);
   });
 
-  it("writes an entry that grew while being read at its real size, and the archive still verifies", async () => {
+  it.skipIf(!HAS_UNZIP)("writes an entry that grew while being read at its real size, and the archive still verifies", async () => {
     // The mirror rewrites Markdown files while a backup is being taken, so
     // the size an entry was listed at is only an estimate. What was read is
     // what every header must say.
@@ -104,7 +112,7 @@ describe("zip writer", () => {
 });
 
 describe("backup archive", () => {
-  it("contains a working database copy and every photo", async () => {
+  it.skipIf(!HAS_UNZIP)("contains a working database copy and every photo", async () => {
     const { execFileSync } = await import("node:child_process");
     const fsm = await import("node:fs");
     const osm = await import("node:os");
@@ -142,7 +150,7 @@ describe("backup archive", () => {
 });
 
 describe("zip reader", () => {
-  it("reads archives written by the system zip tool, stored and deflated", async () => {
+  it.skipIf(!HAS_ZIP)("reads archives written by the system zip tool, stored and deflated", async () => {
     const { execFileSync } = await import("node:child_process");
     const fsm = await import("node:fs");
     const osm = await import("node:os");
@@ -190,7 +198,7 @@ describe("zip reader", () => {
     await expect(readZip(new Uint8Array(good), { maxTotalBytes: 1e6, maxEntries: 0 })).rejects.toThrow(/more than the 0 allowed/);
   });
 
-  it("refuses to inflate past the allowed size, not merely to notice afterwards", async () => {
+  it.skipIf(!HAS_ZIP)("refuses to inflate past the allowed size, not merely to notice afterwards", async () => {
     const { execFileSync } = await import("node:child_process");
     const fsm = await import("node:fs");
     const osm = await import("node:os");

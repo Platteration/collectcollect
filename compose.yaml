@@ -34,6 +34,15 @@ services:
       timeout: 5s
       start_period: 20s
       retries: 3
+    # Ten seconds is the default; a server finishing a price refresh or a
+    # backup copy is given longer to close its database cleanly.
+    stop_grace_period: 30s
+    # The server needs no capability the base image grants and must not gain
+    # any: nothing inside runs as root, and nothing should be able to.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   skins:
@@ -56,6 +65,15 @@ services:
       timeout: 5s
       start_period: 20s
       retries: 3
+    # Ten seconds is the default; a server finishing a price refresh or a
+    # backup copy is given longer to close its database cleanly.
+    stop_grace_period: 30s
+    # The server needs no capability the base image grants and must not gain
+    # any: nothing inside runs as root, and nothing should be able to.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
 volumes:

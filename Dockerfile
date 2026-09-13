@@ -47,6 +47,9 @@ EXPOSE 3000
 # stops answering is reported as unhealthy rather than merely running.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
-# Shell form, so the app chosen at build time is read from the environment;
-# CMD cannot see a build argument directly.
-CMD node ${APP_DIR}/server.js
+# The app chosen at build time is read from the environment, since CMD cannot
+# see a build argument directly — but through `exec`, so node replaces the
+# shell and is what receives SIGTERM. Under a plain shell form the signal
+# stopped at the shell, and every `docker stop` waited out the full grace
+# period before killing a server that never heard it was being stopped.
+CMD ["sh", "-c", "exec node ${APP_DIR}/server.js"]

@@ -1,5 +1,8 @@
 name: CI
 
+# Every push runs the suite. A pull request from a branch in this repository
+# would run it a second time for the same commit, so the pull_request event
+# only counts when it comes from a fork, which a push here cannot cover.
 on:
   push:
     branches: ["**"]
@@ -17,6 +20,7 @@ concurrency:
 jobs:
   # Fast and whole: every workspace's lint, types and unit tests in one job.
   check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -34,6 +38,7 @@ jobs:
   # parallel. Only the browser binary and Next's build cache are worth keeping
   # between runs; a stale build output is not.
   e2e:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -52,11 +57,16 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          # A lockfile change rarely changes the browser; the last one is a fine start.
+          restore-keys: |
+            playwright-${{ runner.os }}-
       - name: Cache the Next build
         uses: actions/cache@v4
         with:
           path: apps/${{ matrix.app }}/.next/cache
-          key: next-${{ matrix.app }}-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('apps/**/*.ts', 'apps/**/*.tsx', 'packages/**/*.ts', 'packages/**/*.tsx') }}
+          # Keyed on this app's own sources and the shared package, not on the
+          # other app's: a change there is no reason to lose this build's cache.
+          key: next-${{ matrix.app }}-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles(format('apps/{0}/**/*.ts', matrix.app), format('apps/{0}/**/*.tsx', matrix.app), 'packages/**/*.ts', 'packages/**/*.tsx') }}
           restore-keys: |
             next-${{ matrix.app }}-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
       - run: npm run build -w @collectcollect/${{ matrix.app }}
@@ -75,6 +85,7 @@ jobs:
   # The image is the thing people run, so it is built for both apps and the
   # running container is asked whether it is well.
   docker:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -109,12 +120,23 @@ jobs:
             sleep 2
           done
           docker logs app; exit 1
+      - name: It stops when asked, not when killed
+        # Under a shell-form CMD node never receives SIGTERM, and `docker stop`
+        # waits out its whole grace period before killing the container. With
+        # node as PID 1 it is gone in well under that.
+        run: |
+          start=$(date +%s)
+          docker stop -t 20 app
+          took=$(( $(date +%s) - start ))
+          echo "stopped in ${took}s"
+          [ "$took" -lt 10 ]
       - if: always()
         run: docker rm -f app
 
   # Advisory: a known vulnerability in a dependency is worth seeing on every
   # run, but not worth blocking a fix for something else.
   audit:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     continue-on-error: true
