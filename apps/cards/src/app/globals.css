@@ -16,25 +16,27 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 :root {
-  --background: #f6f5f2;
-  --foreground: #1c1b1a;
-  /* Hairlines that draw the interface. In dark they are the whole aesthetic. */
-  --line: rgba(11, 11, 11, 0.12);
-  --line-strong: rgba(11, 11, 11, 0.22);
-  --surface: #ffffff;
-  --surface-raised: rgba(11, 11, 11, 0.03);
-  --muted: rgba(28, 27, 26, 0.62);
+  --background: #f5f0e6;
+  --foreground: #24333e;
+  --line: #c9c2b3;
+  --line-strong: #8e978f;
+  --surface: #fffaf0;
+  --surface-raised: #e9e2d3;
+  --muted: #5b6b72;
+  --tabletop-edge: #c9c2b3;
+  --tabletop-shine: rgba(255,255,255,0.7);
 }
 
 [data-theme="dark"] {
-  /* Wireline: a near-black ground with the interface drawn in white hairlines. */
-  --background: #08090a;
-  --foreground: #f2f4f5;
-  --line: rgba(255, 255, 255, 0.16);
-  --line-strong: rgba(255, 255, 255, 0.32);
-  --surface: rgba(255, 255, 255, 0.022);
-  --surface-raised: rgba(255, 255, 255, 0.06);
-  --muted: rgba(242, 244, 245, 0.56);
+  --background: #19232d;
+  --foreground: #f7f1e5;
+  --line: #526674;
+  --line-strong: #82949c;
+  --surface: #24323e;
+  --surface-raised: #30424f;
+  --muted: #b7c2c7;
+  --tabletop-edge: #101820;
+  --tabletop-shine: rgba(255,255,255,0.12);
 }
 
 @theme inline {
@@ -62,9 +64,7 @@ body {
   border-radius: 0.75rem;
   border: 1px solid var(--line);
   background: var(--surface);
-}
-:root:not([data-theme="dark"]) .card-surface {
-  box-shadow: 0 1px 2px rgba(11, 11, 11, 0.04);
+  box-shadow: inset 0 1px 0 var(--tabletop-shine), 0 3px 0 var(--tabletop-edge);
 }
 @utility btn {
   @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
@@ -234,6 +234,24 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .reveal { animation: none; }
+}
+
+/* Shared illustrated tabletop controls; chart colors and card art retain their semantics. */
+@media screen {
+  :root { --accent: #296f69; --accent-ink: #fffaf0; --accent-solid: #296f69; }
+  [data-theme="dark"] { --accent: #88c9c0; --accent-ink: #19232d; --accent-solid: #88c9c0; }
+  .btn-primary, .btn-secondary {
+    border-radius: 0.75rem;
+    box-shadow: 0 3px 0 var(--tabletop-edge);
+  }
+  .btn-primary:active:not(:disabled), .btn-secondary:active:not(:disabled) {
+    box-shadow: 0 1px 0 var(--tabletop-edge);
+    transform: translateY(2px);
+  }
+  .btn-primary:focus-visible, .btn-secondary:focus-visible {
+    outline: 2px solid var(--accent-solid);
+    outline-offset: 3px;
+  }
 }
 
 /* Printing the appraisal report: drop the app chrome, force ink-on-paper colours. */
