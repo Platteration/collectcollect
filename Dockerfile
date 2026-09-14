@@ -9,6 +9,11 @@ ARG APP=cards
 FROM node:22-bookworm-slim AS build
 ARG APP
 WORKDIR /app
+# Native dependencies such as better-sqlite3 compile during npm ci.
+# Keep the compiler toolchain in this stage, out of the runtime image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 # Every workspace manifest has to be present before `npm ci`, or the install
 # resolves against a lockfile describing a tree it cannot see.
 COPY package.json package-lock.json ./
