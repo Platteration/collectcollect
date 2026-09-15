@@ -153,16 +153,21 @@ Inside `packages/core/src`:
 ```
 markdown/                The Markdown codec: front matter, tables, money, slugs
 zip.ts, csv.ts           Dependency-free streaming zip writer and reader; RFC 4180 CSV reader
-auth.ts, auth-route.ts   The optional password gate and its sign-in routes
+auth.ts, auth-route.ts   The optional password gate, its sign-in routes, and revoking a session
+sessions.ts              Ended sessions, kept in one small file beside the data
 proxy.ts                 The per-request gate: session check, CSP nonce, security headers
 net.ts, http.ts          What may be a webhook, whether a request came over TLS; route helpers
 webhook.ts               Resolves a webhook's host before posting to it
 throttle.ts, limiter.ts  Per-route request ceilings; per-source pacing for the price APIs
 gate.ts                  One-at-a-time for a refresh, a backup or a restore
+scheduler.ts             The hourly auto-refresh, one instance per app
 collection-swap.ts       Moving a database aside and another into place without a gap
 atomic-write.ts          Write-then-rename with fsync, for every file the mirror writes
 lookup.ts, series.ts     Prototype-safe table lookup; extent and thinning for long series
-charts/, components/     Chart geometry and the components both apps draw with
+manifest.ts, service-worker.ts
+                         The installable app shell both apps share; each app only names itself
+charts/, components/     Chart geometry and the components both apps draw with, including the
+                         not-found, error and offline pages and the service worker registration
 ```
 
 Inside `apps/cards`:
@@ -191,7 +196,8 @@ src/app/                 Next.js App Router pages and API routes
   api/import             POST — preview a CSV, or apply it with `apply: true`
   api/locations          GET — storage locations in use, for autocomplete
   api/sets/refresh       POST — fetch and store a set's published checklist
-  api/auth               POST signs in, DELETE signs out (only when APP_PASSWORD is set)
+  api/auth               POST signs in, DELETE signs out this session; /revoke ends every
+                         session at once (only when APP_PASSWORD is set)
   api/health             GET — is the server up, what is it reading; needs no session
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema

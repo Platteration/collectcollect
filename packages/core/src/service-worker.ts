@@ -1,14 +1,20 @@
-/*
+/** One service worker for both apps, told apart by the name on its caches. */
+const SOURCE = `/*
  * A deliberately small service worker: enough to make the app installable and
  * to open something sensible without a network, and nothing more.
  *
- * It never caches API responses or page HTML. Card data, prices and the
- * collection itself change, and a stale answer about what something is worth
- * would be worse than no answer.
+ * It never caches API responses or page HTML. Prices and the collection itself
+ * change, and a stale answer about what something is worth would be worse than
+ * no answer.
+ *
+ * The cache names carry the app's name. A service worker's scope is an origin,
+ * and on activation it removes every cache it does not own — so the two apps
+ * must be served from different origins (which two ports are), or each would
+ * evict the other's.
  */
 const VERSION = "v1";
-const SHELL = `collectcollect-shell-${VERSION}`;
-const ASSETS = `collectcollect-assets-${VERSION}`;
+const SHELL = \`__PREFIX__-shell-\${VERSION}\`;
+const ASSETS = \`__PREFIX__-assets-\${VERSION}\`;
 const OFFLINE_URL = "/offline";
 
 const PRECACHE = [OFFLINE_URL, "/icons/icon-192.png", "/icons/icon-512.png", "/manifest.webmanifest"];
@@ -37,7 +43,7 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  // The collection's own data is never served from a cache.
+  // The app's own data is never served from a cache.
   if (url.pathname.startsWith("/api/")) return;
 
   // Pages: always try the network, and fall back to the offline notice.
@@ -63,3 +69,25 @@ self.addEventListener("fetch", (event) => {
     );
   }
 });
+`;
+
+/**
+ * The worker's script text for an app. Served from a route rather than a file
+ * in `public`, so there is one copy of it and each app only names itself;
+ * the cache prefix is the only thing that differs between them.
+ */
+export function serviceWorkerSource(cachePrefix: string): string {
+  if (!/^[a-z0-9-]+$/.test(cachePrefix)) throw new Error("A cache prefix is lowercase letters, digits and hyphens");
+  return SOURCE.replaceAll("__PREFIX__", cachePrefix);
+}
+
+/** The response a `/sw.js` route hands back: script, never cached long, allowed to control the whole origin. */
+export function serviceWorkerResponse(cachePrefix: string): Response {
+  return new Response(serviceWorkerSource(cachePrefix), {
+    headers: {
+      "Content-Type": "text/javascript; charset=utf-8",
+      "Cache-Control": "no-cache",
+      "Service-Worker-Allowed": "/",
+    },
+  });
+}
