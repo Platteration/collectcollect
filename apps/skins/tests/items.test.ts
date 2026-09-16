@@ -3,6 +3,7 @@ import { getDb, openDatabase, setDb } from "@/lib/db";
 import {
   HasSalesError,
   addAcquisition,
+  addSnapshot,
   createItem,
   deleteItem,
   findByAssetId,
@@ -10,6 +11,8 @@ import {
   intakeItem,
   isTradeLocked,
   listItems,
+  latestSnapshot,
+  latestSnapshotsByItem,
   listStorageUnits,
   normalizeInput,
   updateItem,
@@ -19,6 +22,15 @@ import { deleteSale, recordSale } from "@/lib/sales";
 import { clutchCase, redline, seedCase, seedRedline } from "./helpers";
 
 beforeEach(() => setDb(openDatabase(":memory:")));
+
+it("uses quote time for the inventory headline when imported prices arrive out of order", () => {
+  const item = seedCase();
+  for (const [fetchedAt, value] of [["2026-09-15T12:00:00Z", 20], ["2026-01-01T12:00:00Z", 8], ["2026-09-15T12:00:00Z", 0]] as const) {
+    addSnapshot(item.id, { currency: "USD", fetchedAt, market: value, marketSource: "Fixture", yourCopyValue: value, yourCopyBasis: "Fixture", quotes: [], errors: [] });
+  }
+  expect(latestSnapshotsByItem().get(item.id)).toEqual(latestSnapshot(item.id));
+  expect(latestSnapshotsByItem().get(item.id)?.summary.yourCopyValue).toBe(0);
+});
 
 function at<T>(xs: readonly T[], i: number): T {
   const x = xs[i];
@@ -192,7 +204,8 @@ describe("editing an item", () => {
     addAcquisition(item.id, { quantity: 1, unitCost: 3 });
     // With two lots the price is derived, so a typed-in number cannot overwrite
     // what the two purchases actually cost.
-    expect(updateItem(item.id, { purchasePrice: 99 })!.purchasePrice).toBe(2);
+    expect(() => updateItem(item.id, { purchasePrice: 99 })).toThrow(/individual purchases/);
+    expect(getItem(item.id)!.purchasePrice).toBe(2);
   });
 
   it("refuses a second copy of a unique object", () => {

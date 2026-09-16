@@ -15,17 +15,25 @@ import path from "node:path";
  */
 export function writeFileAtomic(file: string, contents: string): void {
   const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`);
-  const fd = fs.openSync(tmp, "w");
+  const fd = fs.openSync(/* turbopackIgnore: true */ tmp, "w");
   try {
-    fs.writeFileSync(fd, contents, "utf8");
+    fs.writeFileSync(/* turbopackIgnore: true */ fd, contents, "utf8");
     fs.fsyncSync(fd);
   } finally {
     fs.closeSync(fd);
   }
   try {
-    fs.renameSync(tmp, file);
+    // Windows virus scanners briefly hold a just-written destination open.
+    // Retrying the rename preserves atomic replacement; deleting the old file
+    // first would create a gap in session records and recovery journals.
+    for (let attempt = 0; ; attempt++) {
+      try { fs.renameSync(/* turbopackIgnore: true */ tmp, file); break; } catch (error) {
+        if (attempt >= 5 || !["EPERM", "EBUSY", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10 * (attempt + 1));
+      }
+    }
   } catch (e) {
-    fs.rmSync(tmp, { force: true });
+    fs.rmSync(/* turbopackIgnore: true */ tmp, { force: true });
     throw e;
   }
 }

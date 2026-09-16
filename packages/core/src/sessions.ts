@@ -31,6 +31,10 @@ const KEEP = 200;
 
 const EMPTY: Stored = { before: 0, ids: [] };
 
+export class SessionStoreError extends Error {
+  constructor() { super("Session records could not be read. Restore sessions.json or rotate the signing secret before resetting it."); this.name = "SessionStoreError"; }
+}
+
 export function createSessionStore(file: string | (() => string)): SessionStore {
   const where = typeof file === "string" ? () => file : file;
   let cached: { path: string; mtimeMs: number; size: number; stored: Stored } | null = null;
@@ -39,15 +43,17 @@ export function createSessionStore(file: string | (() => string)): SessionStore 
     const target = where();
     let stat: fs.Stats;
     try {
-      stat = fs.statSync(target);
-    } catch {
-      cached = null;
-      return EMPTY;
+      stat = fs.statSync(/* turbopackIgnore: true */ target);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT" && !cached) return EMPTY;
+      throw new SessionStoreError();
     }
     if (cached && cached.path === target && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.stored;
     let stored: Stored = EMPTY;
     try {
-      const parsed = JSON.parse(fs.readFileSync(target, "utf8")) as Partial<Stored>;
+      const parsed = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ target, "utf8")) as Partial<Stored>;
+      if (!parsed || !Number.isSafeInteger(parsed.before) || (parsed.before ?? -1) < 0 || !Array.isArray(parsed.ids) ||
+        parsed.ids.some((entry) => !entry || typeof entry.id !== "string" || !Number.isSafeInteger(entry.expires))) throw new SessionStoreError();
       stored = {
         before: typeof parsed.before === "number" && Number.isFinite(parsed.before) ? parsed.before : 0,
         ids: Array.isArray(parsed.ids)
@@ -55,7 +61,7 @@ export function createSessionStore(file: string | (() => string)): SessionStore 
           : [],
       };
     } catch {
-      // An unreadable file revokes nothing; it is rewritten whole by the next change.
+      throw new SessionStoreError();
     }
     cached = { path: target, mtimeMs: stat.mtimeMs, size: stat.size, stored };
     return stored;
@@ -63,7 +69,7 @@ export function createSessionStore(file: string | (() => string)): SessionStore 
 
   function write(stored: Stored): void {
     const target = where();
-    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.mkdirSync(/* turbopackIgnore: true */ path.dirname(target), { recursive: true });
     writeFileAtomic(target, JSON.stringify(stored, null, 2) + "\n");
     cached = null;
   }
@@ -72,7 +78,7 @@ export function createSessionStore(file: string | (() => string)): SessionStore 
   function prune(ids: Stored["ids"], now: number): Stored["ids"] {
     const live = ids.filter((e) => e.expires > now);
     live.sort((a, b) => a.expires - b.expires);
-    return live.length > KEEP ? live.slice(live.length - KEEP) : live;
+    return live;
   }
 
   return {
@@ -88,7 +94,8 @@ export function createSessionStore(file: string | (() => string)): SessionStore 
     revoke(id, expires, now = Date.now()) {
       const stored = read();
       if (stored.ids.some((e) => e.id === id)) return;
-      write({ before: stored.before, ids: prune([...stored.ids, { id, expires }], now) });
+      const ids = prune([...stored.ids, { id, expires }], now);
+      write(ids.length > KEEP ? { before: Math.max(stored.before, now + 1), ids: [] } : { before: stored.before, ids });
     },
   };
 }

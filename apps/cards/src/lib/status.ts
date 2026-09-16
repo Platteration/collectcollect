@@ -8,7 +8,7 @@ export function providerStatuses(): ProviderStatus[] {
       id: "claude",
       label: `Claude vision (${claudeModel()})`,
       configured: isClaudeConfigured(),
-      optional: false,
+      optional: true,
       games: ["pokemon", "yugioh", "mtg", "sports", "other"],
       note: "Identifies cards from photos. Set ANTHROPIC_API_KEY. Without it you can still add cards by hand.",
     },

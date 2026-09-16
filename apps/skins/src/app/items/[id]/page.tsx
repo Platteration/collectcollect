@@ -91,7 +91,7 @@ export default async function ItemPage({ params }: PageProps<"/items/[id]">) {
 
       <PricePanel item={item} summary={snapshots[0]?.summary ?? null} />
 
-      <EditItem item={item} storageUnits={listStorageUnits().map((u) => u.storageUnit)} />
+      <EditItem item={item} storageUnits={listStorageUnits().map((u) => u.storageUnit)} purchasePriceReadOnly={lots.length > 1 || lots.some((lot) => lot.remaining !== lot.quantity)} />
 
       <Spread cash={cash} wallet={wallet} quantity={item.quantity} lockedUntil={locked ? item.tradableAfter : null} />
 

@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Barlow_Condensed } from "next/font/google";
+import localFont from "next/font/local";
 import { headers } from "next/headers";
 import Link from "next/link";
 import "./globals.css";
@@ -11,10 +11,14 @@ import { SignOut } from "@collectcollect/core/components/SignOut";
 import { ServiceWorker } from "@/components/ServiceWorker";
 
 // Condensed display face for the hero value, item names and headings.
-const display = Barlow_Condensed({
+const display = localFont({
   variable: "--font-display",
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  display: "swap",
+  src: [
+    { path: "../../../../packages/core/fonts/BarlowCondensed-500-latin.woff2", weight: "500", style: "normal" },
+    { path: "../../../../packages/core/fonts/BarlowCondensed-600-latin.woff2", weight: "600", style: "normal" },
+    { path: "../../../../packages/core/fonts/BarlowCondensed-700-latin.woff2", weight: "700", style: "normal" },
+  ],
 });
 
 export const metadata: Metadata = {

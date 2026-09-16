@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 import { E2E_PASSWORD, LOCKED_DATA_DIR, READ_DATA_DIR, WRITE_DATA_DIR } from "./e2e/data-dir";
 
+// Fixture timestamps render identically in the server and the browser on every host.
+process.env.TZ = "UTC";
+
 /**
  * End-to-end tests run against a real production build with inventories of
  * their own, so they never touch a developer's data.
@@ -21,15 +24,16 @@ export default defineConfig({
   testDir: "./e2e",
   testMatch: /.*\.spec\.ts/,
   globalSetup: "./e2e/seed.ts",
-  globalTeardown: "./e2e/teardown.ts",
+  globalTeardown: "./e2e/stop-servers.ts",
   fullyParallel: false,
   workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   // The html report is what the CI job uploads on failure; without a reporter
   // that writes one, the upload step finds nothing.
-  reporter: process.env.CI ? [["github"], ["list"], ["html", { open: "never" }]] : "list",
-  use: { ...devices["Desktop Chrome"], trace: "retain-on-failure", screenshot: "only-on-failure" },
+  reporter: process.env.CI ? [["github"], ["list"], ["html", { open: "never" }], ["./e2e/teardown.ts"]] : [["list"], ["./e2e/teardown.ts"]],
+  use: { ...devices["Desktop Chrome"], trace: "retain-on-failure", screenshot: "only-on-failure", timezoneId: "UTC",
+    launchOptions: process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : undefined },
   projects: [
     {
       name: "read",
@@ -49,25 +53,25 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `npm start -- --port ${READ_PORT}`,
+      command: `node ../../scripts/e2e-server.mjs ${READ_PORT}`,
       port: READ_PORT,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { SKINS_DATA_DIR: READ_DATA_DIR },
+      env: { SKINS_DATA_DIR: READ_DATA_DIR, SKINS_AUTO_REFRESH_HOURS: "0" },
     },
     {
-      command: `npm start -- --port ${WRITE_PORT}`,
+      command: `node ../../scripts/e2e-server.mjs ${WRITE_PORT}`,
       port: WRITE_PORT,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { SKINS_DATA_DIR: WRITE_DATA_DIR },
+      env: { SKINS_DATA_DIR: WRITE_DATA_DIR, SKINS_AUTO_REFRESH_HOURS: "0" },
     },
     {
-      command: `npm start -- --port ${LOCKED_PORT}`,
+      command: `node ../../scripts/e2e-server.mjs ${LOCKED_PORT}`,
       port: LOCKED_PORT,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { SKINS_DATA_DIR: LOCKED_DATA_DIR, SKINS_APP_PASSWORD: E2E_PASSWORD },
+      env: { SKINS_DATA_DIR: LOCKED_DATA_DIR, SKINS_APP_PASSWORD: E2E_PASSWORD, SKINS_AUTO_REFRESH_HOURS: "0" },
     },
   ],
 });

@@ -22,7 +22,7 @@ export interface PortfolioPoint {
  * Build a step series of total collection value. Each snapshot changes one
  * card's contribution; totals are recomputed at every snapshot time using the
  * most recent snapshot of every card. Quantities are taken from the cards as
- * they are now (there is no quantity history).
+ * they are now. Actual holdings history is recorded separately.
  */
 export function portfolioSeries(cards: CardRecord[], snapshots: PriceSnapshot[]): PortfolioPoint[] {
   const qty = new Map(cards.map((c) => [c.id, c.quantity]));
@@ -108,8 +108,12 @@ export interface Outlook {
   upside: number;
   /** min − raw − fee: what grading adds if it comes back a mid grade (negative = you lose money). */
   downside: number;
-  /** Whether min/max came from real graded sales (true) or from the multiplier estimates. */
+  /** Whether both bounds have recorded graded prices rather than multiplier estimates. */
   fromRealData: boolean;
+  /** Provenance of each bound; a measured high end never makes the low end measured. */
+  provenance?: { min: "observed" | "estimated"; max: "observed" | "estimated"; likely: "observed" | "estimated" | null; source: string | null; fetchedAt: string;
+    minSource: string | null; maxSource: string | null; minAt: string; maxAt: string;
+    likelySource: string | null; likelyAt: string | null };
   /** Value at the grade the photo suggests this copy would receive, when one was estimated. */
   likely: number | null;
   likelyLabel: string | null;
@@ -146,6 +150,15 @@ export function gradingOutlook(summary: PriceSummary, settings: Settings, expect
   const min = pick(summary, MIN_KEYS) ?? { value: raw, label: "Ungraded", real: false };
   const fee = settings.gradingFee;
   const likely = atGrade(summary, expectedGrade);
+  const provenanceOf = (label: string, value: number) => {
+    const priority = ["manual", "pricecharting", "pokemontcg", "scryfall", "ygoprodeck"];
+    const quote = summary.quotes.filter(q => q.currency === "USD" && q.graded[label] === value)
+      .sort((a, b) => priority.indexOf(a.source) - priority.indexOf(b.source))[0];
+    return { source: quote?.sourceLabel ?? summary.gradedSource, at: quote?.fetchedAt ?? summary.fetchedAt };
+  };
+  const minProvenance = provenanceOf(min.label, min.value), maxProvenance = provenanceOf(max.label, max.value);
+  const likelyMeasured = likely && summary.graded[likely.label] !== undefined;
+  const likelyProvenance = likelyMeasured ? provenanceOf(likely.label, likely.value) : null;
   return {
     likely: likely?.value ?? null,
     likelyLabel: likely?.label ?? null,
@@ -157,7 +170,13 @@ export function gradingOutlook(summary: PriceSummary, settings: Settings, expect
     fee,
     upside: round2(max.value - raw - fee),
     downside: round2(min.value - raw - fee),
-    fromRealData: max.real,
+    fromRealData: max.real && min.real,
+    provenance: { min: min.real ? "observed" : "estimated", max: max.real ? "observed" : "estimated",
+      likely: likely ? (likelyMeasured ? "observed" : "estimated") : null,
+      source: summary.gradedSource, fetchedAt: summary.fetchedAt,
+      minSource: min.real ? minProvenance.source : null, maxSource: max.real ? maxProvenance.source : null,
+      minAt: minProvenance.at, maxAt: maxProvenance.at,
+      likelySource: likelyProvenance?.source ?? null, likelyAt: likelyProvenance?.at ?? null },
   };
 }
 
@@ -201,29 +220,32 @@ export function gradingVerdict(series: OutlookPoint[]): Verdict {
       upsideVsPeak: null,
     };
   }
-  if (series.length < 3) {
+  const days = new Map<string, OutlookPoint>();
+  for (const point of series) days.set(point.t.slice(0, 10), point);
+  const daily = [...days.values()];
+  if (daily.length < 3) {
     return {
       kind: "insufficient",
       headline: `Up to ${fmt(last.upside)} upside`,
-      detail: "Not enough history yet to tell whether the gap is widening. Prices refresh daily; check back in a week.",
+      detail: "This comparison needs prices from at least three different days. Repeated refreshes today do not add another day of history.",
       upsideVsPeak: null,
     };
   }
-  const [, peak] = extent(series.map((p) => p.upside));
+  const [, peak] = extent(daily.map((p) => p.upside));
   const ratio = peak > 0 ? last.upside / peak : 0;
-  const trend = last.upside - (series[Math.max(0, series.length - 4)] ?? last).upside;
+  const trend = last.upside - (daily[Math.max(0, daily.length - 4)] ?? last).upside;
   if (ratio >= 0.9) {
     return {
       kind: "prime",
-      headline: "Good time to grade",
-      detail: `The ${last.maxLabel} premium over raw is ${fmt(last.upside)} after fees, ${ratio >= 0.999 ? "the widest" : "close to the widest"} it has been.${trend > 0 ? " Still widening." : ""}`,
+      headline: "Near the best recorded premium",
+      detail: `The ${last.maxLabel} premium over raw is ${fmt(last.upside)} after fees, ${ratio >= 0.999 ? "the widest" : "close to the widest"} recorded here.${trend > 0 ? " Still widening." : ""} This comparison does not predict the grade or a sale price.`,
       upsideVsPeak: ratio,
     };
   }
   return {
     kind: "wait",
     headline: "Gap has narrowed",
-    detail: `Upside is ${fmt(last.upside)} now versus ${fmt(peak)} at its widest. ${trend > 0 ? "It is recovering." : "Consider waiting for the graded premium to come back."}`,
+    detail: `Upside is ${fmt(last.upside)} now versus ${fmt(peak)} at its widest recorded here. ${trend > 0 ? "The recorded gap has increased recently." : "The recorded gap is below its earlier peak."}`,
     upsideVsPeak: ratio,
   };
 }
@@ -316,7 +338,7 @@ export interface Realized {
   percent: number | null;
   sales: number;
   copies: number;
-  /** How many sales had no cost basis, so the gain understates them. */
+  /** Sales with unknown costs excluded; reported gain may overstate actual profit. */
   withoutCost: number;
 }
 

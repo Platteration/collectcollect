@@ -50,7 +50,7 @@ describe("optional password gate", () => {
     process.env.APP_PASSWORD = "hunter2";
     const now = Date.now();
     const token = await createToken(now);
-    expect(token).toMatch(/^v2\.\d+\.\d+\.[a-f0-9-]{36}\.[a-f0-9]{64}$/);
+    expect(token).toMatch(/^v3\.\d+\.\d+\.[a-f0-9-]{36}\.[a-f0-9]{64}$/);
     const id = tokenId(token);
     expect(id).toMatch(/^[a-f0-9-]{36}$/);
     expect(tokenId("garbage")).toBeNull();

@@ -4,6 +4,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { uploadsDir } from "./db";
 import { lookup } from "@collectcollect/core/lookup";
+import { storageLock } from "./storage";
 
 export const ALLOWED_IMAGE_TYPES: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -50,7 +51,8 @@ export async function dominantColor(buffer: Buffer): Promise<string | null> {
   }
 }
 
-export async function saveUpload(file: File): Promise<{ name: string; bytes: number; color: string | null }> {
+export interface StoredUpload { name: string; bytes: number; color: string | null }
+export async function saveUpload(file: File, onStored?: (upload: StoredUpload) => void): Promise<StoredUpload> {
   if (!lookup(ALLOWED_IMAGE_TYPES, file.type) && !file.type.startsWith("image/")) {
     throw new Error(`Unsupported file type: ${file.type || "unknown"}`);
   }
@@ -62,8 +64,16 @@ export async function saveUpload(file: File): Promise<{ name: string; bytes: num
     .resize({ width: 2000, height: 2000, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 88 })
     .toBuffer();
-  await fs.writeFile(path.join(uploadsDir(), name), output);
-  return { name, bytes: output.length, color: await dominantColor(output) };
+  const stored = { name, bytes: output.length, color: await dominantColor(output) };
+  await storageLock.run(async () => {
+    const file = path.join(uploadsDir(), name);
+    await fs.writeFile(file, output);
+    try { onStored?.(stored); } catch (error) {
+      await fs.unlink(file).catch(() => undefined);
+      throw error;
+    }
+  });
+  return stored;
 }
 
 export function uploadPath(name: string): string {
@@ -91,7 +101,7 @@ export async function prepareForVision(buffer: Buffer): Promise<{ data: string; 
 
 export async function deleteUpload(name: string): Promise<void> {
   try {
-    await fs.unlink(uploadPath(name));
+    await storageLock.run(() => fs.unlink(uploadPath(name)));
   } catch {
     /* already gone */
   }

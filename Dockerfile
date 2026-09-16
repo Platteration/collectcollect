@@ -45,6 +45,7 @@ RUN mkdir -p /data && chown node:node /data
 COPY --from=build --chown=node:node /app/apps/${APP}/.next/standalone ./
 COPY --from=build --chown=node:node /app/apps/${APP}/.next/static ./apps/${APP}/.next/static
 COPY --from=build --chown=node:node /app/apps/${APP}/public ./apps/${APP}/public
+COPY --from=build --chown=node:node /app/packages/core/fonts/OFL.txt ./licenses/BarlowCondensed-OFL.txt
 USER node
 VOLUME ["/data"]
 EXPOSE 3000

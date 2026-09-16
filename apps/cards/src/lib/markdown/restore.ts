@@ -5,6 +5,7 @@ import type { CardInput, CardRecord } from "../types";
 import { isSafeEntryName, readZip } from "@collectcollect/core/zip";
 import { parseCardMarkdown, type ParsedCard } from "./card";
 import { mirrorCard, readCardFiles } from "./mirror";
+import { importGoalMarkdown, isGoalFileName, mirrorGoals } from "../goals/markdown";
 
 /**
  * Reading a collection back out of its Markdown files.
@@ -17,6 +18,7 @@ import { mirrorCard, readCardFiles } from "./mirror";
  */
 
 export interface CollectionImport {
+  goals: number;
   created: number;
   replaced: number;
   sales: number;
@@ -30,7 +32,7 @@ export interface CollectionImport {
 export const IMPORT_MAX_BYTES = 128 * 1024 * 1024;
 
 export function importCardFiles(files: Array<{ name: string; text: string }>): CollectionImport {
-  const result: CollectionImport = { created: 0, replaced: 0, sales: 0, acquisitions: 0, prices: 0, skipped: [], warnings: [] };
+  const result: CollectionImport = { goals: 0, created: 0, replaced: 0, sales: 0, acquisitions: 0, prices: 0, skipped: [], warnings: [] };
   const db = getDb();
   /** Card id -> whether it could already be filed under another name. */
   const touched = new Map<number, boolean>();
@@ -184,6 +186,11 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
 
   const run = db.transaction(() => {
     for (const file of files) {
+      if (isGoalFileName(file.name)) {
+        try { importGoalMarkdown(file.text); result.goals++; }
+        catch (e) { result.skipped.push({ file: file.name, reason: skipReason(e) }); }
+        continue;
+      }
       const parsed = parseCardMarkdown(file.text);
       if (!parsed) {
         result.skipped.push({ file: file.name, reason: "No card record in this file" });
@@ -215,6 +222,7 @@ export function importCardFiles(files: Array<{ name: string; text: string }>): C
   // claims. Rewriting also normalises a hand-edited folder, giving every card
   // the file name and layout it should have.
   discardDeferredMirror();
+  mirrorGoals();
   for (const [id, mayHaveOldName] of touched) {
     const card = getCard(id);
     if (card) mirrorCard(card, { mayHaveOldName });

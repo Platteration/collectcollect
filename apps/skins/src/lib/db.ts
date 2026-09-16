@@ -1,6 +1,9 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { initializeHoldingsHistory } from "@collectcollect/core/holdings-history";
+import { initializePriceJobs } from "@collectcollect/core/price-jobs";
+import { recoverCollectionSwap } from "@collectcollect/core/collection-swap";
 
 import { DB_FILE, dataDir, resetDataDirLookup } from "./paths";
 
@@ -109,17 +112,31 @@ CREATE TABLE IF NOT EXISTS settings (
 /** Columns added after the first release; applied when missing so older databases keep working. */
 const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [];
 
-export function openDatabase(file: string): Database.Database {
-  const db = new Database(file);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+export const SCHEMA_VERSION = 1;
+
+export function initializeDatabase(db: Database.Database): void {
+  if (Number(db.pragma("user_version", { simple: true })) > SCHEMA_VERSION) throw new Error("This database needs a newer CollectCollect version.");
+  db.transaction(() => {
   db.exec(SCHEMA);
   for (const m of MIGRATIONS) {
     const cols = db.prepare(`PRAGMA table_info(${m.table})`).all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === m.column)) db.exec(m.ddl);
   }
   ensureAssetIndex(db);
-  return db;
+  initializePriceJobs(db);
+  initializeHoldingsHistory(db, { table: "items", foreignKey: "item_id", name: "market_hash_name", manualPrice: "manual_price" });
+  db.pragma(`user_version = ${SCHEMA_VERSION}`);
+  })();
+}
+
+export function openDatabase(file: string): Database.Database {
+  const db = new Database(file);
+  try {
+    db.pragma("journal_mode = WAL");
+    db.pragma("foreign_keys = ON");
+    initializeDatabase(db);
+    return db;
+  } catch (error) { db.close(); throw error; }
 }
 
 /**
@@ -202,6 +219,7 @@ export function getDb(): Database.Database {
     throw new Error(globalForDb.__skinsLocked);
   }
   if (!globalForDb.__skinsDb) {
+    recoverCollectionSwap({ dataDir: dataDir(), databaseFile: databaseFile(), collectionDir: path.join(dataDir(), "collection") });
     globalForDb.__skinsDb = openDatabase(databaseFile());
   }
   return globalForDb.__skinsDb;

@@ -15,6 +15,8 @@ import { CardForm, formFromCard, formToInput } from "./CardForm";
 import type { Acquisition } from "@/lib/acquisitions";
 import { PricePanel } from "./PricePanel";
 import { AddToSubmission } from "./AddToSubmission";
+import { PurchaseEditor } from "@collectcollect/core/components/PurchaseEditor";
+import { GradingProvenance } from "./GradingProvenance";
 
 interface Props {
   acquisitions: Acquisition[];
@@ -115,6 +117,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
         method: "PATCH",
         body: JSON.stringify({
           ...formToInput(form),
+          ...((acquisitions.length > 1 || acquisitions.some((lot) => lot.remaining !== lot.quantity)) ? { purchasePrice: undefined } : {}),
           manualUngraded: manualUngraded.trim() === "" ? null : Number(manualUngraded),
           manualGraded: graded,
         }),
@@ -355,7 +358,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
 
         {editing ? (
           <div ref={editBox} className="card-surface space-y-4 p-4">
-            <CardForm value={form} onChange={setForm} />
+            <CardForm value={form} onChange={setForm} purchasePriceReadOnly={acquisitions.length > 1 || acquisitions.some((lot) => lot.remaining !== lot.quantity)} />
             <div className="border-t border-black/10 pt-3 dark:border-white/10">
               <div className="mb-2 text-sm font-medium">Manual price overrides (USD)</div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -430,16 +433,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
           </p>
         )}
 
-        {/* A card with no price yet has no outlook section to hold this, and
-            can still be put into a batch. */}
-        {!graded && !latest && card.gradingStatus !== "submitted" && (
-          <div className="card-surface flex flex-wrap items-center justify-between gap-2 p-4 text-sm">
-            <span className="text-neutral-500">Sending this in for grading?</span>
-            <AddToSubmission cardId={card.id} />
-          </div>
-        )}
-
-        {!graded && latest && (
+        {!graded && (
           <section className="card-surface p-4">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
@@ -478,6 +472,8 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
                 <AddToSubmission cardId={card.id} />
               </div>
             )}
+            {!lastOutlook && <p className="mt-3 text-sm text-neutral-500">No price is available yet. Your grading plan and submissions can still be managed here.</p>}
+            {lastOutlook && <GradingProvenance outlook={lastOutlook} />}
             {lastOutlook && (
               <div className="my-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                 <Field label="Raw (yours)" value={money(lastOutlook.raw)} />
@@ -500,11 +496,8 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
                   : `, which does not cover the ${money(lastOutlook.fee)} fee.`}
               </p>
             )}
-            <OutlookChart series={outlook} />
-            <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">{verdict.detail}</p>
-            {lastOutlook && !lastOutlook.fromRealData && (
-              <p className="mt-1 text-xs text-neutral-500">Graded outcomes are estimates from your Settings multipliers; a PriceCharting token replaces them with real graded sales.</p>
-            )}
+            {lastOutlook && <OutlookChart series={outlook} />}
+            {lastOutlook && <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">{verdict.detail}</p>}
           </section>
         )}
 
@@ -541,7 +534,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
 
         <section className="card-surface p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="font-semibold">What you paid</h3>
+            <h3 id="purchases" className="font-semibold">What you paid</h3>
             {!buying && (
               <button ref={buyButton} type="button" className="btn-secondary" onClick={() => setBuying(true)}>
                 Add copies
@@ -601,6 +594,10 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
                       {lot.remaining === lot.quantity ? "" : lot.remaining === 0 ? ", all gone" : `, ${lot.remaining} left`} · {when(lot.acquiredAt)}
                     </div>
                   </div>
+                  <PurchaseEditor key={`${lot.id}:${lot.unitCost}:${lot.acquiredAt}:${lot.source}:${lot.notes}:${lot.remaining}`} lot={lot} onSave={async (patch) => {
+                    const response = await api<{ card: CardRecord; acquisitions: Acquisition[] }>(`/api/cards/${card.id}/acquisitions/${lot.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+                    setCard(response.card); setAcquisitions(response.acquisitions); setForm(formFromCard(response.card));
+                  }} />
                   {lot.remaining === lot.quantity && (
                     <button type="button" className="text-xs text-neutral-500 underline" onClick={() => removePurchase(lot)}>
                       Remove

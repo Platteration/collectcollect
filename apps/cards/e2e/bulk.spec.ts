@@ -1,10 +1,12 @@
 import { expect, test } from "@playwright/test";
 import { addCardByHand } from "./helpers";
 
-test("cards can be selected and acted on together", async ({ page }) => {
-  await addCardByHand(page, { name: "Bulk One", set: "Neo Genesis" });
-  await addCardByHand(page, { name: "Bulk Two", set: "Neo Genesis" });
-  await addCardByHand(page, { name: "Bulk Three", set: "Neo Genesis" });
+test("cards can be selected and acted on together without price data", async ({ page, request }) => {
+  // No provider timing: these intentionally unpriced cards must still have grading controls.
+  for (const name of ["Bulk One", "Bulk Two", "Bulk Three"]) {
+    const response = await request.post("/api/cards", { data: { game: "pokemon", name, setName: "Neo Genesis" } });
+    expect(response.ok()).toBe(true);
+  }
 
   await page.goto("/collection?q=Bulk");
   await expect(page.getByRole("link", { name: /Bulk One/ })).toBeVisible();

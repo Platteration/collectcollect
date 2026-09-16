@@ -6,6 +6,7 @@ import { api } from "@collectcollect/core/api-client";
 import { day, money } from "@collectcollect/core/format";
 import type { Acquisition } from "@/lib/acquisitions";
 import type { ItemRecord, Sale } from "@/lib/types";
+import { PurchaseEditor } from "@collectcollect/core/components/PurchaseEditor";
 
 /**
  * What this item cost, and what it earned.
@@ -79,7 +80,7 @@ export function Ledger({ item, acquisitions, sales }: { item: ItemRecord; acquis
 
       {acquisitions.length > 0 && (
         <div>
-          <h3 className="label">Purchases</h3>
+          <h3 id="purchases" className="label">Purchases</h3>
           <div className="card-surface overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -106,6 +107,9 @@ export function Ledger({ item, acquisitions, sales }: { item: ItemRecord; acquis
                       {lot.source ?? "—"}
                     </td>
                     <td className="px-3 py-2 text-right">
+                      <PurchaseEditor key={`${lot.id}:${lot.unitCost}:${lot.acquiredAt}:${lot.source}:${lot.notes}:${lot.remaining}`} lot={lot} onSave={async (patch) => {
+                        await api(`/api/items/${item.id}/acquisitions/${lot.id}`, { method: "PATCH", body: JSON.stringify(patch) }); router.refresh();
+                      }} />
                       {lot.remaining === lot.quantity ? (
                         <button
                           type="button"

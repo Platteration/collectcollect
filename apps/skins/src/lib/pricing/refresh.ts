@@ -4,6 +4,11 @@ import { getSettings } from "../settings";
 import type { ItemRecord, PriceSnapshot, PriceSummary } from "../types";
 import { primeProviders, priceItem } from "./index";
 import { createGate } from "@collectcollect/core/gate";
+import { BusyError } from "@collectcollect/core/gate";
+import type { JobRefreshOptions } from "@collectcollect/core/price-jobs";
+import { archiveGate } from "../storage";
+
+const refreshState = globalThis as unknown as { __skinsActivePrices?: number };
 
 function hasPrice(summary: PriceSummary): boolean {
   return summary.yourCopyValue !== null || summary.market !== null;
@@ -20,21 +25,27 @@ function hasPrice(summary: PriceSummary): boolean {
 export async function refreshItem(
   item: ItemRecord,
   fetchImpl?: typeof fetch,
-): Promise<{ item: ItemRecord; snapshot: PriceSnapshot; stored: boolean }> {
-  const settings = getSettings();
-  const previous = listSnapshots(item.id, 1)[0]?.summary ?? null;
-  const summary = await priceItem(item, fetchImpl);
-  const failed = !hasPrice(summary) && latestSnapshot(item.id) !== null;
-  const snapshot: PriceSnapshot = failed
-    ? { id: 0, itemId: item.id, fetchedAt: summary.fetchedAt, summary }
-    : addSnapshot(item.id, summary);
+): Promise<{ item: ItemRecord; snapshot: PriceSnapshot; stored: boolean; skipped?: boolean }> {
+  if (archiveGate.busy) throw new BusyError("A backup or restore is in progress.");
+  refreshState.__skinsActivePrices = (refreshState.__skinsActivePrices ?? 0) + 1;
+  try {
+    const settings = getSettings();
+    const previous = listSnapshots(item.id, 1)[0]?.summary ?? null;
+    const summary = await priceItem(item, fetchImpl);
+    const current = getItem(item.id);
+    if (!current || current.quantity <= 0) return { item, snapshot: { id: 0, itemId: item.id, fetchedAt: summary.fetchedAt, summary }, stored: false, skipped: true };
+    const failed = !hasPrice(summary) && latestSnapshot(item.id) !== null;
+    const snapshot: PriceSnapshot = failed
+      ? { id: 0, itemId: item.id, fetchedAt: summary.fetchedAt, summary }
+      : addSnapshot(item.id, summary);
 
-  if (!failed) {
-    for (const alert of alertsForRefresh(item, previous, summary, settings)) {
-      void deliver(createAlert(alert), settings);
+    if (!failed) {
+      for (const alert of alertsForRefresh(current, previous, summary, settings)) {
+        void deliver(createAlert(alert), settings);
+      }
     }
-  }
-  return { item, snapshot, stored: !failed };
+    return { item: current, snapshot, stored: !failed };
+  } finally { refreshState.__skinsActivePrices = Math.max(0, (refreshState.__skinsActivePrices ?? 1) - 1); }
 }
 
 export interface RefreshResult {
@@ -72,7 +83,7 @@ const gate = (globalForRefresh.__skinsRefreshGate ??= createGate("A price refres
 
 /** Whether a whole-inventory refresh is running right now. */
 export function refreshRunning(): boolean {
-  return gate.busy;
+  return gate.busy || (refreshState.__skinsActivePrices ?? 0) > 0;
 }
 
 /**
@@ -88,16 +99,18 @@ export function refreshRunning(): boolean {
  * is rate limited across the whole process, so extra concurrency buys nothing
  * and only makes it harder to say what is happening.
  */
-export function refreshAll(opts: { staleHours?: number; fetchImpl?: typeof fetch } = {}): Promise<RefreshResult> {
+export function refreshAll(opts: { staleHours?: number; fetchImpl?: typeof fetch } & JobRefreshOptions = {}): Promise<RefreshResult> {
+  if (archiveGate.busy) return Promise.reject(new BusyError("A backup or restore is in progress."));
   return gate.run(() => refreshEverything(opts));
 }
 
-async function refreshEverything(opts: { staleHours?: number; fetchImpl?: typeof fetch }): Promise<RefreshResult> {
+async function refreshEverything(opts: { staleHours?: number; fetchImpl?: typeof fetch } & JobRefreshOptions): Promise<RefreshResult> {
   const { staleHours, fetchImpl } = opts;
   const all = listItems();
   const latest = latestSnapshotsByItem();
   const cutoff = staleHours === undefined ? null : Date.now() - staleHours * 3600e3;
   const queue = all.filter((item) => {
+    if (opts.ids && !opts.ids.includes(item.id)) return false;
     if (cutoff === null) return true;
     const snapshot = latest.get(item.id);
     const lastStored = snapshot ? new Date(snapshot.fetchedAt).getTime() : 0;
@@ -116,18 +129,24 @@ async function refreshEverything(opts: { staleHours?: number; fetchImpl?: typeof
     lastAttempt.set(queued.id, Date.now());
     try {
       const fresh = getItem(queued.id);
-      if (!fresh) continue;
+      if (!fresh || fresh.quantity <= 0) { result.skipped++; opts.onProgress?.({ id: queued.id, status: "skipped", message: "Item was removed or sold out." }); continue; }
       const outcome = await refreshItem(fresh, fetchImpl);
+      if (outcome.skipped) { result.skipped++; opts.onProgress?.({ id: queued.id, status: "skipped", message: "Item was removed or sold out during refresh." }); continue; }
+      const priced = hasPrice(outcome.snapshot.summary);
       if (outcome.stored) result.refreshed++;
       else result.unpriced++;
+      const errors = [...result.providerErrors, ...outcome.snapshot.summary.errors];
+      opts.onProgress?.({ id: queued.id, status: priced ? "priced" : errors.length ? "failed" : "unpriced",
+        message: errors.map(e => `${e.source}: ${e.message}`).join("; ") || (priced ? undefined : "No listing found; previous value kept.") });
     } catch (e) {
       result.failed.push({ itemId: queued.id, message: e instanceof Error ? e.message : String(e) });
+      opts.onProgress?.({ id: queued.id, status: "failed", message: e instanceof Error ? e.message : String(e) });
     }
   }
 
   // A lock ending changes nothing about an item, so nothing else would notice.
   const settings = getSettings();
-  for (const alert of alertsForTradeLocks(all)) void deliver(createAlert(alert), settings);
+  for (const alert of alertsForTradeLocks(listItems())) void deliver(createAlert(alert), settings);
 
   return result;
 }

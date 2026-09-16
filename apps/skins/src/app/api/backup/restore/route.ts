@@ -1,3 +1,4 @@
+import { BodyLimitError, readFormDataLimited } from "@collectcollect/core/http";
 import { NextResponse } from "next/server";
 import { RESTORE_MAX_BYTES, restoreBackup, restoreThrottle } from "@/lib/backup";
 import { BusyError } from "@collectcollect/core/gate";
@@ -18,8 +19,9 @@ export async function POST(request: Request) {
   if (refused) return refused;
   let form: FormData;
   try {
-    form = await request.formData();
-  } catch {
+    form = await readFormDataLimited(request, RESTORE_MAX_BYTES + 64 * 1024);
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected multipart/form-data with an archive");
   }
   const file = form.get("archive");

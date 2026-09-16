@@ -9,7 +9,7 @@ import path from "node:path";
  * agree without a file to coordinate through, and two runs on one machine do
  * not collide.
  */
-export const ROOT = path.join(os.tmpdir(), `collectcollect-e2e-${process.pid}`);
+export const ROOT = process.env.COLLECTCOLLECT_E2E_ROOT ??= path.join(os.tmpdir(), `collectcollect-e2e-${process.pid}`);
 
 /** Written to freely by the specs. */
 export const OPEN_DATA_DIR = path.join(ROOT, "open");

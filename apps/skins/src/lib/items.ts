@@ -13,7 +13,7 @@ import {
 } from "./acquisitions";
 import { mirrorItem, unmirrorItem } from "./markdown/mirror";
 
-interface ItemRow {
+export interface ItemRow {
   id: number;
   market_hash_name: string;
   category: string;
@@ -60,7 +60,7 @@ function parseJson<T>(text: string | null, fallback: T): T {
   }
 }
 
-function rowToItem(row: ItemRow, stickers: AppliedSticker[]): ItemRecord {
+export function rowToItem(row: ItemRow, stickers: AppliedSticker[]): ItemRecord {
   return {
     id: row.id,
     marketHashName: row.market_hash_name,
@@ -367,12 +367,16 @@ export function updateItem(id: number, patch: Partial<ItemInput>): ItemRecord | 
       });
     if (patch.stickers !== undefined) writeStickers(id, merged.stickers);
     if (merged.quantity !== existing.quantity) reconcileToQuantity(id, merged.quantity);
-    if (patch.purchasePrice !== undefined) {
+    if (patch.purchasePrice !== undefined && merged.purchasePrice !== existing.purchasePrice) {
       // With one lot the purchase price is still something the owner sets
       // directly. With several it is an average of them, so the edit is ignored
       // and the recompute below puts the average back.
       const lots = listLots(id);
       const only = lots.length === 1 ? lots[0] : undefined;
+      if (lots.length > 1) throw new Error("Edit the individual purchases to change their costs.");
+      if (only && (only.remaining !== only.quantity || getDb().prepare("SELECT 1 FROM sale_lots WHERE acquisition_id=? LIMIT 1").get(only.id))) {
+        throw new Error("Copies from this purchase have been sold. Undo those sales before changing its cost.");
+      }
       if (only) {
         getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, only.id);
       }
@@ -797,9 +801,10 @@ export function allSnapshots(): PriceSnapshot[] {
 export function latestSnapshotsByItem(): Map<number, PriceSnapshot> {
   const rows = getDb()
     .prepare(
-      `SELECT s.* FROM price_snapshots s
-       JOIN (SELECT item_id, MAX(id) AS max_id FROM price_snapshots GROUP BY item_id) m
-         ON m.max_id = s.id`,
+      `SELECT s.* FROM items i JOIN price_snapshots s ON s.id = (
+        SELECT p.id FROM price_snapshots p WHERE p.item_id = i.id
+        ORDER BY p.fetched_at DESC, p.id DESC LIMIT 1
+      )`,
     )
     .all() as SnapshotRow[];
   const map = new Map<number, PriceSnapshot>();

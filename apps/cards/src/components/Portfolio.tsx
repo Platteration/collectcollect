@@ -3,8 +3,7 @@
 import { thinPoints } from "@collectcollect/core/series";
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { api } from "@/lib/api-client";
+import { PriceRefresh } from "@collectcollect/core/components/PriceRefresh";
 import { RANGES, change, sliceRange, type Allocation, type OutlookPoint, type PortfolioPoint, type Range, type Realized, type Returns, type Verdict } from "@/lib/analytics";
 import { money, when } from "@/lib/format";
 import { GAMES, GRADING_STATUSES, type Game, type GradingStatus, type Settings } from "@/lib/types";
@@ -12,6 +11,7 @@ import { PortfolioChart } from "./charts/PortfolioChart";
 import { OutlookChart } from "./charts/OutlookChart";
 import { VERDICT_STYLE } from "./verdict";
 import { AddToSubmission } from "./AddToSubmission";
+import { GradingProvenance } from "./GradingProvenance";
 
 export interface Opportunity {
   id: number;
@@ -37,6 +37,9 @@ export interface Holding {
 
 interface Props {
   points: PortfolioPoint[];
+  pricePoints: PortfolioPoint[];
+  historyStartedAt: string;
+  freshCount: number;
   cardCount: number;
   copyCount: number;
   pricedCount: number;
@@ -71,14 +74,12 @@ const GAME_COLORS: Record<Game, string> = {
   other: "var(--chart-series-5)",
 };
 
-export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefreshed, opportunities, holdings, returns, allocation, settings, realized, recentSales }: Props) {
-  const router = useRouter();
+export function Portfolio({ points: historyPoints, pricePoints, historyStartedAt, freshCount, cardCount, copyCount, pricedCount, lastRefreshed, opportunities, holdings, returns, allocation, settings, realized, recentSales }: Props) {
+  const [historyMode, setHistoryMode] = useState(true);
+  const points = historyMode ? historyPoints : pricePoints;
   const [range, setRange] = useState<Range>("1M");
   const [filter, setFilter] = useState<OutlookFilter>("active");
   const [hover, setHover] = useState<PortfolioPoint | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const visible = useMemo(() => thinPoints(sliceRange(points, range)), [points, range]);
   const latest = points[points.length - 1] ?? null;
@@ -90,26 +91,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
   }, [visible, hover]);
   const up = delta.amount >= 0;
 
-  const refreshAll = async () => {
-    setRefreshing(true);
-    setMessage(null);
-    setError(null);
-    try {
-      const r = await api<{ refreshed: number; unpriced: number; failed: Array<{ cardId: number; message: string }> }>("/api/prices/refresh", { method: "POST" });
-      const parts = [`Refreshed ${r.refreshed} card${r.refreshed === 1 ? "" : "s"}`];
-      if (r.unpriced) parts.push(`${r.unpriced} returned no prices (previous values kept)`);
-      if (r.failed.length) parts.push(`${r.failed.length} failed`);
-      setMessage(parts.join(", ") + ".");
-      router.refresh();
-    } catch (e) {
-      // A refusal is not a result, and must not wear the same grey as one.
-      setError((e as Error).message);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  if (cardCount === 0 && realized.sales === 0) {
+  if (cardCount === 0 && realized.sales === 0 && !historyPoints.some(p => p.value > 0)) {
     return (
       <div className="card-surface flex flex-col items-center gap-3 p-12 text-center">
         <p className="text-lg font-medium">Your portfolio is empty</p>
@@ -169,6 +151,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
                 </span>
               </div>
             )}
+            {realized.withoutCost > 0 && <p className="mt-1 text-xs text-neutral-500">{realized.withoutCost} sales have no recorded cost. Those costs are excluded, so the reported gain may be higher than the actual profit.</p>}
             {returns.cardsWithCost > 0 && (
               <div className="mt-1 text-sm">
                 <span className="text-neutral-500">Unrealized </span>
@@ -196,22 +179,15 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
           {/* On a phone this wraps under the figure, so it reads left-aligned there
               and right-aligned only once there is room beside the hero. */}
           <div className="flex flex-col items-start gap-2 sm:items-end">
-            <button type="button" className="btn-secondary" onClick={refreshAll} disabled={refreshing || cardCount === 0}>
-              {refreshing ? "Refreshing…" : "Refresh all prices"}
-            </button>
-            {error ? (
-              <span role="alert" className="text-xs font-medium" style={{ color: "var(--chart-bad-text)" }}>
-                {error}
-              </span>
-            ) : (
-              <span role="status" className="text-xs" style={{ color: "var(--muted)" }}>
-                {message ?? (lastRefreshed ? `Last refresh ${when(lastRefreshed)}` : "Never refreshed")}
-              </span>
-            )}
+            <PriceRefresh count={cardCount} detailPath="/cards" />
+            <span className="text-xs text-neutral-500">{freshCount} fresh · {Math.max(0, pricedCount - freshCount)} stale · {cardCount - pricedCount} unpriced</span>
+            {lastRefreshed && <span className="text-xs text-neutral-500">Newest quote {when(lastRefreshed)}</span>}
           </div>
         </div>
 
         <div className="mt-4">
+          <p className="mb-2 text-xs text-neutral-500">{historyMode ? `Collection value recorded since ${when(historyStartedAt)}. Changes include purchases, sales and corrections; this is not investment return.` : "Price history of current holdings: earlier points use the quantities held today."}</p>
+          <button type="button" className="btn-secondary mb-2" onClick={() => { setHistoryMode(!historyMode); setHover(null); }}>{historyMode ? "Show price history of current holdings" : "Show actual collection history"}</button>
           <PortfolioChart points={visible} up={up} onHover={setHover} />
         </div>
         <div className="mt-3 flex gap-1">
@@ -332,6 +308,7 @@ export function Portfolio({ points, cardCount, copyCount, pricedCount, lastRefre
                     <OutlookChart series={o.series} compact />
                   </div>
                   <p className="mt-1 text-xs text-neutral-500">{o.verdict.detail}</p>
+                  {last && <details className="mt-2 text-xs"><summary>Price basis and estimates</summary><GradingProvenance outlook={last} /></details>}
                   {o.ready && o.status !== "submitted" && o.status !== "keep_raw" && (
                     <div className="mt-2">
                       <AddToSubmission cardId={o.id} compact />

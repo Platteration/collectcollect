@@ -1,0 +1,79 @@
+name: Validate release candidate (no publishing)
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Candidate image version (no publication)
+        required: false
+        default: 0.1.0-candidate
+        type: string
+
+# License selection is deferred. No registry credentials or publishing rights.
+permissions:
+  contents: read
+env:
+  RELEASE_VERSION: ${{ inputs.version || '0.1.0-candidate' }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate candidate version
+        run: '[[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]'
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: APP=cards
+          tags: collectcollect-cards:${{ env.RELEASE_VERSION }}
+          load: true
+          push: false
+      - name: Check the cards image
+        run: |
+          docker run -d --name cards -p 127.0.0.1:3000:3000 -v candidate-data:/data "collectcollect-cards:$RELEASE_VERSION"
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:3000/api/health; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:3000/api/health
+          curl -fsS http://127.0.0.1:3000/goals > /dev/null
+          curl -fsS -H 'Content-Type: application/json' -H 'Origin: http://127.0.0.1:3000' --data '{"name":"Candidate persistence check"}' http://127.0.0.1:3000/api/goals > goal.json
+          docker restart cards
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:3000/api/health; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:3000/api/health
+          curl -fsS http://127.0.0.1:3000/api/goals | jq -e --arg id "$(jq -r .goal.id goal.json)" '.goals | any(.id == $id)'
+      - name: Package the validated candidate
+        run: |
+          mkdir -p release
+          docker save "collectcollect-cards:$RELEASE_VERSION" | gzip > "release/collectcollect-cards-$RELEASE_VERSION.tar.gz"
+          cp compose.candidate.yaml release/
+          cp .env.example release/
+          cp docs/SELF_HOSTING.md release/
+          cp docs/CHANGELOG.md release/
+          printf 'COLLECTCOLLECT_VERSION=%s\n' "$RELEASE_VERSION" > release/candidate.env
+      - uses: actions/upload-artifact@v4
+        with:
+          name: collectcollect-cards-${{ env.RELEASE_VERSION }}-candidate
+          path: release/
+          include-hidden-files: true
+          retention-days: 14
+      - if: always()
+        run: docker logs cards || true
+      - if: always()
+        run: docker rm -f cards || true

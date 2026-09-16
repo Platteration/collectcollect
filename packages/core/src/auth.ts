@@ -40,7 +40,7 @@ export interface Auth {
 
 /**
  * The parts of a token, or null when it is not one. The format is
- * `v2.<expires>.<issued>.<id>.<signature>`: when it stops being good, when it
+ * `v3.<expires>.<issued>.<id>.<signature>`: when it stops being good, when it
  * was made, which one it is, and the proof that this app made it. A token
  * from before the format carried only the first and the last, which is why it
  * could never be revoked short of changing the password.
@@ -48,12 +48,12 @@ export interface Auth {
 export function parseToken(token: string | undefined | null): { expires: number; issued: number; id: string; signature: string } | null {
   if (!token) return null;
   const parts = token.split(".");
-  if (parts.length !== 5 || parts[0] !== "v2") return null;
+  if (parts.length !== 5 || parts[0] !== "v3") return null;
   const expires = Number(parts[1]);
   const issued = Number(parts[2]);
   const id = parts[3] ?? "";
   const signature = parts[4] ?? "";
-  if (!Number.isFinite(expires) || !Number.isFinite(issued) || !/^[a-f0-9-]{36}$/.test(id) || !signature) return null;
+  if (!Number.isSafeInteger(expires) || !Number.isSafeInteger(issued) || issued < 0 || expires <= issued || !/^[a-f0-9-]{36}$/.test(id) || !/^[a-f0-9]{64}$/.test(signature)) return null;
   return { expires, issued, id, signature };
 }
 
@@ -85,10 +85,10 @@ export function createAuth(config: AuthConfig): Auth {
   // and so a test can turn the gate on and off between cases.
   const password = () => process.env[config.passwordEnv] ?? "";
 
-  function secret(): string {
-    // A dedicated secret is better, but deriving one keeps setup to a single
-    // variable. Changing the password invalidates existing sessions either way.
-    return process.env[config.secretEnv] || `${config.secretPrefix}${password()}`;
+  async function secret(): Promise<string> {
+    // Bind every token to this app AND its password, including installations
+    // with a separate signing secret. v2 cookies deliberately expire on upgrade.
+    return hmac(JSON.stringify(["session-v3", config.secretPrefix, password()]), process.env[config.secretEnv] || `${config.secretPrefix}${password()}`);
   }
 
   return {
@@ -114,7 +114,7 @@ export function createAuth(config: AuthConfig): Auth {
       const expires = now + SESSION_DAYS * 86400_000;
       const id = crypto.randomUUID();
       const body = `${expires}.${now}.${id}`;
-      return `v2.${body}.${await hmac(body, secret())}`;
+      return `v3.${body}.${await hmac(body, await secret())}`;
     },
 
     /**
@@ -127,8 +127,8 @@ export function createAuth(config: AuthConfig): Auth {
     async verifyToken(token: string | undefined | null, now = Date.now(), revoked?: Revoked): Promise<boolean> {
       const parsed = parseToken(token);
       if (!parsed) return false;
-      if (parsed.expires < now || parsed.issued > now + 60_000) return false;
-      if (!timingSafeEqual(parsed.signature, await hmac(`${parsed.expires}.${parsed.issued}.${parsed.id}`, secret()))) return false;
+      if (!password() || parsed.expires <= now || parsed.issued > now + 60_000 || parsed.expires - parsed.issued > SESSION_DAYS * 86400_000) return false;
+      if (!timingSafeEqual(parsed.signature, await hmac(`${parsed.expires}.${parsed.issued}.${parsed.id}`, await secret()))) return false;
       if (revoked) {
         if (parsed.issued < revoked.before) return false;
         if (revoked.ids.includes(parsed.id)) return false;

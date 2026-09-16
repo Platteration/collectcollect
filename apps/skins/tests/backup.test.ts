@@ -1,9 +1,10 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { lockDatabase, openDatabase, setDb, unlockDatabase } from "@/lib/db";
+import { closeDatabase, lockDatabase, openDatabase, setDb, unlockDatabase } from "@/lib/db";
 import { createItem, listItems } from "@/lib/items";
 import { archiveGate, buildBackup, putBack, replacedCollections, restoreBackup, restoreThrottle } from "@/lib/backup";
 import Database from "better-sqlite3";
@@ -41,7 +42,7 @@ async function zipOf(entries: Array<[string, Uint8Array]>): Promise<Uint8Array> 
   return new Uint8Array(Buffer.concat(parts));
 }
 
-afterEach(() => setDb(undefined));
+afterEach(() => { closeDatabase(); unlockDatabase(); vi.restoreAllMocks(); });
 
 /** Whether unzip is installed; without it the archive is still checked by this app's own reader elsewhere. */
 const HAS_UNZIP = spawnSync("unzip", ["-v"], { stdio: "ignore" }).status === 0;
@@ -183,7 +184,11 @@ describe("restore", () => {
     const dir = inventory();
     const archive = await archiveOf();
     createItem(clutchCase({ quantity: 3 }));
-    fs.mkdirSync(path.join(dir, "collectcollect-skins.db.restoring"));
+    const copy = fsp.copyFile.bind(fsp);
+    vi.spyOn(fsp, "copyFile").mockImplementation(async (from, to, mode) => {
+      if (String(to).includes(".restore-")) throw new Error("simulated disk full");
+      return copy(from, to, mode);
+    });
     await expect(restoreBackup(archive)).rejects.toThrow(/before anything was replaced/);
     expect(listItems()).toHaveLength(2);
     expect(fs.readdirSync(dir).filter((n) => n.startsWith("replaced-"))).toEqual([]);

@@ -58,16 +58,28 @@ function checklistForName(game: Game, setName: string): (Checklist & { fetchedAt
 /** Which cards of a checklist the owner has, matched on collector number then name. */
 export function ownedFromChecklist(checklist: Checklist, owned: CardRecord[]): Set<string> {
   const byNumber = new Map<string, CardRecord>();
-  const byName = new Map<string, CardRecord>();
+  const byName = new Map<string, CardRecord[]>();
+  const nameCounts = new Map<string, number>();
+  for (const entry of checklist.cards) {
+    const name = entry.name.trim().toLowerCase();
+    nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+  }
   for (const card of owned) {
+    if (card.quantity <= 0) continue;
     const n = normalizeNumber(card.cardNumber);
     if (n) byNumber.set(n, card);
-    byName.set(card.name.trim().toLowerCase(), card);
+    const name = card.name.trim().toLowerCase();
+    byName.set(name, [...(byName.get(name) ?? []), card]);
   }
   const have = new Set<string>();
   for (const entry of checklist.cards) {
     const n = normalizeNumber(entry.number);
-    if ((n && byNumber.has(n)) || byName.has(entry.name.trim().toLowerCase())) have.add(entry.number);
+    const name = entry.name.trim().toLowerCase();
+    const nameMatches = byName.get(name) ?? [];
+    // A known different number is a different printing. Name fallback is
+    // reserved for missing numbers and names unique in this checklist.
+    const uniqueName = nameCounts.get(name) === 1;
+    if ((n && byNumber.has(n)) || (uniqueName && nameMatches.some((card) => !n || !normalizeNumber(card.cardNumber)))) have.add(entry.number);
   }
   return have;
 }
@@ -83,6 +95,12 @@ export function setProgress(): SetProgress[] {
     groups.set(key, group);
   }
 
+  // Fetched sets remain visible before the first purchase and after a sale.
+  for (const row of getDb().prepare("SELECT game, set_name FROM set_checklists").all() as Array<{ game: Game; set_name: string }>) {
+    const key = groupKey(row.game, row.set_name);
+    if (!groups.has(key)) groups.set(key, { game: row.game, setName: row.set_name, cards: [] });
+  }
+
   return [...groups.entries()]
     .map(([key, group]) => {
       const checklist = checklistForName(group.game, group.setName);
@@ -91,7 +109,7 @@ export function setProgress(): SetProgress[] {
         game: group.game,
         key,
         setName: group.setName,
-        owned: group.cards.length,
+        owned: have?.size ?? group.cards.length,
         copies: group.cards.reduce((n, c) => n + c.quantity, 0),
         total: checklist ? checklist.cards.length : null,
         missing: checklist && have ? checklist.cards.length - have.size : null,
@@ -103,12 +121,13 @@ export function setProgress(): SetProgress[] {
 }
 
 /** Fetch and store the checklist for one of the owner's sets. */
-export async function refreshChecklist(game: Game, setName: string, fetchImpl: typeof fetch = fetch): Promise<Checklist | null> {
+export async function refreshChecklist(game: Game, setName: string, fetchImpl: typeof fetch = fetch, setCode?: string): Promise<Checklist | null> {
   const provider = setProviderFor(game);
   if (!provider) return null;
   const cards = listCards({ game }).filter((c) => (c.setName ?? "").trim().toLowerCase() === setName.trim().toLowerCase());
-  const hint = hintFromCards(cards);
-  if (!hint) return null;
+  const cached = checklistForName(game, setName);
+  const hint = hintFromCards(cards) ?? { game, setName, setCode: setCode ?? (game === "mtg" ? cached?.setId ?? null : null), externalIds: {} };
+  if (setCode) hint.setCode = setCode;
   const checklist = await provider.checklist({ ...hint, setName }, fetchImpl);
   if (checklist) saveChecklist(checklist);
   return checklist;

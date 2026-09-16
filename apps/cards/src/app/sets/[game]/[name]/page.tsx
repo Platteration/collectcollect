@@ -4,6 +4,7 @@ import { latestSnapshotsByCard } from "@/lib/cards";
 import { money } from "@/lib/format";
 import { setDetail } from "@/lib/sets";
 import { GAMES, isGame } from "@/lib/types";
+import { SetGoalButton } from "@/components/SetPlanning";
 
 export const dynamic = "force-dynamic";
 
@@ -26,9 +27,10 @@ export default async function SetPage({ params }: PageProps<"/sets/[game]/[name]
         </Link>
         <h1 className="mt-1 font-display text-3xl font-semibold">{checklist?.setName ?? setName}</h1>
         <p className="text-sm text-neutral-500">
-          {GAMES[game]} · {owned.length} card{owned.length === 1 ? "" : "s"} owned worth {money(ownedValue)}
+          {GAMES[game]} · {checklist ? have.size : owned.length} different cards owned worth {money(ownedValue)}
           {checklist ? ` · ${checklist.cards.length} in the set` : " · no checklist fetched yet"}
         </p>
+        {checklist && <SetGoalButton game={game} setId={checklist.setId} />}
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">

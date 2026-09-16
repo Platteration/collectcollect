@@ -15,11 +15,12 @@ describe("sales", () => {
     expect(listSalesForCard(card.id)).toHaveLength(1);
   });
 
-  it("keeps the recorded cost even if the card's purchase price is edited later", async () => {
+  it("refuses to rewrite a sold purchase and keeps its recorded cost", async () => {
     const card = createCard({ game: "mtg", name: "Lotus", purchasePrice: 50 });
     recordSale(card.id, { unitPrice: 90 });
     const { updateCard } = await import("@/lib/cards");
-    updateCard(card.id, { purchasePrice: 999 });
+    expect(() => updateCard(card.id, { purchasePrice: 999 })).toThrow(/sold/);
+    expect(getCard(card.id)?.purchasePrice).toBe(50);
     expect(listSalesForCard(card.id)[0]?.unitCost).toBe(50);
   });
 

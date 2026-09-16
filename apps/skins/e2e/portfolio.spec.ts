@@ -4,7 +4,7 @@ test.describe("the portfolio", () => {
   test("totals the inventory and shows what it is made of", async ({ page }) => {
     await page.goto("/");
     // 1180 + 51 + 34 + 35 × 1.40 + 128 = $1,442.00
-    await expect(page.getByText("$1,442.00")).toBeVisible();
+    await expect(page.getByText("$1,442.00", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Top holdings" })).toBeVisible();
     await expect(page.getByRole("link", { name: /Karambit/ })).toBeVisible();
     await expect(page.getByRole("heading", { name: "By kind" })).toBeVisible();
@@ -43,7 +43,7 @@ test.describe("the portfolio", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "1Y" }).click();
     await expect(page.getByRole("button", { name: "1Y" })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByText("$1,442.00")).toBeVisible();
+    await expect(page.getByText("$1,442.00", { exact: true })).toBeVisible();
   });
 
   test("shows what was sold and what it actually earned", async ({ page }) => {

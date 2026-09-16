@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     const files = collectionFiles();
     // The folder always holds its own explainer; a download of nothing but
     // that is not what anyone asked for.
-    if (!files.some((file) => file.name.startsWith("cards/"))) {
+    if (!files.some((file) => file.name.startsWith("cards/") || file.name.startsWith("goals/"))) {
       return jsonError("There is nothing in the collection yet", 404);
     }
     const entries: ZipEntry[] = files.map((file) => ({

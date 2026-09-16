@@ -161,7 +161,7 @@ export interface Realized {
   percent: number | null;
   sales: number;
   copies: number;
-  /** How many sales had no cost basis, so the gain understates them. */
+  /** Sales with unknown costs excluded; reported gain may overstate actual profit. */
   withoutCost: number;
 }
 

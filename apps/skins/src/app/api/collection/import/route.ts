@@ -1,3 +1,4 @@
+import { BodyLimitError, readFormDataLimited } from "@collectcollect/core/http";
 import { NextResponse } from "next/server";
 import { errorMessage, jsonError, tooLarge } from "@collectcollect/core/http";
 import { IMPORT_MAX_BYTES, importItemFiles, isItemFileName, itemFilesFromZip } from "@/lib/markdown/restore";
@@ -19,8 +20,9 @@ export async function POST(request: Request) {
   if (refused) return refused;
   let form: FormData;
   try {
-    form = await request.formData();
-  } catch {
+    form = await readFormDataLimited(request, IMPORT_MAX_BYTES + 64 * 1024);
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected multipart/form-data with an archive or Markdown files");
   }
 

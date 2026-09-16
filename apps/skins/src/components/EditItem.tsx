@@ -30,7 +30,7 @@ import {
  * every recorded price — so it asks first and says exactly that. Nothing else
  * in this app destroys a record.
  */
-export function EditItem({ item, storageUnits }: { item: ItemRecord; storageUnits: string[] }) {
+export function EditItem({ item, storageUnits, purchasePriceReadOnly = false }: { item: ItemRecord; storageUnits: string[]; purchasePriceReadOnly?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -73,7 +73,7 @@ export function EditItem({ item, storageUnits }: { item: ItemRecord; storageUnit
       collection: form.collection.trim() || null,
       nameTag: form.nameTag.trim() || null,
       quantity: Math.max(0, Number(form.quantity) || 0),
-      purchasePrice: form.purchasePrice.trim() === "" ? null : Number(form.purchasePrice),
+      purchasePrice: purchasePriceReadOnly ? undefined : form.purchasePrice.trim() === "" ? null : Number(form.purchasePrice),
       storageUnit: form.storageUnit.trim() || null,
       tradableAfter: form.tradableAfter || null,
       notes: form.notes.trim() || null,
@@ -215,7 +215,8 @@ export function EditItem({ item, storageUnits }: { item: ItemRecord; storageUnit
             <label className="label" htmlFor="edit-price">
               Paid, each
             </label>
-            <input id="edit-price" className="input" inputMode="decimal" value={form.purchasePrice} onChange={(e) => set({ purchasePrice: e.target.value })} />
+            <input id="edit-price" className="input" inputMode="decimal" value={form.purchasePrice} onChange={(e) => set({ purchasePrice: e.target.value })} readOnly={purchasePriceReadOnly} />
+            {purchasePriceReadOnly && <p className="text-xs">Calculated from purchases. Edit individual purchases in the ledger.</p>}
           </div>
           <div>
             <label className="label" htmlFor="edit-storage">

@@ -104,9 +104,10 @@ interface Props {
   value: CardFormState;
   onChange: (next: CardFormState) => void;
   disabled?: boolean;
+  purchasePriceReadOnly?: boolean;
 }
 
-export function CardForm({ value, onChange, disabled }: Props) {
+export function CardForm({ value, onChange, disabled, purchasePriceReadOnly }: Props) {
   // Offer the places cards are already kept, so locations stay consistent
   // instead of becoming "Binder 2", "binder2" and "Binder two".
   const [locations, setLocations] = useState<string[]>([]);
@@ -227,7 +228,8 @@ export function CardForm({ value, onChange, disabled }: Props) {
       )}
       <label className="block">
         <span className="label">Purchase price (USD)</span>
-        <input className="input" value={value.purchasePrice} onChange={set("purchasePrice")} inputMode="decimal" />
+        <input className="input" value={value.purchasePrice} onChange={set("purchasePrice")} inputMode="decimal" readOnly={purchasePriceReadOnly} />
+        {purchasePriceReadOnly && <span className="block text-xs text-neutral-500">Calculated from purchases. Edit an individual purchase in the ledger.</span>}
       </label>
       <label className="block">
         <span className="label">Kept in</span>

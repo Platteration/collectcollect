@@ -3,14 +3,14 @@ import { identifyCard, IdentifyError } from "@/lib/identify/claude";
 import { isValidUploadName, readUpload } from "@/lib/images";
 import { errorMessage, jsonError } from "@/lib/http";
 import { logError } from "@collectcollect/core/http";
-import { createThrottle } from "@collectcollect/core/throttle";
+import { identificationThrottle } from "@/lib/identify/throttle";
 
 /**
  * POST { uploads: string[], hint?: string } — identify a single card from one
  * or more previously stored uploads (front / back / slab label).
  */
 /** Each call sends photos to a paid vision model; ten a minute is a person, more is a loop. */
-export const throttle = createThrottle(10, 60_000, "identifications");
+export const throttle = identificationThrottle;
 
 export async function POST(request: Request) {
   const refused = throttle.check(request);
