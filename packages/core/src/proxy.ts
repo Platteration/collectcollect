@@ -99,7 +99,11 @@ export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
     const { pathname, search } = request.nextUrl;
     if (opts.publicPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return next();
 
-    if (await auth.verifyToken(request.cookies.get(auth.SESSION_COOKIE)?.value, Date.now(), opts.sessions?.revoked())) return next();
+    try {
+      if (await auth.verifyToken(request.cookies.get(auth.SESSION_COOKIE)?.value, Date.now(), opts.sessions?.revoked())) return next();
+    } catch {
+      return secure(NextResponse.json({ error: "Session records are temporarily unavailable" }, { status: 503 }));
+    }
 
     // An unauthenticated API call gets a status, not an HTML redirect.
     if (pathname.startsWith("/api/")) {

@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { listCards } from "./cards";
-import { DB_FILE, closeDatabase, dataDir, databaseFile, getDb, lockDatabase, unlockDatabase, uploadsDir } from "./db";
+import { DB_FILE, closeDatabase, dataDir, databaseFile, getDb, openDatabase, lockDatabase, unlockDatabase, uploadsDir } from "./db";
 import { isValidUploadName } from "./images";
-import { collectionDir, collectionFiles, rebuildCollection } from "./markdown/mirror";
+import { collectionDir, rebuildCollection } from "./markdown/mirror";
 import {
   listReplacedFolders,
   replacedAt,
@@ -14,20 +14,18 @@ import {
   swapCollection,
   type SwapDeps,
 } from "@collectcollect/core/collection-swap";
-import { assertZippable, fileChunks, isSafeEntryName, readZip, zipStream, type ZipEntry } from "@collectcollect/core/zip";
-import { createGate, type Gate } from "@collectcollect/core/gate";
+import { isSafeEntryName, readZip } from "@collectcollect/core/zip";
+import { stagedArchive } from "@collectcollect/core/staged-archive";
+import { prepareDatabase } from "@collectcollect/core/restore-validation";
+import { archiveGate, storageLock } from "./storage";
+import { writeSnapshotMarkdown } from "./markdown/snapshot";
+import { refreshRunning } from "./pricing/refresh";
+export { archiveGate } from "./storage";
+import { BusyError } from "@collectcollect/core/gate";
 import { createThrottle } from "@collectcollect/core/throttle";
 
 /** What the manifest calls this app, which is how its archives are told from the skins app's. */
 export const BACKUP_APP = "collectcollect";
-
-/**
- * A backup copies the database and a restore swaps it out; one running under
- * the other would copy half of each. Held on the global object so a
- * development reload cannot make two.
- */
-const globalForGate = globalThis as unknown as { __collectcollectArchiveGate?: Gate };
-export const archiveGate: Gate = (globalForGate.__collectcollectArchiveGate ??= createGate("A backup or restore is already running; try again in a moment"));
 
 /**
  * A restore swaps the whole database out, and putting a replaced one back is
@@ -45,81 +43,31 @@ export const restoreThrottle = createThrottle(6, 60_000, "restores");
  * log. The Markdown is included so that an archive is readable by a person
  * even if nothing can open the database any more.
  */
-export async function buildBackup(): Promise<{ filename: string; stream: ReadableStream<Uint8Array> }> {
-  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "collectcollect-backup-"));
-  const dbCopy = path.join(tmpDir, "collectcollect.db");
-  try {
-    await archiveGate.run(() => getDb().backup(dbCopy));
-  } catch (e) {
-    await fsp.rm(tmpDir, { recursive: true, force: true });
-    throw e;
-  }
+export function buildBackup(): Promise<{ filename: string; stream: ReadableStream<Uint8Array> }> {
+  return archiveGate.run(async () => {
+    const tmpDir = await fsp.mkdtemp(/* turbopackIgnore: true */ path.join(os.tmpdir(), "collectcollect-backup-"));
+    try {
+      await storageLock.run(async () => {
+        const dbCopy = path.join(tmpDir, DB_FILE);
+        await getDb().backup(dbCopy);
+        const snapshot = new Database(dbCopy, { fileMustExist: true });
+        snapshot.pragma("journal_mode = DELETE");
+        try {
+          const manifest: Record<string, unknown> = { app: BACKUP_APP, format: 1, schemaVersion: snapshot.pragma("user_version", { simple: true }), createdAt: new Date().toISOString() };
 
-  const uploads = uploadsDir();
-  const photoNames = (await fsp.readdir(uploads).catch(() => [] as string[])).filter(isValidUploadName).sort();
-
-  const entries: ZipEntry[] = [];
-  const manifest = Buffer.from(
-    JSON.stringify(
-      {
-        app: BACKUP_APP,
-        format: 1,
-        createdAt: new Date().toISOString(),
-        photos: photoNames.length,
-        note: "Restore by stopping the app and unpacking this archive into its data directory. The collection folder holds the same catalogue as Markdown, readable without the app.",
-      },
-      null,
-      2,
-    ) + "\n",
-  );
-  entries.push({ name: "manifest.json", size: manifest.length, chunks: () => [new Uint8Array(manifest)] });
-
-  const dbSize = (await fsp.stat(dbCopy)).size;
-  entries.push({ name: "collectcollect.db", size: dbSize, chunks: () => fileChunks(dbCopy) });
-
-  for (const name of photoNames) {
-    const full = path.join(uploads, name);
-    const size = (await fsp.stat(full)).size;
-    entries.push({ name: `uploads/${name}`, size, chunks: () => fileChunks(full) });
-  }
-
-  // The Markdown is a bonus inside the archive; the database and the photos are
-  // the backup. An unreadable collection folder must not cost someone theirs.
-  try {
-    for (const file of collectionFiles()) {
-      entries.push({ name: `collection/${file.name}`, size: file.size, chunks: () => fileChunks(file.path) });
-    }
-  } catch {
-    /* the archive still holds everything needed to restore */
-  }
-
-  // Check before a byte goes out: a limit hit halfway through a download
-  // leaves the reader with a truncated archive and no idea why.
-  assertZippable(entries);
-
-  const iterator = zipStream(entries);
-  // The database copy lives in a temp directory for as long as the download
-  // takes; it is removed when the stream ends, fails, or the client gives up.
-  const discard = () => void fsp.rm(tmpDir, { recursive: true, force: true });
-  const stream = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const { value, done } = await iterator.next();
-        if (done) {
-          controller.close();
-          discard();
-        } else {
-          controller.enqueue(value);
-        }
-      } catch (e) {
-        controller.error(e);
-        discard();
-      }
-    },
-    cancel: discard,
+          const photos = path.join(tmpDir, "uploads");
+          await fsp.mkdir(/* turbopackIgnore: true */ photos);
+          const names = (await fsp.readdir(/* turbopackIgnore: true */ uploadsDir())).filter(isValidUploadName).sort();
+          for (const name of names) await fsp.copyFile(/* turbopackIgnore: true */ path.join(uploadsDir(), name), path.join(photos, name));
+          validatePhotos(snapshot, new Set(names));
+          manifest.photos = names.length;
+          writeSnapshotMarkdown(snapshot, path.join(tmpDir, "collection"));
+          await fsp.writeFile(/* turbopackIgnore: true */ path.join(tmpDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+        } finally { snapshot.close(); }
+      });
+      return await stagedArchive(tmpDir, `collectcollect-backup-${new Date().toISOString().slice(0, 10)}.zip`);
+    } catch (error) { await fsp.rm(/* turbopackIgnore: true */ tmpDir, { recursive: true, force: true }); throw error; }
   });
-
-  return { filename: `collectcollect-backup-${new Date().toISOString().slice(0, 10)}.zip`, stream };
 }
 
 /** A quick description of what a backup would contain, for the Settings page. */
@@ -127,13 +75,13 @@ export function backupSummary(): { photos: number; databaseBytes: number; photoB
   const uploads = uploadsDir();
   let photos = 0;
   let photoBytes = 0;
-  for (const name of fs.existsSync(uploads) ? fs.readdirSync(uploads) : []) {
+  for (const name of fs.existsSync(/* turbopackIgnore: true */ uploads) ? fs.readdirSync(/* turbopackIgnore: true */ uploads) : []) {
     if (!isValidUploadName(name)) continue;
     photos++;
-    photoBytes += fs.statSync(path.join(uploads, name)).size;
+    photoBytes += fs.statSync(/* turbopackIgnore: true */ path.join(uploads, name)).size;
   }
   const dbFile = (getDb().pragma("database_list") as Array<{ file: string }>)[0]?.file;
-  const databaseBytes = dbFile && fs.existsSync(dbFile) ? fs.statSync(dbFile).size : 0;
+  const databaseBytes = dbFile && fs.existsSync(/* turbopackIgnore: true */ dbFile) ? fs.statSync(/* turbopackIgnore: true */ dbFile).size : 0;
   return { photos, databaseBytes, photoBytes };
 }
 
@@ -165,7 +113,14 @@ export interface RestoreResult {
  * is recoverable by hand. The archive is fully validated, and its database is
  * opened and inspected, before anything is moved.
  */
-export async function restoreBackup(archive: Uint8Array): Promise<RestoreResult> {
+export function restoreBackup(archive: Uint8Array): Promise<RestoreResult> {
+  return archiveGate.run(async () => {
+    if (refreshRunning()) throw new BusyError("Wait for the current price refresh before restoring a collection");
+    return restoreBackupWithin(archive);
+  });
+}
+
+async function restoreBackupWithin(archive: Uint8Array): Promise<RestoreResult> {
   const entries = await readZip(archive, RESTORE_LIMITS);
 
   let database: Uint8Array | null = null;
@@ -190,24 +145,32 @@ export async function restoreBackup(archive: Uint8Array): Promise<RestoreResult>
   if (!database) throw new Error("That archive has no collectcollect.db, so it is not a CollectCollect backup");
 
   // Unpack and check the database before touching anything that exists.
-  const staging = await fsp.mkdtemp(path.join(os.tmpdir(), "collectcollect-restore-"));
+  const staging = await fsp.mkdtemp(/* turbopackIgnore: true */ path.join(os.tmpdir(), "collectcollect-restore-"));
   const stagedDb = path.join(staging, "collectcollect.db");
-  await fsp.writeFile(stagedDb, database);
   let cards: number;
   try {
+    await fsp.writeFile(/* turbopackIgnore: true */ stagedDb, database);
     cards = inspectDatabase(stagedDb);
+    const stagedUploads = path.join(staging, "uploads");
+    await fsp.mkdir(/* turbopackIgnore: true */ stagedUploads);
+    for (const photo of photos) await fsp.writeFile(/* turbopackIgnore: true */ path.join(stagedUploads, photo.name), photo.data);
+    const snapshot = new Database(stagedDb, { readonly: true });
+    try {
+      validatePhotos(snapshot, new Set(photos.map((photo) => photo.name)));
+      writeSnapshotMarkdown(snapshot, path.join(staging, "collection"));
+    } finally { snapshot.close(); }
   } catch (e) {
-    await fsp.rm(staging, { recursive: true, force: true });
+    await fsp.rm(/* turbopackIgnore: true */ staging, { recursive: true, force: true });
     throw e;
   }
 
   let movedAsideTo: string;
   try {
-    ({ movedAsideTo } = await archiveGate.run(() =>
-      swapCollection(SWAP, { database: { path: stagedDb, move: false }, uploads: { photos } }),
+    ({ movedAsideTo } = await storageLock.run(() =>
+      swapCollection(SWAP, { database: { path: stagedDb, move: false }, uploads: { dir: path.join(staging, "uploads") }, collection: path.join(staging, "collection") }),
     ));
   } finally {
-    await fsp.rm(staging, { recursive: true, force: true });
+    await fsp.rm(/* turbopackIgnore: true */ staging, { recursive: true, force: true });
   }
   reopen();
   return { photos: photos.length, cards, movedAsideTo };
@@ -220,42 +183,49 @@ export async function restoreBackup(archive: Uint8Array): Promise<RestoreResult>
  */
 function assertOwnManifest(data: Uint8Array): void {
   let app: unknown;
+  let manifest: { app?: unknown; format?: unknown; schemaVersion?: unknown };
   try {
-    app = (JSON.parse(new TextDecoder().decode(data)) as { app?: unknown }).app;
+    manifest = JSON.parse(new TextDecoder().decode(data)) as typeof manifest;
+    app = manifest?.app;
   } catch {
     return;
   }
   if (typeof app === "string" && app !== BACKUP_APP) {
     throw new Error(`That is a backup of ${app === "collectcollect-skins" ? "the skins app" : app}, not of this collection`);
   }
+  if (manifest?.format !== undefined && manifest.format !== 1) throw new Error("Unsupported backup format; upgrade the app before restoring it");
+  if (typeof manifest?.schemaVersion === "number" && manifest.schemaVersion > 1) throw new Error("This backup uses a newer schema; upgrade the app before restoring it");
 }
 
 /**
- * Look inside a database file without changing it. Opening it the normal way
- * would create this app's tables in whatever file was uploaded and report it
- * as an empty collection; opened read-only, a file that is not a database, or
- * is some other app's, is refused as such.
+ * Inspect the incoming file read-only before migrating its private staging
+ * copy. A foreign, corrupt, future-version or incompatible schema never
+ * replaces the live collection.
  */
 function inspectDatabase(file: string): number {
-  let db: Database.Database;
   try {
-    db = new Database(file, { readonly: true, fileMustExist: true });
-  } catch (e) {
-    throw new Error(`The database in that archive could not be opened: ${e instanceof Error ? e.message : e}`);
-  }
-  try {
-    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((t) => t.name);
-    if (!tables.includes("cards")) throw new Error("The database in that archive is not a card collection: it has no cards table");
-    return (db.prepare("SELECT COUNT(*) AS n FROM cards").get() as { n: number }).n;
-  } catch (e) {
-    if (e instanceof Error && /not a card collection/.test(e.message)) throw e;
-    throw new Error(`The database in that archive could not be opened: ${e instanceof Error ? e.message : e}`);
-  } finally {
-    db.close();
+    return prepareDatabase(file, "cards", (name) => new Database(name, { readonly: true, fileMustExist: true }), openDatabase);
+  } catch (error) {
+    throw new Error(`The database in that archive could not be opened: ${error instanceof Error ? error.message : error}`);
   }
 }
 
-const SWAP: SwapDeps = { dataDir, databaseFile, closeDatabase, lockDatabase, unlockDatabase, collectionDir, uploadsDir };
+function validatePhotos(db: Database.Database, photos: Set<string>): void {
+  const references = db.prepare("SELECT DISTINCT image_path AS name FROM cards WHERE image_path IS NOT NULL AND image_path != ''").all() as Array<{ name: string }>;
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scan_drafts'").get()) {
+    const drafts = db.prepare("SELECT uploads FROM scan_drafts WHERE status NOT IN ('committed','discarded')").all() as Array<{ uploads: string }>;
+    for (const draft of drafts) {
+      const names: unknown = JSON.parse(draft.uploads);
+      if (!Array.isArray(names) || !names.every((name) => typeof name === "string")) throw new Error("A scan draft contains invalid photo references");
+      references.push(...names.map((name: string) => ({ name })));
+    }
+  }
+  for (const { name } of references) {
+    if (!isValidUploadName(name) || !photos.has(name)) throw new Error(`The collection references a missing photo: ${name}. Include every referenced photo before restoring or backing up.`);
+  }
+}
+
+const SWAP: SwapDeps = { dataDir, databaseFile, databaseName: DB_FILE, closeDatabase, lockDatabase, unlockDatabase, collectionDir, uploadsDir };
 
 /**
  * Open the restored database through the normal path, which also applies any
@@ -296,14 +266,14 @@ export function replacedCollections(): ReplacedCollection[] {
       name,
       replacedAt: replacedAt(name) ?? "",
       cards: countRows(path.join(folder, DB_FILE), "cards"),
-      photos: fs.existsSync(uploads) ? fs.readdirSync(uploads).filter(isValidUploadName).length : 0,
+      photos: fs.existsSync(/* turbopackIgnore: true */ uploads) ? fs.readdirSync(/* turbopackIgnore: true */ uploads).filter(isValidUploadName).length : 0,
     };
   });
 }
 
 /** How many rows a database file holds, read without opening it for writing; null when it cannot be read. */
 function countRows(file: string, table: string): number | null {
-  if (!fs.existsSync(file)) return null;
+  if (!fs.existsSync(/* turbopackIgnore: true */ file)) return null;
   try {
     const db = new Database(file, { readonly: true, fileMustExist: true });
     try {
@@ -323,31 +293,39 @@ function countRows(file: string, table: string): number | null {
  * new dated folder, so putting the wrong one back is itself undoable, and the
  * folder named is consumed. Only a name this app wrote is accepted.
  */
-export async function putBack(name: string): Promise<RestoreResult> {
-  const folder = replacedFolder(dataDir(), name);
-  if (!folder || !fs.existsSync(folder)) throw new Error("That is not one of the collections a restore replaced");
-  const database = path.join(folder, DB_FILE);
-  if (!fs.existsSync(database)) throw new Error(`${name} holds no database, so there is nothing to put back`);
-  const cards = countRows(database, "cards");
-  if (cards === null) throw new Error(`The database in ${name} could not be opened`);
+export function putBack(name: string): Promise<RestoreResult> {
+  return archiveGate.run(async () => {
+    if (refreshRunning()) throw new BusyError("Wait for the current price refresh before restoring a collection");
+    const folder = replacedFolder(dataDir(), name);
+    if (!folder || !fs.existsSync(/* turbopackIgnore: true */ folder)) throw new Error("That is not one of the collections a restore replaced");
+    const database = path.join(folder, DB_FILE);
+    if (!fs.existsSync(/* turbopackIgnore: true */ database)) throw new Error(`${name} holds no database, so there is nothing to put back`);
+    const staging = await fsp.mkdtemp(/* turbopackIgnore: true */ path.join(os.tmpdir(), "collectcollect-put-back-"));
+    try {
+      const stagedDb = path.join(staging, DB_FILE);
+      // SQLite backup also captures any old WAL files, without consuming the undo point.
+      const source = new Database(database, { readonly: true, fileMustExist: true });
+      try { await source.backup(stagedDb); } finally { source.close(); }
+      const cards = inspectDatabase(stagedDb);
 
-  const siblings = fs
-    .readdirSync(folder)
-    .filter((entry) => entry.startsWith(`${DB_FILE}-`))
-    .map((entry) => ({ path: path.join(folder, entry), name: entry }));
-  const uploads = path.join(folder, "uploads");
-  const collection = path.join(folder, "collection");
-  const photos = fs.existsSync(uploads) ? fs.readdirSync(uploads).length : 0;
+      const sourcePhotos = path.join(folder, "uploads");
+      const stagedPhotos = path.join(staging, "uploads");
+      await fsp.mkdir(/* turbopackIgnore: true */ stagedPhotos);
+      if (fs.existsSync(/* turbopackIgnore: true */ sourcePhotos)) await fsp.cp(/* turbopackIgnore: true */ sourcePhotos, stagedPhotos, { recursive: true });
+      const photos = (await fsp.readdir(/* turbopackIgnore: true */ stagedPhotos)).filter(isValidUploadName).length;
+      const sourceCollection = path.join(folder, "collection");
+      const stagedCollection = path.join(staging, "collection");
+      if (fs.existsSync(/* turbopackIgnore: true */ sourceCollection)) await fsp.cp(/* turbopackIgnore: true */ sourceCollection, stagedCollection, { recursive: true });
+      const snapshot = new Database(stagedDb, { readonly: true });
+      try {
+        validatePhotos(snapshot, new Set(await fsp.readdir(/* turbopackIgnore: true */ stagedPhotos)));
+        writeSnapshotMarkdown(snapshot, stagedCollection);
+      } finally { snapshot.close(); }
 
-  const { movedAsideTo } = await archiveGate.run(() =>
-    swapCollection(SWAP, {
-      database: { path: database, move: true, siblings },
-      uploads: fs.existsSync(uploads) ? { dir: uploads } : { photos: [] },
-      collection: fs.existsSync(collection) ? collection : undefined,
-    }),
-  );
-  // Everything of value has been moved out; what is left is an empty shell.
-  await fsp.rm(folder, { recursive: true, force: true });
-  reopen();
-  return { photos, cards, movedAsideTo };
+      const { movedAsideTo } = await storageLock.run(() => swapCollection(SWAP, { database: { path: stagedDb, move: false }, uploads: { dir: path.join(staging, "uploads") }, collection: stagedCollection }));
+      await fsp.rm(/* turbopackIgnore: true */ folder, { recursive: true, force: true });
+      reopen();
+      return { photos, cards, movedAsideTo };
+    } finally { await fsp.rm(/* turbopackIgnore: true */ staging, { recursive: true, force: true }); }
+  });
 }

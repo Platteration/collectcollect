@@ -7,6 +7,7 @@ import { CONDITIONS, GAMES } from "../types";
 import { INDEX_HEADERS, cardFileName, cardMarkdown, idFromFileName } from "./card";
 import { money, parseDocument, readMoney, readTable, table } from "@collectcollect/core/markdown/format";
 import { writeFileAtomic } from "@collectcollect/core/atomic-write";
+import { goalFiles, mirrorGoals } from "../goals/markdown";
 
 /**
  * A live plain-text copy of the collection.
@@ -230,6 +231,7 @@ function scheduleIndex(): void {
  * always right.
  */
 export function flushCollection(): void {
+  mirrorGoals();
   if (state.indexTimer) {
     clearTimeout(state.indexTimer);
     state.indexTimer = null;
@@ -506,15 +508,14 @@ export function collectionFiles(): Array<{ name: string; path: string; size: num
   for (const name of fs.existsSync(dir) ? fs.readdirSync(dir).sort() : []) {
     if (name.endsWith(".md")) add(`cards/${name}`, path.join(dir, name));
   }
-  return out;
+  return [...out, ...goalFiles()];
 }
 
-/** Every card file on disk, as text. Used by the reader and by backups. */
+/** Every card and goal file on disk, as text. Used by the reader and by backups. */
 export function readCardFiles(): Array<{ name: string; text: string }> {
   const dir = cardsDir();
-  if (!fs.existsSync(dir)) return [];
-  const out: Array<{ name: string; text: string }> = [];
-  for (const name of fs.readdirSync(dir).sort()) {
+  const out = goalFiles().map((file) => ({ name: file.name, text: fs.readFileSync(file.path, "utf8") }));
+  for (const name of fs.existsSync(dir) ? fs.readdirSync(dir).sort() : []) {
     if (!name.endsWith(".md")) continue;
     out.push({ name, text: fs.readFileSync(path.join(dir, name), "utf8") });
   }

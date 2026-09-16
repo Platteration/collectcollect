@@ -33,6 +33,9 @@ export interface RecentSale {
 
 interface Props {
   points: PortfolioPoint[];
+  pricePoints: PortfolioPoint[];
+  historyStartedAt: string;
+  freshCount: number;
   itemCount: number;
   copyCount: number;
   pricedCount: number;
@@ -47,8 +50,10 @@ interface Props {
 }
 
 export function Portfolio(props: Props) {
-  const { points, itemCount, copyCount, pricedCount, lockedCount, lastRefreshed, holdings, returns, byCategory, byRarity, realized, recentSales } =
+  const { points: historyPoints, pricePoints, historyStartedAt, freshCount, itemCount, copyCount, pricedCount, lockedCount, lastRefreshed, holdings, returns, byCategory, byRarity, realized, recentSales } =
     props;
+  const [historyMode, setHistoryMode] = useState(true);
+  const points = historyMode ? historyPoints : pricePoints;
   const [range, setRange] = useState<Range>("ALL");
   const [hover, setHover] = useState<PortfolioPoint | null>(null);
 
@@ -71,10 +76,13 @@ export function Portfolio(props: Props) {
           <span style={{ color: "var(--muted)" }}>
             {" "}
             {range === "ALL" ? "all time" : `over ${range}`}
-            {lastRefreshed && ` · priced ${when(lastRefreshed)}`}
+            {lastRefreshed && ` · newest quote ${when(lastRefreshed)}`}
           </span>
         </p>
 
+        <p className="mt-2 text-xs text-neutral-500">{freshCount} fresh · {Math.max(0, pricedCount - freshCount)} stale · {itemCount - pricedCount} unpriced</p>
+        <p className="mt-2 text-xs text-neutral-500">{historyMode ? `Inventory value recorded since ${when(historyStartedAt)}. Changes include purchases, sales and corrections; this is not investment return.` : "Price history of current holdings: earlier points use quantities held today."}</p>
+        <button type="button" className="btn-secondary mt-2" onClick={() => { setHistoryMode(!historyMode); setHover(null); }}>{historyMode ? "Show price history of current holdings" : "Show actual inventory history"}</button>
         <div className="mt-4 flex gap-1" role="group" aria-label="Time range">
           {RANGES.map((r) => (
             <button
@@ -206,8 +214,8 @@ export function Portfolio(props: Props) {
           </dl>
           {realized.withoutCost > 0 && (
             <p className="mt-2 text-xs" style={{ color: "var(--muted)" }}>
-              {realized.withoutCost} sale{realized.withoutCost === 1 ? "" : "s"} had no recorded cost, so the realised
-              figure understates {realized.withoutCost === 1 ? "it" : "them"}.
+              {realized.withoutCost} sale{realized.withoutCost === 1 ? "" : "s"} had no recorded cost. Those costs are excluded,
+              so the reported gain may be higher than the actual profit.
             </p>
           )}
           <ul className="mt-3 space-y-2">

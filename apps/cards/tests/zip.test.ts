@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import fsp from "node:fs/promises";
+import { closeDatabase } from "@/lib/db";
+afterEach(() => { closeDatabase(); vi.restoreAllMocks(); });
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -145,7 +148,8 @@ describe("backup archive", () => {
     expect((restored.prepare("SELECT name FROM cards").all() as Array<{ name: string }>)[0]?.name).toBe("Backed-up Charizard");
 
     delete process.env.DATA_DIR;
-    fsm.rmSync(dir, { recursive: true, force: true });
+    closeDatabase();
+    fsm.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 });
 
@@ -170,7 +174,8 @@ describe("zip reader", () => {
       expect(new TextDecoder().decode(manifest!.data), label).toBe(text);
       expect(entries.find((e) => e.name.endsWith("a.jpg"))!.data).toEqual(new Uint8Array([1, 2, 3, 4, 5]));
     }
-    fsm.rmSync(dir, { recursive: true, force: true });
+    closeDatabase();
+    fsm.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   it("refuses damaged, oversized and unrecognised files", async () => {
@@ -212,7 +217,8 @@ describe("zip reader", () => {
     const archive = new Uint8Array(fsm.readFileSync(file));
     expect(archive.length).toBeLessThan(1024 * 1024);
     await expect(readZip(archive, { maxTotalBytes: 1_000_000, maxEntries: 10 })).rejects.toThrow(/expands to more/);
-    fsm.rmSync(dir, { recursive: true, force: true });
+    closeDatabase();
+    fsm.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   it("rejects entry names that would escape the target directory", async () => {
@@ -257,7 +263,8 @@ describe("restore", () => {
     expect(fsm.existsSync(pathm.join(result.movedAsideTo, "collectcollect.db"))).toBe(true);
 
     delete process.env.DATA_DIR;
-    fsm.rmSync(dir, { recursive: true, force: true });
+    closeDatabase();
+    fsm.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   it("replaces the database the app is actually using, not just the default path", async () => {
@@ -288,8 +295,10 @@ describe("restore", () => {
 
     delete process.env.DATABASE_FILE;
     delete process.env.DATA_DIR;
+    closeDatabase();
     setDb(undefined);
-    fsm.rmSync(dir, { recursive: true, force: true });
+    closeDatabase();
+    fsm.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   it("refuses an archive that is not one of its own backups", async () => {
@@ -333,7 +342,8 @@ describe("restore", () => {
     expect(fsm.readdirSync(dir).filter((n) => n.startsWith("replaced-"))).toHaveLength(0);
 
     delete process.env.DATA_DIR;
-    fsm.rmSync(dir, { recursive: true, force: true });
+    closeDatabase();
+    fsm.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 });
 
@@ -365,9 +375,11 @@ describe("a backup and a restore at once", () => {
     await holding;
     expect((await restoreBackup(archive)).cards).toBe(1);
 
+    closeDatabase();
     setDb(undefined);
     delete process.env.DATA_DIR;
-    fsm.rmSync(dir, { recursive: true, force: true });
+    closeDatabase();
+    fsm.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 });
 
@@ -437,8 +449,10 @@ describe("what a restore takes with it", () => {
     expect(fsm.readdirSync(pathm.join(result.movedAsideTo, "uploads")).sort()).toEqual([kept, later].sort());
 
     delete process.env.DATA_DIR;
+    closeDatabase();
     setDb(undefined);
-    fsm.rmSync(dir, { recursive: true, force: true });
+    closeDatabase();
+    fsm.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 });
 
@@ -495,8 +509,10 @@ describe("putting a replaced collection back", () => {
     ]);
 
     delete process.env.DATA_DIR;
+    closeDatabase();
     setDb(undefined);
-    fsm.rmSync(dir, { recursive: true, force: true });
+    closeDatabase();
+    fsm.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   it("only accepts a folder a restore wrote", async () => {
@@ -511,28 +527,36 @@ describe("putting a replaced collection back", () => {
     }
     await expect(putBack("replaced-2026-01-01T00-00-00-000Z")).rejects.toThrow(/no database/);
     delete process.env.DATA_DIR;
+    closeDatabase();
     setDb(undefined);
-    fsm.rmSync(dir, { recursive: true, force: true });
+    closeDatabase();
+    fsm.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   it("leaves the collection untouched when the restore fails before the swap", async () => {
-    const { dir, archive, fsm, pathm } = await collectionWithBackup("cc-swap-early-");
+    const { dir, archive, fsm } = await collectionWithBackup("cc-swap-early-");
     const { createCard, listCards } = await import("@/lib/cards");
     const { restoreBackup } = await import("@/lib/backup");
     const { setDb } = await import("@/lib/db");
     createCard({ game: "mtg", name: "Still here afterwards" });
     // Bringing the incoming database beside the live one is the step that can
     // fail for want of disk; a directory in its way fails it the same way.
-    fsm.mkdirSync(pathm.join(dir, "collectcollect.db.restoring"));
+    const copy = fsp.copyFile.bind(fsp);
+    vi.spyOn(fsp, "copyFile").mockImplementation(async (from, to, mode) => {
+      if (String(to).includes(".restore-")) throw new Error("simulated disk full");
+      return copy(from, to, mode);
+    });
     await expect(restoreBackup(archive)).rejects.toThrow(/before anything was replaced.*untouched/);
     expect(listCards().map((c) => c.name).sort()).toEqual(["Before the restore", "Still here afterwards"]);
     expect(fsm.readdirSync(dir).filter((n) => n.startsWith("replaced-"))).toEqual([]);
     delete process.env.DATA_DIR;
+    closeDatabase();
     setDb(undefined);
-    fsm.rmSync(dir, { recursive: true, force: true });
+    closeDatabase();
+    fsm.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("keeps the restored database live when the restore fails after the swap, and says where the old one went", async () => {
+  it("rolls back the database when the upload directory cannot be installed", async () => {
     const { dir, archive, fsm, pathm } = await collectionWithBackup("cc-swap-late-");
     const { createCard, listCards } = await import("@/lib/cards");
     const { restoreBackup } = await import("@/lib/backup");
@@ -543,16 +567,16 @@ describe("putting a replaced collection back", () => {
     fsm.rmSync(pathm.join(dir, "uploads"), { recursive: true, force: true });
     fsm.writeFileSync(pathm.join(dir, "uploads"), "not a folder");
     const message = await restoreBackup(archive).catch((e: Error) => e.message);
-    expect(message).toMatch(/part way through/);
-    expect(message).toMatch(/replaced-\d{4}/);
+    expect(message).toMatch(/untouched/);
     // The restored database is the live one, not an empty one and not the old one.
-    expect(listCards().map((c) => c.name)).toEqual(["Before the restore"]);
+    expect(listCards().map((c) => c.name).sort()).toEqual(["Added after the backup", "Before the restore"]);
     const aside = fsm.readdirSync(dir).filter((n) => n.startsWith("replaced-"));
-    expect(aside).toHaveLength(1);
-    expect(fsm.existsSync(pathm.join(dir, at(aside, 0), "collectcollect.db"))).toBe(true);
+    expect(aside).toHaveLength(0);
     delete process.env.DATA_DIR;
+    closeDatabase();
     setDb(undefined);
-    fsm.rmSync(dir, { recursive: true, force: true });
+    closeDatabase();
+    fsm.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 });
 

@@ -35,6 +35,54 @@ export function tooLarge(request: Request, max: number, message: string) {
   return null;
 }
 
+export class BodyLimitError extends Error {
+  readonly status = 413;
+  constructor(max: number) {
+    super(`Request body exceeds the ${max} byte limit`);
+    this.name = "BodyLimitError";
+  }
+}
+
+/** Enforce actual bytes, including chunked bodies and extra multipart fields. */
+export async function readBodyLimited(request: Request, max: number): Promise<Uint8Array<ArrayBuffer>> {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > max) {
+    await request.body?.cancel().catch(() => undefined);
+    throw new BodyLimitError(max);
+  }
+  if (!request.body) return new Uint8Array(0);
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > max) {
+        await reader.cancel().catch(() => undefined);
+        throw new BodyLimitError(max);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  return body;
+}
+
+export async function readJsonLimited<T = unknown>(request: Request, max = 1024 * 1024): Promise<T> {
+  return JSON.parse(new TextDecoder().decode(await readBodyLimited(request, max))) as T;
+}
+
+export async function readFormDataLimited(request: Request, max: number): Promise<FormData> {
+  const body = await readBodyLimited(request, max);
+  return new Response(body, { headers: { "content-type": request.headers.get("content-type") ?? "" } }).formData();
+}
+
 /**
  * A route parameter as a row id, or null.
  *

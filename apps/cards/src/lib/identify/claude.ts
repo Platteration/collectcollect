@@ -59,10 +59,10 @@ interface ImageInput {
   buffer: Buffer;
 }
 
-export async function identifyCard(images: ImageInput[], hint?: string): Promise<Identification> {
+export async function identifyCard(images: ImageInput[], hint?: string, timeoutMs?: number): Promise<Identification> {
   if (images.length === 0) throw new IdentifyError("At least one image is required", 400);
 
-  const client = new Anthropic();
+  const client = new Anthropic(timeoutMs ? { timeout: timeoutMs, maxRetries: 0 } : {});
   const content: Anthropic.Beta.BetaContentBlockParam[] = [];
   for (const image of images) {
     const prepared = await prepareForVision(image.buffer);

@@ -3,13 +3,14 @@
 import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { ApiError, api, runQueue, withRetryAfter } from "@/lib/api-client";
-import type { CardRecord, Identification, PriceSummary } from "@/lib/types";
-import { CardForm, emptyForm, formToInput, type CardFormState } from "./CardForm";
+import type { CardInput, CardRecord, Identification, PriceSummary } from "@/lib/types";
+import { CardForm, emptyForm, formFromCard, formToInput, type CardFormState } from "./CardForm";
 import { PricePanel } from "./PricePanel";
 
 type Status = "uploading" | "identifying" | "review" | "saving" | "saved" | "error";
 
 interface Item {
+  externalIds?: Record<string, string>;
   key: string;
   uploads: string[];
   previews: string[];
@@ -61,8 +62,12 @@ function formFromIdentification(id: Identification): CardFormState {
   };
 }
 
-export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
-  const [items, setItems] = useState<Item[]>([]);
+export function AddCardFlow({ claudeConfigured, initialInput }: { claudeConfigured: boolean; initialInput?: Partial<CardInput> }) {
+  const [items, setItems] = useState<Item[]>(() => initialInput ? [{
+    key: "prefilled-card", uploads: [], previews: [], status: "review", error: null, identification: null,
+    form: formFromCard({ ...initialInput, game: initialInput.game ?? "pokemon", name: initialInput.name ?? "" }),
+    externalIds: initialInput.externalIds, price: null, pricing: false, savedId: null, hint: "", accentColor: null, duplicates: null,
+  }] : []);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -186,7 +191,7 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
       const input = formToInput(item.form);
       const { summary } = await api<{ summary: PriceSummary }>("/api/prices/lookup", {
         method: "POST",
-        body: JSON.stringify({ ...input, externalIds: {} }),
+        body: JSON.stringify({ ...input, externalIds: item.externalIds ?? {} }),
       });
       patch(item.key, { price: summary, pricing: false });
     } catch (e) {
@@ -211,7 +216,7 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
       }
       const { card } = await api<{ card: CardRecord }>("/api/cards", {
         method: "POST",
-        body: JSON.stringify({ ...input, imagePath: item.uploads[0] ?? null, accentColor: item.accentColor, identification: item.identification }),
+        body: JSON.stringify({ ...input, externalIds: item.externalIds ?? {}, imagePath: item.uploads[0] ?? null, accentColor: item.accentColor, identification: item.identification }),
       });
       // Store a first price snapshot so the collection view has a value right away.
       api(`/api/cards/${card.id}/price`, { method: "POST" }).catch(() => undefined);

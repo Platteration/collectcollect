@@ -6,7 +6,7 @@ import { logError } from "@collectcollect/core/http";
 
 /** POST { game, setName } — fetch the published checklist for one of your sets. */
 export async function POST(request: Request) {
-  let body: { game?: unknown; setName?: unknown };
+  let body: { game?: unknown; setName?: unknown; setCode?: unknown };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -14,16 +14,17 @@ export async function POST(request: Request) {
   }
   if (!isGame(body.game)) return jsonError("Unknown game");
   if (typeof body.setName !== "string" || !body.setName.trim()) return jsonError("Which set?");
+  if (body.setName.length > 500 || (body.setCode !== undefined && (typeof body.setCode !== "string" || body.setCode.length > 100))) return jsonError("Set name or code is too long");
 
   try {
-    const checklist = await refreshChecklist(body.game, body.setName);
+    const checklist = await refreshChecklist(body.game, body.setName, fetch, typeof body.setCode === "string" ? body.setCode : undefined);
     if (!checklist) {
       return jsonError(
         "No checklist could be found for that set. Its name may not match the source's, or this game has no checklist source.",
         404,
       );
     }
-    return NextResponse.json({ setName: checklist.setName, cards: checklist.cards.length });
+    return NextResponse.json({ setId: checklist.setId, setName: checklist.setName, cards: checklist.cards.length });
   } catch (e) {
     logError("sets/refresh", e);
     return jsonError(`Could not fetch that checklist: ${errorMessage(e)}`, 502);

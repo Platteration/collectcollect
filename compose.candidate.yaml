@@ -1,0 +1,24 @@
+# Local image loaded from the validated candidate artifact; no registry pull.
+# An isolated volume prevents candidate testing from touching the live collection.
+services:
+  cards:
+    image: collectcollect-cards:${COLLECTCOLLECT_VERSION:?Use --env-file candidate.env}
+    pull_policy: never
+    ports:
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATA_DIR: /data
+    volumes:
+      - candidate-data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 30s
+    restart: unless-stopped
+volumes:
+  candidate-data:
+    name: collectcollect-candidate-data

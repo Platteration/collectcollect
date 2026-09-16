@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { parseToken, type Auth } from "./auth";
 import type { SessionStore } from "./sessions";
 import { createThrottle } from "./throttle";
-import { jsonError } from "./http";
+import { BodyLimitError, jsonError, readJsonLimited } from "./http";
 import { isSecureRequest } from "./net";
 import { clientKey } from "./throttle";
 
@@ -47,17 +47,20 @@ export function createAuthRoutes(auth: Auth, opts: { sessions?: SessionStore } =
       return response;
     }
 
+    // Reserve synchronously: parallel requests must count before password
+    // verification yields. Never clear other clients to admit a new one.
+    if (attempts.size >= MAX_TRACKED && !record) return jsonError("Too many sign-in attempts; try again later", 429);
+    attempts.set(key, { count: (record?.count ?? 0) + 1, until: record?.until ?? now + LOCKOUT_MS });
+
     let body: { password?: unknown };
     try {
-      body = (await request.json()) as { password?: unknown };
-    } catch {
+      body = await readJsonLimited(request, 4096);
+    } catch (e) {
+      if (e instanceof BodyLimitError) return jsonError(e.message, 413);
       return jsonError("Expected a JSON body");
     }
 
-    if (typeof body.password !== "string" || !(await auth.passwordMatches(body.password))) {
-      const next = record && now < record.until ? record.count + 1 : 1;
-      if (attempts.size >= MAX_TRACKED && !attempts.has(key)) attempts.clear();
-      attempts.set(key, { count: next, until: now + LOCKOUT_MS });
+    if (!body || typeof body.password !== "string" || !(await auth.passwordMatches(body.password))) {
       return jsonError("Wrong password", 401);
     }
 
@@ -83,8 +86,9 @@ export function createAuthRoutes(auth: Auth, opts: { sessions?: SessionStore } =
    * recorded as ended, so a copy of it somewhere else is no longer good either.
    */
   async function DELETE(request: Request) {
-    const presented = parseToken(cookieValue(request, auth.SESSION_COOKIE));
-    if (presented && sessions) sessions.revoke(presented.id, presented.expires);
+    const token = cookieValue(request, auth.SESSION_COOKIE);
+    const presented = parseToken(token);
+    if (presented && sessions && await auth.verifyToken(token)) sessions.revoke(presented.id, presented.expires);
     return clearCookie(NextResponse.json({ ok: true }));
   }
 
@@ -111,7 +115,9 @@ function cookieValue(request: Request, name: string): string | undefined {
   for (const part of header.split(";")) {
     const eq = part.indexOf("=");
     if (eq < 0) continue;
-    if (part.slice(0, eq).trim() === name) return decodeURIComponent(part.slice(eq + 1).trim());
+    if (part.slice(0, eq).trim() === name) {
+      try { return decodeURIComponent(part.slice(eq + 1).trim()); } catch { return undefined; }
+    }
   }
   return undefined;
 }

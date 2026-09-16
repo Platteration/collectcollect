@@ -12,6 +12,10 @@ Snap a photo of a card and CollectCollect:
 
 ## Quick start
 
+For a persistent cards-only installation, see [Self-hosting](docs/SELF_HOSTING.md).
+Manual entry and CSV import work without API keys. The first-run checklist links
+to setup, provider connection tests, and backups.
+
 ```bash
 npm install
 cp .env.example .env      # add ANTHROPIC_API_KEY (and optional price-source keys)
@@ -22,9 +26,9 @@ Production: `npm run build && npm start`. Everything is stored locally in `apps/
 
 > Upgrading from a version before the app moved into `apps/cards`? Your collection is still where it was. On start the app looks for a `data` folder above itself and uses the one it finds, saying so in the log. Move it to `apps/cards/data`, or set `DATA_DIR`, to settle it permanently.
 
-Docker: `docker compose up --build` brings up both apps — the card app on 3000
-and the skins app on 3001 — each with its own image and its own named volume at
-`/data`. `docker compose up --build cards` brings up just one. To build an image
+Docker: `docker compose up -d --build cards` starts the card app on 3000 with its
+own named volume at `/data`. Add skins with `docker compose up -d --build skins`
+on port 3001. `docker compose up --build` still starts both apps. To build an image
 directly, pick the app with a build argument:
 
 ```bash
@@ -113,6 +117,22 @@ The archive is written and read by a small built-in zip writer and reader rather
 **Export.** The Collection page has an *Export CSV* button (also `GET /api/export`) with every card, its grade or condition, purchase price, and latest ungraded / PSA 10 / your-copy prices.
 
 ## Card identification
+
+**Collecting goals.** `/goals` holds wishlists, target quantities, priorities,
+optional dates and a budget for remaining cards. Each price ceiling is your
+shopping limit; unknown ceilings remain unknown. Progress follows current
+holdings, assigning each copy once within a goal and preferring specific
+printings. A copy can count toward independent goals. Fetch a set before buying
+its first card and choose *Complete this set*, or enter a manual wishlist for
+any game. *Add acquired card* prefills the normal card form without recording a
+purchase until you save. Goals are included in database backups and the
+Markdown folder, and can be archived without removing their history.
+
+Steam imports use a reviewed server snapshot tied to the selected account.
+Changing the SteamID clears the preview. Apply consumes that exact snapshot
+once within ten minutes; a restart or expiry requires another preview. The
+result lists every missing item, lower stack count and failed row without
+silently removing anything.
 
 Identification runs on Claude (`claude-opus-5` by default; override with `CLAUDE_MODEL`). Photos are downscaled server-side before being sent. The model returns a structured identification with a confidence score and alternative matches when the card is ambiguous; you can add a back or slab-label photo, give it a hint ("it's Japanese"), and re-identify. Without an Anthropic key the app still works for manual entry and pricing.
 

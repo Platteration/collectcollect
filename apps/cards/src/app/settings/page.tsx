@@ -11,6 +11,10 @@ import Link from "next/link";
 import { when } from "@/lib/format";
 import { providerStatuses } from "@/lib/status";
 import { GAMES } from "@/lib/types";
+import { ProviderTest } from "@/components/ProviderTest";
+import { SetupChecklist } from "@/components/SetupChecklist";
+import { setupStatus } from "@/lib/setup";
+import { goalMirrorError } from "@/lib/goals/markdown";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +31,8 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <h1 className="font-display text-2xl font-semibold uppercase tracking-wide">Settings</h1>
+      <SetupChecklist status={setupStatus()} reopen />
+      {goalMirrorError() && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">The Markdown copy of your goals needs attention: {goalMirrorError()}. Your goals are safe in the database. Rewrite the files after resolving the storage problem.</p>}
 
       {authEnabled() && (
         <section className="card-surface p-4">
@@ -49,6 +55,7 @@ export default function SettingsPage() {
             { href: "/add", label: "Add cards" },
             { href: "/scan", label: "Scan a stack" },
             { href: "/submissions", label: "Grading submissions" },
+            { href: "/goals", label: "Collecting goals" },
             { href: "/report", label: "Appraisal report" },
             { href: "/import", label: "Import a CSV" },
           ].map((item) => (
@@ -61,10 +68,11 @@ export default function SettingsPage() {
         </ul>
       </nav>
 
-      <section className="card-surface p-4">
+      <section id="data-sources" className="card-surface scroll-mt-24 p-4">
         <h2 className="font-semibold">Data sources</h2>
         <p className="mt-1 text-sm text-neutral-500">
           Configured through environment variables (see <code>.env.example</code>). Restart the server after changing them.
+          Manual cataloging needs no keys. Set <code>APP_PASSWORD</code> before making this collection reachable beyond your machine; use a TLS reverse proxy for remote access.
         </p>
         <ul className="mt-3 divide-y divide-black/5 dark:divide-white/5">
           {providers.map((p) => (
@@ -79,16 +87,17 @@ export default function SettingsPage() {
                     </span>
                   ))}
                 </div>
+                <ProviderTest id={p.id} />
               </div>
               <span className={`badge ${p.configured ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100" : "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200"}`}>
-                {p.configured ? "Ready" : p.optional ? "Not configured" : "Missing"}
+                {p.configured ? "Configured" : "Not configured"}
               </span>
             </li>
           ))}
         </ul>
       </section>
 
-      <section className="card-surface p-4">
+      <section id="backup" className="card-surface scroll-mt-24 p-4">
         <h2 className="font-semibold">Backup</h2>
         <p className="mt-1 text-sm text-neutral-500">
           One zip holding a consistent copy of the database and every photo: {backup.photos} photo

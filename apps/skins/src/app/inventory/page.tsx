@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { money } from "@collectcollect/core/format";
-import { latestSnapshotsByItem, listItems, listStorageUnits, type ListOptions } from "@/lib/items";
+import { costBasisByItem, latestSnapshotsByItem, listItems, listStorageUnits, type ListOptions } from "@/lib/items";
 import { holdingValue } from "@/lib/valuation";
 import { CATEGORIES, CATEGORY_IDS, EXTERIORS, EXTERIOR_IDS, RARITIES, RARITY_IDS, type Category, type Exterior, type Rarity } from "@/lib/types";
 import { ItemTile } from "@/components/ItemTile";
@@ -28,13 +28,15 @@ export default async function InventoryPage({ searchParams }: PageProps<"/invent
     search: one("q") ?? undefined,
     storageUnit: one("unit"),
   };
-  const items = listItems(opts);
+  const missingCost = one("cost") === "missing";
+  const basis = costBasisByItem();
+  const items = listItems(opts).filter((item) => !missingCost || (basis.get(item.id)?.copiesWithoutCost ?? 0) > 0);
   const latest = latestSnapshotsByItem();
   const units = listStorageUnits();
   // An empty grid means two different things: nothing matched what was asked
   // for, or there is nothing at all yet. "Clear the filters" is useless advice
   // for the second, so it is only given for the first.
-  const filtered = Object.values(opts).some((value) => value !== undefined && value !== "");
+  const filtered = missingCost || Object.values(opts).some((value) => value !== undefined && value !== "");
 
   const total = items.reduce((n, i) => n + (holdingValue(i, latest.get(i.id)) ?? 0), 0);
   const unpriced = items.filter((i) => holdingValue(i, latest.get(i.id)) === null).length;
@@ -71,7 +73,7 @@ export default async function InventoryPage({ searchParams }: PageProps<"/invent
           aria-label="Search the inventory"
         />
         {/* Searching must not silently drop the filters already applied. */}
-        {(["category", "exterior", "rarity", "stattrak", "locked", "unit"] as const).map((key) =>
+        {(["category", "exterior", "rarity", "stattrak", "locked", "unit", "cost"] as const).map((key) =>
           one(key) ? <input key={key} type="hidden" name={key} value={one(key)} /> : null,
         )}
         <button type="submit" className="btn-secondary">
@@ -110,6 +112,7 @@ export default async function InventoryPage({ searchParams }: PageProps<"/invent
           ))}
         </FilterRow>
         <FilterRow label="Other">
+          <Chip href={href({ cost: missingCost ? undefined : "missing" })} on={missingCost}>Missing purchase costs</Chip>
           <Chip href={href({ stattrak: opts.stattrak ? undefined : "1" })} on={Boolean(opts.stattrak)}>
             StatTrak™
           </Chip>
@@ -124,6 +127,7 @@ export default async function InventoryPage({ searchParams }: PageProps<"/invent
         </FilterRow>
       </nav>
 
+      {missingCost && items.length > 0 && <div className="card-surface flex flex-wrap gap-3 p-3 text-sm">{items.map((item) => <Link key={item.id} href={`/items/${item.id}#purchases`} className="underline">Record costs for {item.marketHashName}</Link>)}</div>}
       {items.length === 0 && !filtered ? (
         <section className="card-surface p-6 text-center">
           <p className="font-display text-lg font-semibold">Nothing here yet</p>

@@ -16,7 +16,7 @@ test.describe("password gate", () => {
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 
     await page.goto("/");
-    await expect(page.getByText("Inventory value")).toBeVisible();
+    await expect(page.getByText("Inventory value", { exact: true })).toBeVisible();
   });
 
   test("an API call without a session is refused", async ({ request }) => {

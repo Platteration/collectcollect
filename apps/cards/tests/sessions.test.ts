@@ -35,7 +35,7 @@ describe("the session store", () => {
     expect(store.revoked().before).toBe(1001);
   });
 
-  it("notices a change made by another process, and shrugs off a file it cannot read", () => {
+  it("notices a change made by another process, and fails closed for a file it cannot read", () => {
     const file = path.join(dir, "sessions.json");
     const store = createSessionStore(file);
     store.revokeAll(1000);
@@ -44,19 +44,18 @@ describe("the session store", () => {
     fs.writeFileSync(file, JSON.stringify({ before: 7777, ids: [{ id: "bbbbbbbb-0000-4000-8000-000000000001", expires: 9e12 }] }));
     expect(store.revoked()).toEqual({ before: 7777, ids: ["bbbbbbbb-0000-4000-8000-000000000001"] });
     fs.writeFileSync(file, "{not json");
-    expect(store.revoked()).toEqual({ before: 0, ids: [] });
+    expect(() => store.revoked()).toThrow(/Session records/);
     fs.rmSync(file);
-    expect(store.revoked()).toEqual({ before: 0, ids: [] });
+    expect(() => store.revoked()).toThrow(/Session records/);
   });
 
-  it("keeps the newest two hundred ids and no more", () => {
+  it("revokes all sessions rather than forgetting a live revocation at capacity", () => {
     const store = createSessionStore(path.join(dir, "sessions.json"));
     for (let i = 0; i < 250; i++) {
       store.revoke(`cccccccc-0000-4000-8000-${String(i).padStart(12, "0")}`, 1_000_000 + i, 0);
     }
-    const { ids } = store.revoked();
-    expect(ids).toHaveLength(200);
-    expect(ids[0]).toBe("cccccccc-0000-4000-8000-000000000050");
-    expect(ids[199]).toBe("cccccccc-0000-4000-8000-000000000249");
+    const { ids, before } = store.revoked();
+    expect(before).toBe(1);
+    expect(ids).toHaveLength(49);
   });
 });

@@ -4,6 +4,7 @@ import { errorMessage, jsonError, logError } from "@collectcollect/core/http";
 import { SteamInventoryError, fetchInventory, parseInventory } from "@/lib/steam/inventory";
 import type { ItemInput } from "@/lib/types";
 import { createThrottle } from "@collectcollect/core/throttle";
+import { consumePreview, rememberPreview } from "@/lib/steam/preview";
 
 export interface SteamImportResult {
   created: number;
@@ -46,17 +47,23 @@ export const throttle = createThrottle(6, 60_000, "inventory reads");
 export async function POST(request: Request) {
   const refused = throttle.check(request);
   if (refused) return refused;
-  let body: { steamId?: unknown; preview?: unknown };
+  let body: { steamId?: unknown; preview?: unknown; previewToken?: unknown };
   try {
-    body = (await request.json()) as { steamId?: unknown; preview?: unknown };
+    body = (await request.json()) as typeof body;
   } catch {
     return jsonError("Expected a JSON body");
   }
-  const steamId = typeof body.steamId === "string" ? body.steamId.trim() : "";
+  const steamId = typeof body?.steamId === "string" ? body.steamId.trim() : "";
   if (!steamId) return jsonError("A SteamID64 is required");
 
   let items: ItemInput[];
   let unmatched: number;
+  if (body.preview !== true) {
+    const reviewed = typeof body.previewToken === "string" ? consumePreview(body.previewToken, steamId) : null;
+    if (!reviewed) return jsonError("This preview has expired, was already imported, or belongs to another Steam account. Read the inventory again before importing.", 409);
+    items = reviewed.items;
+    unmatched = reviewed.unmatched;
+  } else {
   try {
     const parsed = parseInventory(await fetchInventory(steamId), steamId);
     items = parsed.items;
@@ -68,9 +75,10 @@ export async function POST(request: Request) {
     logError("steam/import", e);
     return jsonError(`Could not read that inventory: ${errorMessage(e)}`, 502);
   }
-
-  if (body.preview === true) {
-    return NextResponse.json({ preview: items, unmatched });
+    try {
+      const reviewed = rememberPreview(steamId, items, unmatched);
+      return NextResponse.json({ preview: items, unmatched, previewToken: reviewed.token, expiresAt: reviewed.expiresAt, steamId });
+    } catch (e) { return jsonError(errorMessage(e)); }
   }
 
   const result: SteamImportResult = {

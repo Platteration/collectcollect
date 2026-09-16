@@ -112,6 +112,7 @@ export function CollectionFiles({ enabled }: Props) {
             Added {imported.created} card{imported.created === 1 ? "" : "s"} and refreshed {imported.replaced}, with{" "}
             {imported.prices} recorded price{imported.prices === 1 ? "" : "s"} and {imported.sales} sale
             {imported.sales === 1 ? "" : "s"}.
+            {imported.goals > 0 && ` Restored ${imported.goals} collecting goal${imported.goals === 1 ? "" : "s"}.`}
           </p>
           {imported.skipped.length > 0 && (
             <p className="mt-1 text-amber-700 dark:text-amber-300">

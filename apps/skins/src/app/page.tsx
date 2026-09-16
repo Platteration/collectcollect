@@ -1,3 +1,6 @@
+import { holdingsHistory } from "@collectcollect/core/holdings-history";
+import { getDb } from "@/lib/db";
+import { priceCoverage } from "@collectcollect/core/price-coverage";
 import { thinPoints } from "@collectcollect/core/series";
 import { allSnapshots, costBasisByItem, isTradeLocked, latestSnapshotsByItem, listItems } from "@/lib/items";
 import { allocationBy, portfolioSeries, realizedReturn, totalReturn } from "@/lib/analytics";
@@ -15,7 +18,9 @@ export default function HomePage() {
   const latest = latestSnapshotsByItem();
   // A long history is thinned before it travels to the browser; the chart
   // thins what it shows again, so a short range keeps its detail.
-  const points = thinPoints(portfolioSeries(items, snapshots), 20_000);
+  const pricePoints = thinPoints(portfolioSeries(items, snapshots), 20_000);
+  const history = holdingsHistory(getDb());
+  const points = thinPoints(history.points, 20_000);
   const priceOf = (item: (typeof items)[number]) => valueOf(item, latest.get(item.id)).value;
 
   const detailOf = (item: (typeof items)[number]) =>
@@ -53,6 +58,9 @@ export default function HomePage() {
   return (
     <Portfolio
       points={points}
+      pricePoints={pricePoints}
+      historyStartedAt={history.startedAt}
+      freshCount={priceCoverage(items.map(c => ({ priced: latest.get(c.id)?.summary.yourCopyValue != null, fetchedAt: latest.get(c.id)?.fetchedAt }))).fresh}
       itemCount={items.length}
       copyCount={items.reduce((n, i) => n + i.quantity, 0)}
       pricedCount={items.filter((i) => priceOf(i) !== null).length}

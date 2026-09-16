@@ -101,7 +101,7 @@ export function ValueChart<P extends ValuePoint>({
   // What a screen reader is told. The crosshair is reachable from the keyboard,
   // so what it lands on has to be readable without seeing the tooltip.
   const description =
-    `${label}. ${points.length} price${points.length === 1 ? "" : "s"} from ${shortDate(first.t)} to ${shortDate(last.t)}, ` +
+    `${label}. ${points.length} observation${points.length === 1 ? "" : "s"} from ${shortDate(first.t)} to ${shortDate(last.t)}, ` +
     `latest ${money(last.value)}. Use the left and right arrow keys to read each value.`;
   const spoken = active ? `${shortDate(active.t, true)}: ${money(active.value)}.${detail ? ` ${detail(active)}` : ""}` : "";
 

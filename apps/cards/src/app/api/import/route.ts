@@ -1,3 +1,4 @@
+import { BodyLimitError, readJsonLimited } from "@collectcollect/core/http";
 import { NextResponse } from "next/server";
 import { errorMessage, jsonError } from "@/lib/http";
 import { applyImport, previewImport } from "@/lib/import";
@@ -47,11 +48,12 @@ export async function POST(request: Request) {
   if (refused) return refused;
   let body: { csv?: unknown; game?: unknown; apply?: unknown; token?: unknown };
   try {
-    body = (await request.json()) as typeof body;
-  } catch {
+    body = await readJsonLimited<typeof body>(request, MAX_BYTES * 2 + 1024);
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
-  if (typeof body.csv !== "string" || !body.csv.trim()) return jsonError("No CSV content");
+  if (!body || typeof body.csv !== "string" || !body.csv.trim()) return jsonError("No CSV content");
   if (body.csv.length > MAX_BYTES) return jsonError("That file is larger than 8 MB", 413);
 
   if (body.game !== undefined && body.game !== null && body.game !== "" && !isGame(body.game)) return jsonError("Unknown game");

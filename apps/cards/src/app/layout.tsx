@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Barlow_Condensed } from "next/font/google";
+import localFont from "next/font/local";
 import { headers } from "next/headers";
 import Link from "next/link";
 import "./globals.css";
@@ -9,12 +9,18 @@ import { SignOut } from "@collectcollect/core/components/SignOut";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { TabBar } from "@/components/TabBar";
 import { ServiceWorker } from "@/components/ServiceWorker";
+import { SetupChecklist } from "@/components/SetupChecklist";
+import { setupStatus } from "@/lib/setup";
 
 // Condensed display face for the hero value, card names and headings.
-const display = Barlow_Condensed({
+const display = localFont({
   variable: "--font-display",
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  display: "swap",
+  src: [
+    { path: "../../../../packages/core/fonts/BarlowCondensed-500-latin.woff2", weight: "500", style: "normal" },
+    { path: "../../../../packages/core/fonts/BarlowCondensed-600-latin.woff2", weight: "600", style: "normal" },
+    { path: "../../../../packages/core/fonts/BarlowCondensed-700-latin.woff2", weight: "700", style: "normal" },
+  ],
 });
 
 export const metadata: Metadata = {
@@ -51,6 +57,7 @@ const NAV = [
   { href: "/collection", label: "Collection", icon: "▦" },
   { href: "/scan", label: "Scan", icon: "▣" },
   { href: "/sets", label: "Sets", icon: "◫" },
+  { href: "/goals", label: "Goals", icon: "◎" },
   { href: "/submissions", label: "Grading", icon: "◈" },
   { href: "/alerts", label: "Alerts", icon: "◉" },
   { href: "/report", label: "Report", icon: "▤" },
@@ -102,7 +109,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           </nav>
         </header>
 
-        <main className="safe-x mx-auto w-full max-w-6xl flex-1 py-6 pb-24 md:pb-6">{children}</main>
+        <main className="safe-x mx-auto w-full max-w-6xl flex-1 py-6 pb-24 md:pb-6"><SetupChecklist status={setupStatus()} />{children}</main>
 
         <TabBar items={NAV.map(({ href, label, icon }) => ({ href, label, icon }))} unread={unread} />
 

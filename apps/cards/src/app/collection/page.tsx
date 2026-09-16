@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { latestSnapshotsByCard, listCards, listLocations } from "@/lib/cards";
+import { costBasisByCard, latestSnapshotsByCard, listCards, listLocations } from "@/lib/cards";
 import { money } from "@/lib/format";
 import { GAMES, GAME_IDS, isGame } from "@/lib/types";
 import { CollectionGrid } from "@/components/CollectionGrid";
@@ -14,11 +14,13 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
   // "none" selects cards with no location recorded, which is how you find what
   // still needs putting away.
   const locationParam = typeof sp.location === "string" ? sp.location : undefined;
+  const missingCost = sp.cost === "missing";
+  const basis = costBasisByCard();
   const cards = listCards({
     game: gameParam,
     search: q,
     location: locationParam === undefined ? undefined : locationParam === "none" ? "" : locationParam,
-  });
+  }).filter((card) => !missingCost || (basis.get(card.id)?.copiesWithoutCost ?? 0) > 0);
   const locations = listLocations();
   const prices = latestSnapshotsByCard();
 
@@ -71,10 +73,11 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
             <option value="none">No location recorded</option>
           </select>
         )}
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="cost" value="missing" defaultChecked={missingCost} /> Missing purchase costs</label>
         <button className="btn-secondary" type="submit">
           Filter
         </button>
-        {(q || gameParam || locationParam) && (
+        {(q || gameParam || locationParam || missingCost) && (
           <Link href="/collection" className="text-sm text-neutral-500 underline">
             Clear
           </Link>
@@ -90,7 +93,8 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
         </Link>
       </form>
 
-      {cards.length === 0 && (q || gameParam || locationParam !== undefined) ? (
+      {missingCost && cards.length > 0 && <div className="card-surface flex flex-wrap gap-3 p-3 text-sm">{cards.map((card) => <Link key={card.id} href={`/cards/${card.id}#purchases`} className="underline">Record costs for {card.name}</Link>)}</div>}
+      {cards.length === 0 && (q || gameParam || locationParam !== undefined || missingCost) ? (
         // A filter that matched nothing is not an empty collection, and must
         // not read as one: the way out is to clear it, not to add a card.
         <div className="card-surface flex flex-col items-center gap-3 p-12 text-center">

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ScanFlow } from "@/components/ScanFlow";
 import { isClaudeConfigured } from "@/lib/identify/claude";
+import { listScanDrafts } from "@/lib/scan-drafts";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export default function ScanPage() {
           Add one card at a time instead
         </Link>
       </div>
-      <ScanFlow claudeConfigured={isClaudeConfigured()} />
+      <ScanFlow claudeConfigured={isClaudeConfigured()} initialDrafts={listScanDrafts()} />
     </div>
   );
 }

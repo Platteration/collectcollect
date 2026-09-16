@@ -1,6 +1,11 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { initializeHoldingsHistory } from "@collectcollect/core/holdings-history";
+import { initializePriceJobs } from "@collectcollect/core/price-jobs";
+import { initializeScanDrafts } from "./scan-schema";
+import { initializeGoalSchema } from "./goals/schema";
+import { recoverCollectionSwap } from "@collectcollect/core/collection-swap";
 
 import { DB_FILE, dataDir, resetDataDirLookup, uploadsDir } from "./paths";
 
@@ -136,17 +141,33 @@ const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "cards", column: "location", ddl: "ALTER TABLE cards ADD COLUMN location TEXT" },
 ];
 
-export function openDatabase(file: string): Database.Database {
-  const db = new Database(file);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+export const SCHEMA_VERSION = 1;
+
+export function initializeDatabase(db: Database.Database): void {
+  if (Number(db.pragma("user_version", { simple: true })) > SCHEMA_VERSION) throw new Error("This database needs a newer CollectCollect version.");
+  db.transaction(() => {
   db.exec(SCHEMA);
   for (const m of MIGRATIONS) {
     const cols = db.prepare(`PRAGMA table_info(${m.table})`).all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === m.column)) db.exec(m.ddl);
   }
   backfillAcquisitions(db);
-  return db;
+  initializeScanDrafts(db);
+  initializeGoalSchema(db);
+  initializePriceJobs(db);
+  initializeHoldingsHistory(db, { table: "cards", foreignKey: "card_id", name: "name", rawField: "ungraded" });
+  db.pragma(`user_version = ${SCHEMA_VERSION}`);
+  })();
+}
+
+export function openDatabase(file: string): Database.Database {
+  const db = new Database(file);
+  try {
+    db.pragma("journal_mode = WAL");
+    db.pragma("foreign_keys = ON");
+    initializeDatabase(db);
+    return db;
+  } catch (error) { db.close(); throw error; }
 }
 
 const BACKFILL_KEY = "acquisitions_backfilled";
@@ -222,6 +243,7 @@ export function getDb(): Database.Database {
     throw new Error(globalForDb.__collectcollectLocked);
   }
   if (!globalForDb.__collectcollectDb) {
+    recoverCollectionSwap({ dataDir: dataDir(), databaseFile: databaseFile(), uploadsDir: path.join(dataDir(), "uploads"), collectionDir: path.join(dataDir(), "collection") });
     globalForDb.__collectcollectDb = openDatabase(databaseFile());
   }
   return globalForDb.__collectcollectDb;

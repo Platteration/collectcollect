@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@collectcollect/core/api-client";
 import type { SteamImportResult } from "@/app/api/steam/import/route";
@@ -19,6 +20,7 @@ export function SteamImport() {
   const router = useRouter();
   const [steamId, setSteamId] = useState("");
   const [preview, setPreview] = useState<ItemInput[] | null>(null);
+  const [reviewed, setReviewed] = useState<{ steamId: string; token: string; expiresAt: string } | null>(null);
   const [unmatched, setUnmatched] = useState(0);
   const [result, setResult] = useState<SteamImportResult | null>(null);
   const [busy, setBusy] = useState<"preview" | "apply" | null>(null);
@@ -31,19 +33,22 @@ export function SteamImport() {
     setError(null);
     try {
       if (apply) {
+        if (!reviewed || reviewed.steamId !== steamId.trim()) throw new Error("Read this account's inventory before importing.");
         const body = await api<{ result: SteamImportResult }>("/api/steam/import", {
           method: "POST",
-          body: JSON.stringify({ steamId }),
+          body: JSON.stringify({ steamId: reviewed.steamId, previewToken: reviewed.token }),
         });
         setResult(body.result);
         setPreview(null);
+        setReviewed(null);
         router.refresh();
       } else {
-        const body = await api<{ preview: ItemInput[]; unmatched: number }>("/api/steam/import", {
+        const body = await api<{ preview: ItemInput[]; unmatched: number; previewToken: string; expiresAt: string; steamId: string }>("/api/steam/import", {
           method: "POST",
           body: JSON.stringify({ steamId, preview: true }),
         });
         setPreview(body.preview);
+        setReviewed({ steamId: body.steamId, token: body.previewToken, expiresAt: body.expiresAt });
         setUnmatched(body.unmatched);
         setResult(null);
       }
@@ -65,7 +70,8 @@ export function SteamImport() {
             id="steam-id"
             className="input max-w-xs"
             value={steamId}
-            onChange={(e) => setSteamId(e.target.value)}
+            onChange={(e) => { setSteamId(e.target.value); setPreview(null); setReviewed(null); setResult(null); }}
+            disabled={busy !== null}
             placeholder="76561198000000001"
             inputMode="numeric"
           />
@@ -91,6 +97,7 @@ export function SteamImport() {
             <strong>{preview.length}</strong> item{preview.length === 1 ? "" : "s"} found
             {unmatched > 0 && `, and ${unmatched} Steam described too little to read`}.
           </p>
+          {reviewed && <p className="text-xs" style={{ color: "var(--muted)" }}>Reviewed account {reviewed.steamId}. This exact snapshot can be imported once, within ten minutes; a server restart requires a new preview.</p>}
           <p className="text-xs" style={{ color: "var(--muted)" }}>
             This is what you hold now, so importing it sets the counts rather
             than adding to them — run it as often as you like. Nothing arrives
@@ -148,9 +155,9 @@ export function SteamImport() {
                 {result.missing.length} item{result.missing.length === 1 ? "" : "s"} you hold here were not in that
                 inventory. Nothing was removed — they may be in a storage unit, which Steam does not show, or gone.
               </p>
-              <ul className="mt-1 list-inside list-disc" style={{ color: "var(--muted)" }}>
-                {result.missing.slice(0, 10).map((item) => (
-                  <li key={item.id}>{item.name}</li>
+              <ul className="mt-1 max-h-80 list-inside list-disc overflow-y-auto" style={{ color: "var(--muted)" }}>
+                {result.missing.map((item) => (
+                  <li key={item.id}><Link className="underline" href={`/items/${item.id}`}>{item.name}</Link></li>
                 ))}
               </ul>
             </div>
@@ -162,10 +169,10 @@ export function SteamImport() {
                 you hold here. Nothing was changed — the rest may be in a storage unit, which Steam does not show.
                 Edit the count on the item if they really are gone.
               </p>
-              <ul className="mt-1 list-inside list-disc" style={{ color: "var(--muted)" }}>
-                {result.fewer.slice(0, 10).map((item) => (
+              <ul className="mt-1 max-h-80 list-inside list-disc overflow-y-auto" style={{ color: "var(--muted)" }}>
+                {result.fewer.map((item) => (
                   <li key={item.id}>
-                    {item.name}: {item.seen} of {item.held}
+                    <Link className="underline" href={`/items/${item.id}`}>{item.name}</Link>: {item.seen} of {item.held}
                   </li>
                 ))}
               </ul>
@@ -174,8 +181,8 @@ export function SteamImport() {
           {result.failed.length > 0 && (
             <div>
               <p style={{ color: "var(--chart-bad-text)" }}>{result.failed.length} could not be saved:</p>
-              <ul className="mt-1 list-inside list-disc" style={{ color: "var(--muted)" }}>
-                {result.failed.slice(0, 10).map((f) => (
+              <ul className="mt-1 max-h-80 list-inside list-disc overflow-y-auto" style={{ color: "var(--muted)" }}>
+                {result.failed.map((f) => (
                   <li key={f.name}>
                     {f.name} — {f.reason}
                   </li>

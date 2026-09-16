@@ -3,9 +3,9 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DB_FILE, closeDatabase, dataDir, databaseFile, getDb, lockDatabase, unlockDatabase } from "./db";
+import { DB_FILE, closeDatabase, dataDir, databaseFile, getDb, openDatabase, lockDatabase, unlockDatabase } from "./db";
 import { listItems } from "./items";
-import { collectionDir, collectionFiles, rebuildCollection } from "./markdown/mirror";
+import { collectionDir, rebuildCollection } from "./markdown/mirror";
 import {
   listReplacedFolders,
   replacedAt,
@@ -13,20 +13,18 @@ import {
   swapCollection,
   type SwapDeps,
 } from "@collectcollect/core/collection-swap";
-import { assertZippable, fileChunks, isSafeEntryName, readZip, zipStream, type ZipEntry } from "@collectcollect/core/zip";
-import { createGate, type Gate } from "@collectcollect/core/gate";
+import { isSafeEntryName, readZip } from "@collectcollect/core/zip";
+import { stagedArchive } from "@collectcollect/core/staged-archive";
+import { prepareDatabase } from "@collectcollect/core/restore-validation";
+import { archiveGate, storageLock } from "./storage";
+import { writeSnapshotMarkdown } from "./markdown/snapshot";
+import { refreshRunning } from "./pricing/refresh";
+export { archiveGate } from "./storage";
+import { BusyError } from "@collectcollect/core/gate";
 import { createThrottle } from "@collectcollect/core/throttle";
 
 /** What the manifest calls this app, which is how its archives are told from the card app's. */
 export const BACKUP_APP = "collectcollect-skins";
-
-/**
- * A backup copies the database and a restore swaps it out; one running under
- * the other would copy half of each. Held on the global object so a
- * development reload cannot make two.
- */
-const globalForGate = globalThis as unknown as { __skinsArchiveGate?: Gate };
-export const archiveGate: Gate = (globalForGate.__skinsArchiveGate ??= createGate("A backup or restore is already running; try again in a moment"));
 
 /**
  * A restore swaps the whole database out, and putting a replaced one back is
@@ -45,77 +43,31 @@ export const restoreThrottle = createThrottle(6, 60_000, "restores");
  * included so the archive is readable by a person even if nothing can open the
  * database any more.
  */
-export async function buildBackup(): Promise<{ filename: string; stream: ReadableStream<Uint8Array> }> {
-  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "collectcollect-skins-backup-"));
-  const dbCopy = path.join(tmpDir, DB_FILE);
-  try {
-    await archiveGate.run(() => getDb().backup(dbCopy));
-  } catch (e) {
-    await fsp.rm(tmpDir, { recursive: true, force: true });
-    throw e;
-  }
+export function buildBackup(): Promise<{ filename: string; stream: ReadableStream<Uint8Array> }> {
+  return archiveGate.run(async () => {
+    const tmpDir = await fsp.mkdtemp(/* turbopackIgnore: true */ path.join(os.tmpdir(), "collectcollect-skins-backup-"));
+    try {
+      await storageLock.run(async () => {
+        const dbCopy = path.join(tmpDir, DB_FILE);
+        await getDb().backup(dbCopy);
+        const snapshot = new Database(dbCopy, { fileMustExist: true });
+        snapshot.pragma("journal_mode = DELETE");
+        try {
+          const manifest: Record<string, unknown> = { app: BACKUP_APP, format: 1, schemaVersion: snapshot.pragma("user_version", { simple: true }), createdAt: new Date().toISOString() };
 
-  const entries: ZipEntry[] = [];
-  const manifest = Buffer.from(
-    JSON.stringify(
-      {
-        app: BACKUP_APP,
-        format: 1,
-        createdAt: new Date().toISOString(),
-        note: "Restore from Settings, or by stopping the app and unpacking this archive into its data directory. The collection folder holds the same inventory as Markdown, readable without the app.",
-      },
-      null,
-      2,
-    ) + "\n",
-  );
-  entries.push({ name: "manifest.json", size: manifest.length, chunks: () => [new Uint8Array(manifest)] });
-
-  const dbSize = (await fsp.stat(dbCopy)).size;
-  entries.push({ name: DB_FILE, size: dbSize, chunks: () => fileChunks(dbCopy) });
-
-  // The Markdown is a bonus inside the archive; the database is the backup. An
-  // unreadable collection folder must not cost someone theirs.
-  try {
-    for (const file of collectionFiles()) {
-      entries.push({ name: `collection/${file.name}`, size: file.size, chunks: () => fileChunks(file.path) });
-    }
-  } catch {
-    /* the archive still holds everything needed to restore */
-  }
-
-  // Check before a byte goes out: a limit hit halfway through a download
-  // leaves the reader with a truncated archive and no idea why.
-  assertZippable(entries);
-
-  const iterator = zipStream(entries);
-  // The database copy lives in a temp directory for as long as the download
-  // takes; it is removed when the stream ends, fails, or the client gives up.
-  const discard = () => void fsp.rm(tmpDir, { recursive: true, force: true });
-  const stream = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const { value, done } = await iterator.next();
-        if (done) {
-          controller.close();
-          discard();
-        } else {
-          controller.enqueue(value);
-        }
-      } catch (e) {
-        controller.error(e);
-        discard();
-      }
-    },
-    cancel: discard,
+          writeSnapshotMarkdown(snapshot, path.join(tmpDir, "collection"));
+          await fsp.writeFile(/* turbopackIgnore: true */ path.join(tmpDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+        } finally { snapshot.close(); }
+      });
+      return await stagedArchive(tmpDir, `collectcollect-skins-backup-${new Date().toISOString().slice(0, 10)}.zip`);
+    } catch (error) { await fsp.rm(/* turbopackIgnore: true */ tmpDir, { recursive: true, force: true }); throw error; }
   });
-
-  return { filename: `collectcollect-skins-backup-${new Date().toISOString().slice(0, 10)}.zip`, stream };
 }
 
 /** A quick description of what a backup would contain, for the Settings page. */
 export function backupSummary(): { items: number; databaseBytes: number } {
   const dbFile = (getDb().pragma("database_list") as Array<{ file: string }>)[0]?.file;
-  const databaseBytes = dbFile && fs.existsSync(dbFile) ? fs.statSync(dbFile).size : 0;
+  const databaseBytes = dbFile && fs.existsSync(/* turbopackIgnore: true */ dbFile) ? fs.statSync(/* turbopackIgnore: true */ dbFile).size : 0;
   const items = (getDb().prepare("SELECT COUNT(*) AS n FROM items").get() as { n: number }).n;
   return { items, databaseBytes };
 }
@@ -147,7 +99,14 @@ export interface RestoreResult {
  * wrong file is undone from Settings. The archive is fully validated, and its
  * database is opened and inspected, before anything is moved.
  */
-export async function restoreBackup(archive: Uint8Array): Promise<RestoreResult> {
+export function restoreBackup(archive: Uint8Array): Promise<RestoreResult> {
+  return archiveGate.run(async () => {
+    if (refreshRunning()) throw new BusyError("Wait for the current price refresh before restoring a collection");
+    return restoreBackupWithin(archive);
+  });
+}
+
+async function restoreBackupWithin(archive: Uint8Array): Promise<RestoreResult> {
   const entries = await readZip(archive, RESTORE_LIMITS);
 
   let database: Uint8Array | null = null;
@@ -169,22 +128,24 @@ export async function restoreBackup(archive: Uint8Array): Promise<RestoreResult>
   if (!database) throw new Error(`That archive has no ${DB_FILE}, so it is not a backup of this app`);
 
   // Unpack and check the database before touching anything that exists.
-  const staging = await fsp.mkdtemp(path.join(os.tmpdir(), "collectcollect-skins-restore-"));
+  const staging = await fsp.mkdtemp(/* turbopackIgnore: true */ path.join(os.tmpdir(), "collectcollect-skins-restore-"));
   const stagedDb = path.join(staging, DB_FILE);
-  await fsp.writeFile(stagedDb, database);
   let items: number;
   try {
+    await fsp.writeFile(/* turbopackIgnore: true */ stagedDb, database);
     items = inspectDatabase(stagedDb);
+    const snapshot = new Database(stagedDb, { readonly: true });
+    try { writeSnapshotMarkdown(snapshot, path.join(staging, "collection")); } finally { snapshot.close(); }
   } catch (e) {
-    await fsp.rm(staging, { recursive: true, force: true });
+    await fsp.rm(/* turbopackIgnore: true */ staging, { recursive: true, force: true });
     throw e;
   }
 
   let movedAsideTo: string;
   try {
-    ({ movedAsideTo } = await archiveGate.run(() => swapCollection(SWAP, { database: { path: stagedDb, move: false } })));
+    ({ movedAsideTo } = await storageLock.run(() => swapCollection(SWAP, { database: { path: stagedDb, move: false }, collection: path.join(staging, "collection") })));
   } finally {
-    await fsp.rm(staging, { recursive: true, force: true });
+    await fsp.rm(/* turbopackIgnore: true */ staging, { recursive: true, force: true });
   }
   reopen();
   return { items, movedAsideTo };
@@ -197,42 +158,34 @@ export async function restoreBackup(archive: Uint8Array): Promise<RestoreResult>
  */
 function assertOwnManifest(data: Uint8Array): void {
   let app: unknown;
+  let manifest: { app?: unknown; format?: unknown; schemaVersion?: unknown };
   try {
-    app = (JSON.parse(new TextDecoder().decode(data)) as { app?: unknown }).app;
+    manifest = JSON.parse(new TextDecoder().decode(data)) as typeof manifest;
+    app = manifest?.app;
   } catch {
     return;
   }
   if (typeof app === "string" && app !== BACKUP_APP) {
     throw new Error(`That is a backup of ${app === "collectcollect" ? "the card app" : app}, not of this inventory`);
   }
+  if (manifest?.format !== undefined && manifest.format !== 1) throw new Error("Unsupported backup format; upgrade the app before restoring it");
+  if (typeof manifest?.schemaVersion === "number" && manifest.schemaVersion > 1) throw new Error("This backup uses a newer schema; upgrade the app before restoring it");
 }
 
 /**
- * Look inside a database file without changing it. Opening it the normal way
- * would create this app's tables in whatever file was uploaded and report it
- * as an empty inventory; opened read-only, a file that is not a database, or
- * is some other app's, is refused as such.
+ * Inspect the incoming file read-only before migrating its private staging
+ * copy. A foreign, corrupt, future-version or incompatible schema never
+ * replaces the live inventory.
  */
 function inspectDatabase(file: string): number {
-  let db: Database.Database;
   try {
-    db = new Database(file, { readonly: true, fileMustExist: true });
-  } catch (e) {
-    throw new Error(`The database in that archive could not be opened: ${e instanceof Error ? e.message : e}`);
-  }
-  try {
-    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((t) => t.name);
-    if (!tables.includes("items")) throw new Error("The database in that archive is not an inventory: it has no items table");
-    return (db.prepare("SELECT COUNT(*) AS n FROM items").get() as { n: number }).n;
-  } catch (e) {
-    if (e instanceof Error && /not an inventory/.test(e.message)) throw e;
-    throw new Error(`The database in that archive could not be opened: ${e instanceof Error ? e.message : e}`);
-  } finally {
-    db.close();
+    return prepareDatabase(file, "items", (name) => new Database(name, { readonly: true, fileMustExist: true }), openDatabase);
+  } catch (error) {
+    throw new Error(`The database in that archive could not be opened: ${error instanceof Error ? error.message : error}`);
   }
 }
 
-const SWAP: SwapDeps = { dataDir, databaseFile, closeDatabase, lockDatabase, unlockDatabase, collectionDir };
+const SWAP: SwapDeps = { dataDir, databaseFile, databaseName: DB_FILE, closeDatabase, lockDatabase, unlockDatabase, collectionDir };
 
 /**
  * Open the restored database through the normal path, which also applies any
@@ -274,7 +227,7 @@ export function replacedCollections(): ReplacedCollection[] {
 
 /** How many rows a database file holds, read without opening it for writing; null when it cannot be read. */
 function countRows(file: string, table: string): number | null {
-  if (!fs.existsSync(file)) return null;
+  if (!fs.existsSync(/* turbopackIgnore: true */ file)) return null;
   try {
     const db = new Database(file, { readonly: true, fileMustExist: true });
     try {
@@ -294,28 +247,30 @@ function countRows(file: string, table: string): number | null {
  * new dated folder, so putting the wrong one back is itself undoable, and the
  * folder named is consumed. Only a name this app wrote is accepted.
  */
-export async function putBack(name: string): Promise<RestoreResult> {
-  const folder = replacedFolder(dataDir(), name);
-  if (!folder || !fs.existsSync(folder)) throw new Error("That is not one of the inventories a restore replaced");
-  const database = path.join(folder, DB_FILE);
-  if (!fs.existsSync(database)) throw new Error(`${name} holds no database, so there is nothing to put back`);
-  const items = countRows(database, "items");
-  if (items === null) throw new Error(`The database in ${name} could not be opened`);
+export function putBack(name: string): Promise<RestoreResult> {
+  return archiveGate.run(async () => {
+    if (refreshRunning()) throw new BusyError("Wait for the current price refresh before restoring a collection");
+    const folder = replacedFolder(dataDir(), name);
+    if (!folder || !fs.existsSync(/* turbopackIgnore: true */ folder)) throw new Error("That is not one of the inventories a restore replaced");
+    const database = path.join(folder, DB_FILE);
+    if (!fs.existsSync(/* turbopackIgnore: true */ database)) throw new Error(`${name} holds no database, so there is nothing to put back`);
+    const staging = await fsp.mkdtemp(/* turbopackIgnore: true */ path.join(os.tmpdir(), "collectcollect-skins-put-back-"));
+    try {
+      const stagedDb = path.join(staging, DB_FILE);
+      // SQLite backup also captures any old WAL files, without consuming the undo point.
+      const source = new Database(database, { readonly: true, fileMustExist: true });
+      try { await source.backup(stagedDb); } finally { source.close(); }
+      const items = inspectDatabase(stagedDb);
 
-  const siblings = fs
-    .readdirSync(folder)
-    .filter((entry) => entry.startsWith(`${DB_FILE}-`))
-    .map((entry) => ({ path: path.join(folder, entry), name: entry }));
-  const collection = path.join(folder, "collection");
-
-  const { movedAsideTo } = await archiveGate.run(() =>
-    swapCollection(SWAP, {
-      database: { path: database, move: true, siblings },
-      collection: fs.existsSync(collection) ? collection : undefined,
-    }),
-  );
-  // Everything of value has been moved out; what is left is an empty shell.
-  await fsp.rm(folder, { recursive: true, force: true });
-  reopen();
-  return { items, movedAsideTo };
+      const sourceCollection = path.join(folder, "collection");
+      const stagedCollection = path.join(staging, "collection");
+      if (fs.existsSync(/* turbopackIgnore: true */ sourceCollection)) await fsp.cp(/* turbopackIgnore: true */ sourceCollection, stagedCollection, { recursive: true });
+      const snapshot = new Database(stagedDb, { readonly: true });
+      try { writeSnapshotMarkdown(snapshot, stagedCollection); } finally { snapshot.close(); }
+      const { movedAsideTo } = await storageLock.run(() => swapCollection(SWAP, { database: { path: stagedDb, move: false }, collection: stagedCollection }));
+      await fsp.rm(/* turbopackIgnore: true */ folder, { recursive: true, force: true });
+      reopen();
+      return { items, movedAsideTo };
+    } finally { await fsp.rm(/* turbopackIgnore: true */ staging, { recursive: true, force: true }); }
+  });
 }
