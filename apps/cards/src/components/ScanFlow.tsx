@@ -21,18 +21,30 @@ export function ScanFlow({ claudeConfigured, initialDrafts }: { claudeConfigured
   const stream = useRef<MediaStream | null>(null);
   const files = useRef<HTMLInputElement>(null);
   const running = useRef(new Set<string>());
+  const attempted = useRef(new Map<string, number>());
+  const latestDrafts = useRef(initialDrafts);
+  useEffect(() => { latestDrafts.current = drafts; }, [drafts]);
   const replace = useCallback((draft: ScanDraft) => setDrafts((all) => {
     const existing = all.find((d) => d.id === draft.id);
     if (existing && existing.revision > draft.revision) return all;
     return existing ? all.map((d) => d.id === draft.id ? draft : d) : [draft, ...all];
   }), []);
   const reload = useCallback(async () => {
+    const before = latestDrafts.current;
     const result = await api<{ drafts: ScanDraft[] }>("/api/scan-drafts");
     result.drafts.forEach(replace);
+    const listed = new Set(result.drafts.map((draft) => draft.id));
+    // The inbox omits discarded rows. Confirm an absent row individually:
+    // this list response may predate a new upload or a newer local revision.
+    await runQueue(before.filter((draft) => !listed.has(draft.id) && draft.status !== "committed" && draft.status !== "discarded").map((draft) => async () => {
+      try { replace((await api<{ draft: ScanDraft }>(`/api/scan-drafts/${draft.id}`)).draft); }
+      catch { /* Keep local work when a poll cannot confirm its current state. */ }
+    }));
   }, [replace]);
   const process = useCallback(async (draft: ScanDraft) => {
     if (running.current.has(draft.id)) return;
     running.current.add(draft.id);
+    attempted.current.set(draft.id, draft.revision);
     try {
       let current = draft;
       if (current.status !== "ready") {
@@ -41,6 +53,7 @@ export function ScanFlow({ claudeConfigured, initialDrafts }: { claudeConfigured
         current = response.draft; replace(current);
       }
       if (current.status === "ready") {
+        attempted.current.set(current.id, current.revision);
         const response = await api<{ draft: ScanDraft }>(`/api/scan-drafts/${draft.id}/commit`, { method: "POST", body: JSON.stringify({ revision: current.revision, mode: "auto" }) });
         replace(response.draft);
         if (response.draft.cardId) void api(`/api/cards/${response.draft.cardId}/price`, { method: "POST" }).catch(() => undefined);
@@ -48,7 +61,14 @@ export function ScanFlow({ claudeConfigured, initialDrafts }: { claudeConfigured
     } catch (e) { setError((e as Error).message); await reload().catch(() => undefined); }
     finally { running.current.delete(draft.id); }
   }, [claudeConfigured, reload, replace]);
-  useEffect(() => { void runQueue(initialDrafts.filter((d) => d.status === "queued" || d.status === "ready").map((d) => () => process(d))); }, [initialDrafts, process]);
+  useEffect(() => {
+    const available = drafts.filter((draft) => (draft.status === "ready" || (claudeConfigured && draft.status === "queued")) &&
+      !running.current.has(draft.id) && attempted.current.get(draft.id) !== draft.revision);
+    // Reserve queued work before launching it. A rejected revision waits for
+    // explicit Retry instead of retrying on every poll or unrelated render.
+    for (const draft of available) attempted.current.set(draft.id, draft.revision);
+    void runQueue(available.map((draft) => () => process(draft)));
+  }, [claudeConfigured, drafts, process]);
   useEffect(() => { const timer = setInterval(() => { void reload().catch(() => undefined); }, 4000); return () => clearInterval(timer); }, [reload]);
   useEffect(() => { if (camera && video.current && stream.current) { video.current.srcObject = stream.current; void video.current.play().catch(() => setError("Camera preview could not start. Choose photos instead.")); } }, [camera]);
   useEffect(() => () => { stream.current?.getTracks().forEach((track) => track.stop()); }, []);
@@ -136,9 +156,10 @@ function DraftReview({ draft, onChange, onClose, onIdentify, claudeConfigured }:
   return <section ref={editorRef} className="card-surface space-y-4 p-4" aria-label="Review scanned card">
     <div className="flex justify-between gap-3"><h2 className="font-semibold">Review scanned card</h2><button className="underline" onClick={onClose}>Close review</button></div>
     {error && <p role="alert" className="text-red-700 dark:text-red-300">{error}</p>}
+    {draft.status === "discarded" && <p role="status" className="text-sm text-amber-700 dark:text-amber-300">This scan was discarded. Your entries remain visible here, but it can no longer be saved.</p>}
     {draft.revision !== base.revision && <p className="text-sm text-amber-700 dark:text-amber-300">This scan changed elsewhere. Your unsaved edits are still here. <button className="underline" onClick={() => void run(reloadSaved)}>Reload and discard my edits</button></p>}
     {draft.identification && <p className="text-sm">{Math.round(draft.identification.confidence * 100)}% confident. {draft.identification.condition_assessment?.caveat}</p>}
-    {draft.identification?.alternatives.map((alt, i) => <button key={i} className="block text-sm underline" onClick={() => setForm({ ...form, name: alt.name, setName: alt.set_name ?? form.setName, cardNumber: alt.card_number ?? form.cardNumber })}>{alt.name} · {alt.reason}</button>)}
+    {draft.identification?.alternatives.map((alt, i) => <button key={i} className="block text-sm underline" disabled={busy || locked} onClick={() => setForm({ ...form, name: alt.name, setName: alt.set_name ?? form.setName, cardNumber: alt.card_number ?? form.cardNumber })}>{alt.name} · {alt.reason}</button>)}
     <div className="space-y-2"><p className="text-sm">{draft.uploads.length} saved {draft.uploads.length === 1 ? "photo" : "photos"}</p><div className="flex flex-wrap gap-2">
       {draft.uploads.map((name, index) => <a key={name} href={`/api/uploads/${name}`} target="_blank" rel="noreferrer" aria-label={`Open saved photo ${index + 1}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
