@@ -8,13 +8,16 @@ import { ReplacedCollections } from "@/components/ReplacedCollections";
 import { CollectionFiles } from "@/components/CollectionFiles";
 import { collectionStatus } from "@/lib/markdown/mirror";
 import Link from "next/link";
-import { when } from "@/lib/format";
+import { describeMissingPhotos, when } from "@/lib/format";
 import { providerStatuses } from "@/lib/status";
 import { GAMES } from "@/lib/types";
 import { ProviderTest } from "@/components/ProviderTest";
 import { SetupChecklist } from "@/components/SetupChecklist";
 import { setupStatus } from "@/lib/setup";
 import { goalMirrorError } from "@/lib/goals/markdown";
+import { databaseFile, recoveryConflicts } from "@/lib/db";
+import { recoveryConflictsFile } from "@collectcollect/core/collection-swap";
+import { RecoveryNotice } from "@collectcollect/core/components/RecoveryNotice";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +35,7 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <h1 className="font-display text-2xl font-semibold uppercase tracking-wide">Settings</h1>
       <SetupChecklist status={setupStatus()} reopen />
+      <RecoveryNotice record={recoveryConflicts()} file={recoveryConflictsFile(databaseFile())} noun="collection" />
       {goalMirrorError() && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">The Markdown copy of your goals needs attention: {goalMirrorError()}. Your goals are safe in the database. Rewrite the files after resolving the storage problem.</p>}
 
       {authEnabled() && (
@@ -103,6 +107,13 @@ export default function SettingsPage() {
           One zip holding a consistent copy of the database and every photo: {backup.photos} photo
           {backup.photos === 1 ? "" : "s"} ({mb(backup.photoBytes)}) plus a {mb(backup.databaseBytes)} database.
         </p>
+        {backup.missingPhotos.length > 0 && (
+          <p className="mt-2 text-sm text-amber-700 dark:text-amber-300" role="alert">
+            {backup.missingPhotos.length} photo{backup.missingPhotos.length === 1 ? " is" : "s are"} referenced but not in the uploads folder. A backup
+            leaves {backup.missingPhotos.length === 1 ? "it" : "them"} out and lists {backup.missingPhotos.length === 1 ? "it" : "them"} in its manifest:{" "}
+            {describeMissingPhotos(backup.missingPhotos)}.
+          </p>
+        )}
         <a href="/api/backup" className="btn-secondary mt-3 inline-flex" download>
           Download backup
         </a>

@@ -19,6 +19,12 @@ import { writeFileAtomic } from "./atomic-write";
  * Ordinary failures roll every resource back together. A persisted journal
  * lets startup finish that rollback after a crash, before any live connection
  * opens; a committed swap retains the previous collection in its dated folder.
+ *
+ * A rollback that finds a file at both ends of a move it recorded never picks
+ * one: a rename is atomic here, so two copies mean a filesystem that renames by
+ * copying, or a hand that moved something. Both are left where they are and
+ * the pair is written down beside the journal (`recoveryConflictsFile`), so
+ * the app can start on what the journal does identify and say what it found.
  */
 
 export interface SwapDeps {
@@ -110,10 +116,46 @@ interface Journal {
   aside: string;
 }
 
+/** A move whose rollback found something at both ends, and left both alone. */
+export interface RecoveryConflict {
+  from: string;
+  to: string;
+}
+
+/** What a rollback wrote down, for the log and the Settings page. */
+export interface RecoveryConflicts {
+  recordedAt: string;
+  conflicts: RecoveryConflict[];
+  /** Staging files kept rather than deleted, since one of the copies may be in them. */
+  kept: string[];
+}
+
+export interface RecoveryReport {
+  /** Empty unless the rollback left two copies of something in place. */
+  conflicts: RecoveryConflict[];
+}
+
+/** Where a rollback records the pairs it left in place: beside the journal, cleared by the next successful swap. */
+export function recoveryConflictsFile(databaseFile: string): string {
+  return `${path.resolve(databaseFile)}.restore-conflicts.json`;
+}
+
+/** The conflicts a rollback recorded, or null when there are none to report. */
+export function readRecoveryConflicts(databaseFile: string): RecoveryConflicts | null {
+  const file = recoveryConflictsFile(databaseFile);
+  try {
+    const parsed = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ file, "utf8")) as RecoveryConflicts;
+    if (!Array.isArray(parsed?.conflicts) || !parsed.conflicts.length) return null;
+    return { recordedAt: String(parsed.recordedAt ?? ""), conflicts: parsed.conflicts.map((c) => ({ from: String(c.from), to: String(c.to) })), kept: Array.isArray(parsed.kept) ? parsed.kept.map(String) : [] };
+  } catch {
+    return null;
+  }
+}
+
 /** Run before opening the live connection, including after an interrupted restore. */
-export function recoverCollectionSwap(paths: RecoveryPaths): void {
+export function recoverCollectionSwap(paths: RecoveryPaths): RecoveryReport {
   const file = `${paths.databaseFile}.restore-journal.json`;
-  if (!fs.existsSync(/* turbopackIgnore: true */ file)) return;
+  if (!fs.existsSync(/* turbopackIgnore: true */ file)) return { conflicts: [] };
   const journal = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ file, "utf8")) as Journal;
   const root = path.resolve(paths.dataDir);
   const live = path.resolve(paths.databaseFile);
@@ -129,12 +171,32 @@ export function recoverCollectionSwap(paths: RecoveryPaths): void {
       journal.moves.some((move) => !allowed(move.from) || !allowed(move.to))) {
     throw new Error("The restore recovery journal is invalid; the collection was left untouched");
   }
+  const conflicts: RecoveryConflict[] = [];
   if (journal.phase === "applying") {
+    // The live database and the files SQLite keeps beside it. Rolling back
+    // puts the collection that was live before the restore at these paths.
+    const databasePaths = new Set(["", "-wal", "-shm", "-journal"].map((suffix) => `${live}${suffix}`));
     while (journal.moves.length) {
       const { from, to } = journal.moves[journal.moves.length - 1]!;
       if (fs.existsSync(/* turbopackIgnore: true */ to)) {
-        if (fs.existsSync(/* turbopackIgnore: true */ from)) throw new Error("Restore recovery found both copies; keep both and repair the journal before reopening");
-        fs.renameSync(/* turbopackIgnore: true */ to, from);
+        if (fs.existsSync(/* turbopackIgnore: true */ from)) {
+          // Two copies. The journal says which collection should be live — the
+          // one from before the restore — but not which file holds it, so
+          // nothing is renamed over anything. When the pair is the live
+          // database itself being moved aside, the file still at its own path
+          // is that collection, and the app can start on it. When the pair
+          // would put something else *at* the database's path, what is there
+          // is not the collection, and starting on it would be a guess.
+          if (databasePaths.has(path.resolve(to))) {
+            throw new Error(
+              `Restore recovery found two copies of the database: ${from} and ${to}. Neither was changed. ` +
+                `The collection from before the restore is in ${journal.aside}. Put the copy you want at ${live}, move the other out of the data directory, and delete ${file} before starting the app again.`,
+            );
+          }
+          conflicts.push({ from, to });
+        } else {
+          fs.renameSync(/* turbopackIgnore: true */ to, from);
+        }
       }
       // Recovery itself can stop. Persist its remaining work before restoring
       // an earlier resource into a path that a later rename also used.
@@ -144,9 +206,17 @@ export function recoverCollectionSwap(paths: RecoveryPaths): void {
     // An empty replaced directory is only a failed attempt, not a restore point.
     try { fs.rmdirSync(/* turbopackIgnore: true */ journal.aside); } catch { /* preserve anything unexpected */ }
   }
-  fs.rmSync(/* turbopackIgnore: true */ journal.stage, { recursive: true, force: true });
-  fs.rmSync(/* turbopackIgnore: true */ journal.stagedDatabase, { force: true });
+  if (conflicts.length) {
+    // One of the two copies may be the staged one, so the staging files stay too.
+    const kept = [journal.stage, journal.stagedDatabase].filter((candidate) => fs.existsSync(/* turbopackIgnore: true */ candidate));
+    const record: RecoveryConflicts = { recordedAt: new Date().toISOString(), conflicts, kept };
+    writeFileAtomic(recoveryConflictsFile(paths.databaseFile), JSON.stringify(record, null, 2));
+  } else {
+    fs.rmSync(/* turbopackIgnore: true */ journal.stage, { recursive: true, force: true });
+    fs.rmSync(/* turbopackIgnore: true */ journal.stagedDatabase, { force: true });
+  }
   fs.rmSync(/* turbopackIgnore: true */ file);
+  return { conflicts };
 }
 
 export async function swapCollection(deps: SwapDeps, incoming: Incoming): Promise<SwapResult> {
@@ -226,6 +296,9 @@ export async function swapCollection(deps: SwapDeps, incoming: Incoming): Promis
   }
   // The committed marker makes post-commit cleanup safe to repeat after a crash.
   recoverCollectionSwap({ dataDir: root, databaseFile: live, collectionDir: deps.collectionDir() });
+  // A swap that committed leaves no doubt which collection is live, so an
+  // earlier rollback's record of two copies has been overtaken by events.
+  fs.rmSync(/* turbopackIgnore: true */ recoveryConflictsFile(live), { force: true });
   deps.unlockDatabase();
   return { movedAsideTo: aside };
 }

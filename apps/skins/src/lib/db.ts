@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { initializeHoldingsHistory } from "@collectcollect/core/holdings-history";
 import { initializePriceJobs } from "@collectcollect/core/price-jobs";
-import { recoverCollectionSwap } from "@collectcollect/core/collection-swap";
+import { readRecoveryConflicts, recoverCollectionSwap, type RecoveryConflict, type RecoveryConflicts } from "@collectcollect/core/collection-swap";
 
 import { DB_FILE, dataDir, resetDataDirLookup } from "./paths";
 
@@ -219,10 +219,38 @@ export function getDb(): Database.Database {
     throw new Error(globalForDb.__skinsLocked);
   }
   if (!globalForDb.__skinsDb) {
-    recoverCollectionSwap({ dataDir: dataDir(), databaseFile: databaseFile(), collectionDir: path.join(dataDir(), "collection") });
+    const recovery = recoverCollectionSwap({ dataDir: dataDir(), databaseFile: databaseFile(), collectionDir: path.join(dataDir(), "collection") });
+    if (recovery.conflicts.length) console.warn(describeRecoveryConflicts(recovery.conflicts));
     globalForDb.__skinsDb = openDatabase(databaseFile());
   }
   return globalForDb.__skinsDb;
+}
+
+/**
+ * Whether the inventory answers a query, for the health check. "Exists" is
+ * not the question: a database whose restore journal cannot be replayed is a
+ * file on disk that every request fails against. Nothing is opened that does
+ * not exist, so an install with no inventory yet answers false quietly;
+ * one that cannot be opened throws, and the caller says so.
+ */
+export function databaseAnswers(): boolean {
+  if (!databaseExists()) return false;
+  return getDb().prepare("SELECT 1 AS ok").get() !== undefined;
+}
+
+/**
+ * What an interrupted restore's rollback left in two places, if anything.
+ * Recorded beside the database by the rollback, cleared by the next restore or
+ * put-back that completes, and shown on Settings until then.
+ */
+export function recoveryConflicts(): RecoveryConflicts | null {
+  return readRecoveryConflicts(databaseFile());
+}
+
+/** One log line naming every pair, for boot and for the moment they are found. */
+export function describeRecoveryConflicts(conflicts: RecoveryConflict[]): string {
+  const pairs = conflicts.map((c) => `${c.from} and ${c.to}`).join("; ");
+  return `[collectcollect-skins] An interrupted restore left two copies in place: ${pairs}. Both were kept; move the one you do not want out of the data directory. Details are on the Settings page.`;
 }
 
 /**

@@ -3,12 +3,16 @@ import type Database from "better-sqlite3";
 type OpenDatabase = (file: string) => Database.Database;
 type OpenReadonly = (file: string) => Database.Database;
 
-/** Validate and migrate a private staging copy; never the currently live DB. */
-export function prepareDatabase(file: string, rootTable: "cards" | "items", openReadonly: OpenReadonly, openDatabase: OpenDatabase): number {
+/**
+ * Validate and migrate a private staging copy; never the currently live DB.
+ * `schemaVersion` is the version this build of the app writes: a backup from a
+ * newer one is refused before anything is migrated.
+ */
+export function prepareDatabase(file: string, rootTable: "cards" | "items", openReadonly: OpenReadonly, openDatabase: OpenDatabase, schemaVersion: number): number {
   const original = openReadonly(file);
   try {
     const version = Number(original.pragma("user_version", { simple: true }));
-    if (version > 1) throw new Error(`This backup uses schema version ${version}; upgrade the app before restoring it`);
+    if (version > schemaVersion) throw new Error(`This backup uses schema version ${version}; upgrade the app before restoring it`);
     const table = original.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(rootTable);
     if (!table) throw new Error(rootTable === "cards" ? "The database is not a card collection: it has no cards table" : "The database is not an inventory: it has no items table");
     assertIntegrity(original);

@@ -2,7 +2,9 @@ import Link from "next/link";
 import { getSettings } from "@/lib/settings";
 import { providerStatuses } from "@/lib/status";
 import { collectionStatus } from "@/lib/markdown/mirror";
-import { dataDir } from "@/lib/db";
+import { dataDir, databaseFile, recoveryConflicts } from "@/lib/db";
+import { recoveryConflictsFile } from "@collectcollect/core/collection-swap";
+import { RecoveryNotice } from "@collectcollect/core/components/RecoveryNotice";
 import { SESSION_DAYS, authEnabled } from "@/lib/auth";
 import { SignOut } from "@collectcollect/core/components/SignOut";
 import { backupSummary, replacedCollections } from "@/lib/backup";
@@ -24,6 +26,8 @@ export default function SettingsPage() {
             : "No password is set (SKINS_APP_PASSWORD), so anyone who can reach this page can change it."}
         </p>
       </header>
+
+      <RecoveryNotice record={recoveryConflicts()} file={recoveryConflictsFile(databaseFile())} noun="inventory" />
 
       {authEnabled() && (
         <section className="card-surface p-4">

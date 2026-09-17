@@ -81,9 +81,34 @@ export function resetRefreshThrottle(): void {
 const globalForRefresh = globalThis as unknown as { __skinsRefreshGate?: ReturnType<typeof createGate> };
 const gate = (globalForRefresh.__skinsRefreshGate ??= createGate("A price refresh is already running; wait for it to finish."));
 
-/** Whether a whole-inventory refresh is running right now. */
+/**
+ * Whether a whole-inventory refresh is running right now. Single-item lookups
+ * are not counted: a save fires one of these in the background,
+ * and the hourly pass runs unattended, so "something is pricing" would be
+ * true for no visible reason most of the day. They are `activeLookups`.
+ */
 export function refreshRunning(): boolean {
-  return gate.busy || (refreshState.__skinsActivePrices ?? 0) > 0;
+  return gate.busy;
+}
+
+/** How many single-item lookups are in flight right now. */
+export function activeLookups(): number {
+  return refreshState.__skinsActivePrices ?? 0;
+}
+
+/**
+ * Wait for the single-item lookups in flight to finish, up to `withinMs`;
+ * true when they have. Meant to be called with the archive gate held: a lookup
+ * checks that gate before it counts itself in, and nothing runs between the
+ * check and the count, so once the gate is held the number can only fall.
+ */
+export async function lookupsSettled(withinMs: number): Promise<boolean> {
+  const deadline = Date.now() + withinMs;
+  while (activeLookups() > 0) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return true;
 }
 
 /**

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DB_FILE, closeDatabase, dataDir, databaseFile, getDb, openDatabase, lockDatabase, unlockDatabase } from "./db";
+import { DB_FILE, SCHEMA_VERSION, closeDatabase, dataDir, databaseFile, getDb, openDatabase, lockDatabase, unlockDatabase } from "./db";
 import { listItems } from "./items";
 import { collectionDir, rebuildCollection } from "./markdown/mirror";
 import {
@@ -18,7 +18,7 @@ import { stagedArchive } from "@collectcollect/core/staged-archive";
 import { prepareDatabase } from "@collectcollect/core/restore-validation";
 import { archiveGate, storageLock } from "./storage";
 import { writeSnapshotMarkdown } from "./markdown/snapshot";
-import { refreshRunning } from "./pricing/refresh";
+import { lookupsSettled, refreshRunning } from "./pricing/refresh";
 export { archiveGate } from "./storage";
 import { BusyError } from "@collectcollect/core/gate";
 import { createThrottle } from "@collectcollect/core/throttle";
@@ -33,6 +33,14 @@ export const BACKUP_APP = "collectcollect-skins";
  * being nothing to a loop.
  */
 export const restoreThrottle = createThrottle(6, 60_000, "restores");
+
+/**
+ * A single-item price lookup in flight when a restore is asked for. A save
+ * fires one in the background, so a restore waits this long for it to finish
+ * rather than refusing for a reason nobody can see; a lookup that outlasts it
+ * gets a refusal that says so.
+ */
+export const LOOKUP_WAIT_MS = 10_000;
 
 /**
  * Everything needed to restore an inventory: a consistent copy of the database
@@ -101,9 +109,25 @@ export interface RestoreResult {
  */
 export function restoreBackup(archive: Uint8Array): Promise<RestoreResult> {
   return archiveGate.run(async () => {
-    if (refreshRunning()) throw new BusyError("Wait for the current price refresh before restoring a collection");
+    await excludePricing();
     return restoreBackupWithin(archive);
   });
+}
+
+/**
+ * A restore must not run while anything is writing prices: a lookup that
+ * finished after the swap would store its snapshot against whatever item has
+ * that id in the restored inventory. A whole-inventory refresh takes minutes,
+ * so it is refused; the single-item lookup a save fires takes seconds, so it
+ * is waited for. Called with the archive gate held, which is what keeps this
+ * free of races: a lookup checks that gate before it counts itself in, so
+ * once the gate is held nothing new can start and the count only falls.
+ */
+async function excludePricing(): Promise<void> {
+  if (refreshRunning()) throw new BusyError("Wait for the current price refresh before restoring a collection");
+  if (!(await lookupsSettled(LOOKUP_WAIT_MS))) {
+    throw new BusyError(`A price lookup has been running for more than ${LOOKUP_WAIT_MS / 1000} seconds; wait for it before restoring a collection`);
+  }
 }
 
 async function restoreBackupWithin(archive: Uint8Array): Promise<RestoreResult> {
@@ -169,7 +193,7 @@ function assertOwnManifest(data: Uint8Array): void {
     throw new Error(`That is a backup of ${app === "collectcollect" ? "the card app" : app}, not of this inventory`);
   }
   if (manifest?.format !== undefined && manifest.format !== 1) throw new Error("Unsupported backup format; upgrade the app before restoring it");
-  if (typeof manifest?.schemaVersion === "number" && manifest.schemaVersion > 1) throw new Error("This backup uses a newer schema; upgrade the app before restoring it");
+  if (typeof manifest?.schemaVersion === "number" && manifest.schemaVersion > SCHEMA_VERSION) throw new Error("This backup uses a newer schema; upgrade the app before restoring it");
 }
 
 /**
@@ -179,7 +203,7 @@ function assertOwnManifest(data: Uint8Array): void {
  */
 function inspectDatabase(file: string): number {
   try {
-    return prepareDatabase(file, "items", (name) => new Database(name, { readonly: true, fileMustExist: true }), openDatabase);
+    return prepareDatabase(file, "items", (name) => new Database(name, { readonly: true, fileMustExist: true }), openDatabase, SCHEMA_VERSION);
   } catch (error) {
     throw new Error(`The database in that archive could not be opened: ${error instanceof Error ? error.message : error}`);
   }
@@ -249,7 +273,7 @@ function countRows(file: string, table: string): number | null {
  */
 export function putBack(name: string): Promise<RestoreResult> {
   return archiveGate.run(async () => {
-    if (refreshRunning()) throw new BusyError("Wait for the current price refresh before restoring a collection");
+    await excludePricing();
     const folder = replacedFolder(dataDir(), name);
     if (!folder || !fs.existsSync(/* turbopackIgnore: true */ folder)) throw new Error("That is not one of the inventories a restore replaced");
     const database = path.join(folder, DB_FILE);
