@@ -1,5 +1,6 @@
+import fs from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { openDatabase, setDb } from "@/lib/db";
+import { closeDatabase, databaseFile, openDatabase, setDb } from "@/lib/db";
 import { createCard, getCard } from "@/lib/cards";
 import { createAlert } from "@/lib/alerts";
 import { recordSale } from "@/lib/sales";
@@ -154,6 +155,25 @@ describe("the health check", () => {
     // or what last went wrong.
     expect(body).not.toHaveProperty("dataDir");
     expect(body.scheduler).not.toHaveProperty("lastError");
+  });
+
+  it("says the database is not ok when it is there but cannot be opened, and ok once it can", async () => {
+    const { GET } = await import("@/app/api/health/route");
+    const health = async () => (await read<{ ok: boolean; database: boolean }>(await GET())).database;
+    fs.mkdirSync(process.env.DATA_DIR!, { recursive: true });
+    setDb(openDatabase(databaseFile()));
+    expect(await health()).toBe(true);
+    // A restore journal nothing can replay: the file exists, and every
+    // request against it fails. "Database ok" has to mean a query ran.
+    closeDatabase();
+    const journal = `${databaseFile()}.restore-journal.json`;
+    fs.writeFileSync(journal, JSON.stringify({ version: 2 }));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await health()).toBe(false);
+    expect(error).toHaveBeenCalledWith("[health]", expect.stringMatching(/recovery journal is invalid/));
+    fs.rmSync(journal);
+    expect(await health()).toBe(true);
+    closeDatabase();
   });
 });
 

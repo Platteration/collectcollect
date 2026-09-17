@@ -6,7 +6,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, lockDatabase, openDatabase, setDb, unlockDatabase } from "@/lib/db";
 import { createItem, listItems } from "@/lib/items";
-import { archiveGate, buildBackup, putBack, replacedCollections, restoreBackup, restoreThrottle } from "@/lib/backup";
+import { LOOKUP_WAIT_MS, archiveGate, buildBackup, putBack, replacedCollections, restoreBackup, restoreThrottle } from "@/lib/backup";
+import { activeLookups, refreshItem, refreshRunning } from "@/lib/pricing/refresh";
+import * as pricing from "@/lib/pricing";
+import type { PriceSummary } from "@/lib/types";
 import Database from "better-sqlite3";
 import { flushCollection } from "@/lib/markdown/mirror";
 import { zipStream } from "@collectcollect/core/zip";
@@ -143,6 +146,43 @@ describe("restore", () => {
     release();
     await holding;
     expect((await restoreBackup(archive)).items).toBe(1);
+  });
+
+  it("waits for a single-item lookup in flight rather than refusing, and refuses when one outlasts the wait", async () => {
+    inventory();
+    const item = listItems()[0]!;
+    const archive = await archiveOf();
+    const summary: PriceSummary = { currency: "USD", fetchedAt: new Date().toISOString(), market: null, marketSource: null, yourCopyValue: null, yourCopyBasis: "No price in this test", quotes: [], errors: [] };
+    let release!: (summary: PriceSummary) => void;
+    vi.spyOn(pricing, "priceItem").mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+    const events: string[] = [];
+    const lookup = refreshItem(item).then(() => { events.push("lookup done"); });
+    expect(activeLookups()).toBe(1);
+    // A save fires one of these in the background; it is not "the current
+    // price refresh", so nobody is told to wait for one they cannot see.
+    expect(refreshRunning()).toBe(false);
+    const restore = restoreBackup(archive).then((result) => { events.push("restored"); return result; });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(events).toEqual([]);
+    release(summary);
+    await lookup;
+    expect((await restore).items).toBe(1);
+    expect(events).toEqual(["lookup done", "restored"]);
+    expect(activeLookups()).toBe(0);
+
+    // One that never comes back is refused after the wait, with the reason.
+    const stuck = refreshItem(listItems()[0]!);
+    vi.useFakeTimers();
+    try {
+      const refused = expect(restoreBackup(archive)).rejects.toThrow(/more than 10 seconds/);
+      await vi.advanceTimersByTimeAsync(LOOKUP_WAIT_MS + 100);
+      await refused;
+    } finally {
+      vi.useRealTimers();
+    }
+    release(summary);
+    await stuck;
+    expect(activeLookups()).toBe(0);
   });
 
   it("throttles putting a replaced inventory back as it does a restore", async () => {

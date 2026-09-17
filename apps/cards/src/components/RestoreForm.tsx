@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { RestoreResult } from "@/lib/backup";
+import { describeMissingPhotos } from "@/lib/format";
 
 export function RestoreForm() {
   const router = useRouter();
@@ -53,6 +54,12 @@ export function RestoreForm() {
         <p className="mt-2 text-sm text-green-800 dark:text-green-300">
           Restored {result.cards} card{result.cards === 1 ? "" : "s"} and {result.photos} photo
           {result.photos === 1 ? "" : "s"}. The collection that was replaced is in {result.movedAsideTo}.
+        </p>
+      )}
+      {result && result.missingPhotos.length > 0 && (
+        <p className="mt-2 text-sm text-amber-700 dark:text-amber-300" role="alert">
+          {result.missingPhotos.length} photo{result.missingPhotos.length === 1 ? " was" : "s were"} named in the backup but not in it, so{" "}
+          {result.missingPhotos.length === 1 ? "this has" : "these have"} no photo now: {describeMissingPhotos(result.missingPhotos)}.
         </p>
       )}
     </div>

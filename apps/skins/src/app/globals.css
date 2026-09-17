@@ -64,6 +64,8 @@ body {
   border: 1px solid var(--line);
   background: var(--surface);
   box-shadow: inset 0 1px 0 var(--tabletop-shine), 0 3px 0 var(--tabletop-edge);
+  /* A chart drawn inside a panel cuts its hover halo from the panel, not the ground. */
+  --chart-surface: var(--surface);
 }
 
 @utility btn {
@@ -117,7 +119,8 @@ body {
   --accent: #2f6feb;
   --accent-ink: #ffffff;
   --accent-solid: #2f6feb;
-  --chart-surface: #ffffff;
+  /* What a chart sits on; a panel overrides it below, so a hover halo is always cut from its own surface. */
+  --chart-surface: var(--background);
   --chart-grid: #e2e4e9;
   --chart-axis: #c2c5cc;
   --chart-muted: #83868e;
@@ -137,7 +140,7 @@ body {
   --accent: #eef1f5;
   --accent-ink: #0b0e13;
   --accent-solid: #9aa0a6;
-  --chart-surface: #0b0e13;
+  --chart-surface: var(--background);
   --chart-grid: rgba(255, 255, 255, 0.09);
   --chart-axis: rgba(255, 255, 255, 0.3);
   --chart-muted: rgba(238, 241, 245, 0.55);

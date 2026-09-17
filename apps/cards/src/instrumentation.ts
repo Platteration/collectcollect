@@ -7,8 +7,12 @@ export async function register() {
     // The one invariant everything about money rests on: every copy belongs to
     // a lot. Checked at boot rather than on a request, and only when there is a
     // database to check, so an empty data directory is not created just to look.
-    const { databaseExists } = await import("./lib/db");
+    const { databaseExists, describeRecoveryConflicts, recoveryConflicts } = await import("./lib/db");
     if (databaseExists()) {
+      // An earlier start's rollback may have left two copies of something in
+      // place; that stays worth saying at every boot until someone sorts it out.
+      const conflicts = recoveryConflicts();
+      if (conflicts) console.warn(describeRecoveryConflicts(conflicts.conflicts));
       const { verifyLotInvariant } = await import("./lib/acquisitions");
       const broken = verifyLotInvariant();
       if (broken.length > 0) {

@@ -65,6 +65,8 @@ body {
   border: 1px solid var(--line);
   background: var(--surface);
   box-shadow: inset 0 1px 0 var(--tabletop-shine), 0 3px 0 var(--tabletop-edge);
+  /* A chart drawn inside a panel cuts its hover halo from the panel, not the ground. */
+  --chart-surface: var(--surface);
 }
 @utility btn {
   @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
@@ -122,7 +124,8 @@ body {
   --accent: #d97706;
   --accent-ink: #ffffff;
   --accent-solid: #d97706;
-  --chart-surface: #ffffff;
+  /* What a chart sits on; a panel overrides it below, so a hover halo is always cut from its own surface. */
+  --chart-surface: var(--background);
   --chart-grid: #e1e0d9;
   --chart-axis: #c3c2b7;
   --chart-muted: #898781;
@@ -143,7 +146,7 @@ body {
   --accent: #f5f6f7;
   --accent-ink: #08090a;
   --accent-solid: #9aa0a6;
-  --chart-surface: #08090a;
+  --chart-surface: var(--background);
   --chart-grid: rgba(255, 255, 255, 0.09);
   --chart-axis: rgba(255, 255, 255, 0.3);
   --chart-muted: rgba(242, 244, 245, 0.55);
