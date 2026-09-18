@@ -116,9 +116,9 @@ body {
 }
 
 :root {
-  --accent: #2f6feb;
-  --accent-ink: #ffffff;
-  --accent-solid: #2f6feb;
+  --accent: #296f69;
+  --accent-ink: #fffaf0;
+  --accent-solid: #296f69;
   /* What a chart sits on; a panel overrides it below, so a hover halo is always cut from its own surface. */
   --chart-surface: var(--background);
   --chart-grid: #e2e4e9;
@@ -137,9 +137,9 @@ body {
 }
 
 [data-theme="dark"] {
-  --accent: #eef1f5;
-  --accent-ink: #0b0e13;
-  --accent-solid: #9aa0a6;
+  --accent: #88c9c0;
+  --accent-ink: #19232d;
+  --accent-solid: #88c9c0;
   --chart-surface: var(--background);
   --chart-grid: rgba(255, 255, 255, 0.09);
   --chart-axis: rgba(255, 255, 255, 0.3);
@@ -158,6 +158,27 @@ body {
 
 .delta-up { color: var(--chart-good-text); }
 .delta-down { color: var(--chart-bad-text); }
+
+/*
+ * Color schemes: each picks a fresh --accent/--accent-ink/--accent-solid,
+ * nothing else — never the good/bad or categorical chart tokens above, so a
+ * gain is always green and a loss always red, whatever scheme is chosen.
+ * "teal" (above) is the default and needs no [data-scheme] rule of its own.
+ */
+[data-scheme="amber"] { --accent: #a85c04; --accent-ink: #fffaf0; --accent-solid: #a85c04; }
+[data-scheme="amber"][data-theme="dark"] { --accent: #f5b862; --accent-ink: #241300; --accent-solid: #f5b862; }
+[data-scheme="sky"] { --accent: #2f6feb; --accent-ink: #ffffff; --accent-solid: #2f6feb; }
+[data-scheme="sky"][data-theme="dark"] { --accent: #8ab4f8; --accent-ink: #0b1d33; --accent-solid: #8ab4f8; }
+[data-scheme="indigo"] { --accent: #4f46e5; --accent-ink: #ffffff; --accent-solid: #4f46e5; }
+[data-scheme="indigo"][data-theme="dark"] { --accent: #a5b4fc; --accent-ink: #1e1b3a; --accent-solid: #a5b4fc; }
+[data-scheme="violet"] { --accent: #7c3aed; --accent-ink: #ffffff; --accent-solid: #7c3aed; }
+[data-scheme="violet"][data-theme="dark"] { --accent: #c4b5fd; --accent-ink: #2e1065; --accent-solid: #c4b5fd; }
+[data-scheme="plum"] { --accent: #b23a72; --accent-ink: #ffffff; --accent-solid: #b23a72; }
+[data-scheme="plum"][data-theme="dark"] { --accent: #f0a8cf; --accent-ink: #3a0620; --accent-solid: #f0a8cf; }
+[data-scheme="copper"] { --accent: #b4552c; --accent-ink: #ffffff; --accent-solid: #b4552c; }
+[data-scheme="copper"][data-theme="dark"] { --accent: #e2946b; --accent-ink: #2a1206; --accent-solid: #e2946b; }
+[data-scheme="slate"] { --accent: #334155; --accent-ink: #ffffff; --accent-solid: #334155; }
+[data-scheme="slate"][data-theme="dark"] { --accent: #cbd5e1; --accent-ink: #0f172a; --accent-solid: #cbd5e1; }
 
 .font-display {
   font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
@@ -222,8 +243,6 @@ body {
 
 /* Shared illustrated tabletop controls; chart colors and card art retain their semantics. */
 @media screen {
-  :root { --accent: #296f69; --accent-ink: #fffaf0; --accent-solid: #296f69; }
-  [data-theme="dark"] { --accent: #88c9c0; --accent-ink: #19232d; --accent-solid: #88c9c0; }
   .btn-primary, .btn-secondary {
     border-radius: 0.75rem;
     box-shadow: 0 3px 0 var(--tabletop-edge);

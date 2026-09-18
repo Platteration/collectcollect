@@ -43,11 +43,11 @@ export const viewport: Viewport = {
 };
 
 /**
- * Resolve the stored preference to a concrete theme before the first paint, so
- * the page never flashes the wrong one. Everything else in the app, CSS
- * variables and Tailwind's dark: utilities alike, keys off this one attribute.
+ * Resolve the stored theme and color scheme before the first paint, so the
+ * page never flashes the wrong one. Everything else in the app, CSS
+ * variables and Tailwind's dark: utilities alike, keys off these attributes.
  */
-const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("theme")||"system";var d=p==="dark"||(p!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.setAttribute("data-theme",d?"dark":"light")}catch(e){}})()`;
+const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("theme")||"system";var d=p==="dark"||(p!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.setAttribute("data-theme",d?"dark":"light");var s=localStorage.getItem("colorScheme")||"teal";document.documentElement.setAttribute("data-scheme",s)}catch(e){}})()`;
 
 const NAV = [
   { href: "/", label: "Portfolio", icon: "▲" },
@@ -67,7 +67,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   const unread = unreadCount();
   return (
-    <html lang="en" data-theme="light" className={`${display.variable} h-full antialiased`} suppressHydrationWarning>
+    <html lang="en" data-theme="light" data-scheme="teal" className={`${display.variable} h-full antialiased`} suppressHydrationWarning>
       <head>
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>

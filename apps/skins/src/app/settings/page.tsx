@@ -7,6 +7,7 @@ import { recoveryConflictsFile } from "@collectcollect/core/collection-swap";
 import { RecoveryNotice } from "@collectcollect/core/components/RecoveryNotice";
 import { SESSION_DAYS, authEnabled } from "@/lib/auth";
 import { SignOut } from "@collectcollect/core/components/SignOut";
+import { ColorSchemePicker } from "@collectcollect/core/components/ColorSchemePicker";
 import { backupSummary, replacedCollections } from "@/lib/backup";
 import { SettingsForm } from "@/components/SettingsForm";
 import { CollectionFiles } from "@/components/CollectionFiles";
@@ -28,6 +29,17 @@ export default function SettingsPage() {
       </header>
 
       <RecoveryNotice record={recoveryConflicts()} file={recoveryConflictsFile(databaseFile())} noun="inventory" />
+
+      <section className="card-surface p-4">
+        <h2 className="font-display text-lg font-semibold uppercase tracking-wide">Appearance</h2>
+        <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
+          Pick an accent color. Saved on this device, like light/dark. A gain or loss is always green or red,
+          whichever you choose.
+        </p>
+        <div className="mt-3">
+          <ColorSchemePicker />
+        </div>
+      </section>
 
       {authEnabled() && (
         <section className="card-surface p-4">

@@ -1,6 +1,7 @@
 import { SettingsForm } from "@/components/SettingsForm";
 import { SESSION_DAYS, authEnabled } from "@/lib/auth";
 import { SignOut } from "@collectcollect/core/components/SignOut";
+import { ColorSchemePicker } from "@collectcollect/core/components/ColorSchemePicker";
 import { getSettings } from "@/lib/settings";
 import { backupSummary, replacedCollections } from "@/lib/backup";
 import { RestoreForm } from "@/components/RestoreForm";
@@ -37,6 +38,17 @@ export default function SettingsPage() {
       <SetupChecklist status={setupStatus()} reopen />
       <RecoveryNotice record={recoveryConflicts()} file={recoveryConflictsFile(databaseFile())} noun="collection" />
       {goalMirrorError() && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">The Markdown copy of your goals needs attention: {goalMirrorError()}. Your goals are safe in the database. Rewrite the files after resolving the storage problem.</p>}
+
+      <section className="card-surface p-4">
+        <h2 className="font-semibold">Appearance</h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          Pick an accent color. Saved on this device, like light/dark above. A gain or loss is always green or red,
+          whichever you choose.
+        </p>
+        <div className="mt-3">
+          <ColorSchemePicker />
+        </div>
+      </section>
 
       {authEnabled() && (
         <section className="card-surface p-4">

@@ -27,6 +27,38 @@ test.describe("theme", () => {
     await light.close();
   });
 
+  test("a color scheme changes the accent but never the gain/loss colors", async ({ page }) => {
+    const created = await page.request.post("/api/cards", {
+      data: { game: "pokemon", name: "Scheme-picked Pikachu", setName: "Scheme Set", manualUngraded: 100 },
+    });
+    const { card } = (await created.json()) as { card: { id: number } };
+    await page.request.post(`/api/cards/${card.id}/price`);
+    await page.request.patch(`/api/cards/${card.id}`, { data: { manualUngraded: 250 } });
+    await page.request.post(`/api/cards/${card.id}/price`);
+
+    await page.goto(`/cards/${card.id}`);
+    await expect(page.locator("html")).toHaveAttribute("data-scheme", "teal");
+    const before = await page.locator(".btn-primary").first().evaluate((el) => getComputedStyle(el).backgroundColor);
+
+    await page.goto("/settings");
+    const violet = page.getByRole("button", { name: "Violet" });
+    await violet.click();
+    await expect(page.locator("html")).toHaveAttribute("data-scheme", "violet");
+    await expect(violet).toHaveAttribute("aria-pressed", "true");
+
+    // Survives a reload, applied before the first paint like the theme is.
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-scheme", "violet");
+
+    await page.goto(`/cards/${card.id}`);
+    const after = await page.locator(".btn-primary").first().evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(after).not.toBe(before);
+
+    // The chart's up/down colors are untouched by the scheme change.
+    const chart = page.locator("svg[aria-label^='Value of this card over time']");
+    expect(await chart.locator("path[stroke]").first().getAttribute("stroke")).toBe("var(--chart-good)");
+  });
+
   test("the portfolio line and its fill carry the direction", async ({ page }) => {
     // A manual price needs no network, so the chart can be given real history
     // here without reaching a price API.
