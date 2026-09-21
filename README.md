@@ -10,24 +10,6 @@ Snap a photo of a card and CollectCollect:
 4. **Shows your portfolio** the way a brokerage app would: one headline number for the whole collection (valued at the grade or condition you recorded for each copy), the change over 1W / 1M / 3M / 1Y / all time, a value-over-time chart you can scrub, your total return against what you paid, the split by game, and your top holdings. Each card page has its own value chart and return.
 5. **Tells you when to grade.** Every ungraded card gets a min/max outlook: the band between a mid-grade outcome and a gem-mint outcome, plotted against what the raw copy is worth. When the gap above the raw line is at its widest and clears your grading fee, the card is flagged as a good time to grade; when it has narrowed, it says wait; when even a PSA 10 would not cover the fee, it says skip.
 
-## Quick start
-
-```bash
-npm install
-cp .env.example .env      # add ANTHROPIC_API_KEY (and optional price-source keys)
-npm run dev               # http://localhost:3000
-```
-
-Production: `npm run build && npm start`. Everything is stored locally in `./data` (SQLite database plus uploaded photos); set `DATA_DIR` to move it.
-
-Docker: `docker compose up --build` (reads `.env`, keeps data in a named volume at `/data`).
-
-**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach (the app says so at startup). Signing out ends that session for good, not just in the browser holding it — and if that cannot be written down, the app says so rather than reporting success, because a session it cannot record as retired is one it still honours. Wrong guesses cost wall clock that doubles with each one, including the ones that have already run past the limit: a refusal is added to the cost, never swapped for it, or the cheapest answer would be the one an attacker wants. The cookie is signed with a random key kept in the data directory, so the cookie is no help to anyone guessing the password; `APP_SECRET` replaces that key if you would rather set one. Behind a reverse proxy that terminates TLS the app cannot see that the connection was secure on its own — set `TRUST_PROXY=1` (or `TRUSTED_PROXY_HOPS`) so it believes the forwarded scheme, or `COOKIE_SECURE=1` to settle it outright, and the session cookie is marked `Secure`.
-
-**Host names and other sites.** Whether or not a password is set, the app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`. Requests that a browser sends from another site are refused for anything but `GET`, so a page you happen to visit cannot restore a backup over your collection or spend your API budget; `curl` and scripts, which send no browser origin headers, are unaffected. Every response carries a content security policy, `nosniff`, `no-referrer` and a refusal to be framed.
-
-> Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
-
 ## How pricing works
 
 | Source | Games | Key | What it provides |
@@ -94,6 +76,52 @@ Identification runs on Claude (`claude-opus-5` by default; override with `CLAUDE
 
 Graded cards render in a slab frame with the grading company's label colour, so a PSA 9 in the grid reads as a slab rather than a photo. Each uploaded photo's average colour is sampled at save time and tints that card's tile and page. The hero value and card names use a condensed display face. Everything is theme-aware; dark mode is a designed palette, not an inverted one.
 
+## Running it
+
+```bash
+npm install
+cp .env.example .env      # add ANTHROPIC_API_KEY (and optional price-source keys)
+npm run dev               # http://localhost:3000
+```
+
+Production: `npm run build && npm start`. Everything is stored locally in `./data` (SQLite database plus uploaded photos); set `DATA_DIR` to move it.
+
+Docker: `docker compose up --build` (reads `.env`, keeps data in a named volume at `/data`).
+
+**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach (the app says so at startup). Signing out ends that session for good, not just in the browser holding it — and if that cannot be written down, the app says so rather than reporting success, because a session it cannot record as retired is one it still honours. Wrong guesses cost wall clock that doubles with each one, including the ones that have already run past the limit: a refusal is added to the cost, never swapped for it, or the cheapest answer would be the one an attacker wants. The cookie is signed with a random key kept in the data directory, so the cookie is no help to anyone guessing the password; `APP_SECRET` replaces that key if you would rather set one. Behind a reverse proxy that terminates TLS the app cannot see that the connection was secure on its own — set `TRUST_PROXY=1` (or `TRUSTED_PROXY_HOPS`) so it believes the forwarded scheme, or `COOKIE_SECURE=1` to settle it outright, and the session cookie is marked `Secure`.
+
+**Host names and other sites.** Whether or not a password is set, the app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`. Requests that a browser sends from another site are refused for anything but `GET`, so a page you happen to visit cannot restore a backup over your collection or spend your API budget; `curl` and scripts, which send no browser origin headers, are unaffected. Every response carries a content security policy, `nosniff`, `no-referrer` and a refusal to be framed.
+
+> Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
+
+## Development
+
+```bash
+npm run dev               # development server
+npm run check             # lint, typecheck, unit tests and the conventions test: the gate before a push
+npm test                  # unit tests (vitest)
+npm run test:e2e          # end-to-end tests (playwright: builds the app, then boots its own servers)
+npm run e2e:ui            # the same suite in Playwright's UI mode, against the last build
+npm run test:all          # unit tests, then the end-to-end suite
+npm run build             # production build
+npm run typecheck         # tsc (after generating Next route types)
+npm run lint
+```
+
+Unit tests cover the pieces where a mistake is silent: price matching and the
+provider adapters (against recorded responses, never the network), the
+valuation and grading-outlook maths, the repository and its migrations, sales,
+submissions, alert rules, and the password gate.
+
+The end-to-end suite drives a real production build in Chromium against a
+throwaway data directory. Identification and price lookups are intercepted, so
+the tests never call Anthropic or a price API, but everything else, including
+the database, runs for real. It covers adding a card by hand, duplicate
+merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
+grading submission from draft to booked outcome, and the password gate. Both
+suites, lint, typecheck, the conventions test and the build run in CI on every
+push.
+
 ## Project layout
 
 ```
@@ -135,30 +163,3 @@ src/lib/cards.ts, db.ts  SQLite (better-sqlite3) repository and schema
 src/components/          UI (add flow, card detail, price panel, settings)
 tests/                   Vitest suites (providers with mocked fetch, valuation, repository)
 ```
-
-## Scripts
-
-```bash
-npm run dev         # development server
-npm run build       # production build
-npm test            # unit tests (vitest)
-npm run e2e         # end-to-end tests (playwright, boots its own servers)
-npm run e2e:ui      # the same suite in Playwright's UI mode
-npm run typecheck   # tsc (after generating Next route types)
-npm run lint
-```
-
-## Testing
-
-Unit tests cover the pieces where a mistake is silent: price matching and the
-provider adapters (against recorded responses, never the network), the
-valuation and grading-outlook maths, the repository and its migrations, sales,
-submissions, alert rules, and the password gate.
-
-The end-to-end suite drives a real production build in Chromium against a
-throwaway data directory. Identification and price lookups are intercepted, so
-the tests never call Anthropic or a price API, but everything else, including
-the database, runs for real. It covers adding a card by hand, duplicate
-merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
-grading submission from draft to booked outcome, and the password gate. Both
-suites plus lint, typecheck and build run in CI on every push.

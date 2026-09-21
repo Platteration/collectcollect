@@ -30,9 +30,6 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
-
 # vercel
 .vercel
 
@@ -40,11 +37,18 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# app data (SQLite database + uploaded photos)
+# project: app data (SQLite database + uploaded photos) and Playwright output
 /data/
-!.env.example
-
-# playwright
 /test-results/
 /playwright-report/
 /blob-report/
+
+# editors
+.vscode/
+.idea/
+
+.claude/settings.local.json
+
+# Secrets: ignore every .env variant, but keep the documented template.
+.env*
+!.env.example
