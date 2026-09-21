@@ -4,6 +4,9 @@ import { backupSummary } from "@/lib/backup";
 import { RestoreForm } from "@/components/RestoreForm";
 import { providerStatuses } from "@/lib/status";
 import { GAMES } from "@/lib/types";
+// The version comes from package.json rather than npm_package_version: under
+// `next start` in the Docker image nothing sets that variable.
+import pkg from "../../../package.json";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +71,28 @@ export default function SettingsPage() {
       </section>
 
       <SettingsForm initial={getSettings()} />
+
+      <footer className="card-surface p-4 text-sm text-neutral-500">
+        <h2 className="font-semibold text-foreground">About</h2>
+        <p className="mt-1">
+          <span className="font-medium text-foreground">CollectCollect</span> {pkg.version} — photograph, identify and price
+          your trading cards, and keep the collection on your own machine.
+        </p>
+        <p className="mt-1">
+          <a href="https://github.com/Platteration/collectcollect/blob/HEAD/LICENSE" className="underline">
+            MIT licence
+          </a>{" "}
+          ·{" "}
+          <a href="https://github.com/Platteration/collectcollect" className="underline">
+            source
+          </a>
+        </p>
+        <p className="mt-1">
+          Your collection and photos stay in this server&apos;s data directory. A photo is sent to Anthropic when you ask
+          for it to be identified, a card&apos;s name and set go to the price sources you have configured when it is
+          priced, and an alert is posted to the webhook URL you set; nothing else leaves this server.
+        </p>
+      </footer>
     </div>
   );
 }
