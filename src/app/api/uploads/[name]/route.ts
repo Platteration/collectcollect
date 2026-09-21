@@ -9,7 +9,7 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/uploads/[na
     headers: {
       // The bytes came from a client, but every upload is re-encoded to JPEG on
       // the way in, so this type is the app's own rather than the uploader's.
-      // `nosniff` is not repeated here: next.config.ts sets it on every
+      // `nosniff` is not repeated here: src/proxy.ts sets it on every
       // response including this one, and e2e/access.spec.ts pins it here.
       "Content-Type": "image/jpeg",
       // A stored upload never changes: the name is a fresh UUID each time.

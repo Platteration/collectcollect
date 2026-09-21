@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, authEnabled, verifyToken } from "@/lib/auth";
+import { securityHeaders } from "@/lib/security-headers";
 
 /** Paths that must stay reachable without a session, or the login page cannot load. */
 const PUBLIC = ["/login", "/api/auth"];
@@ -98,7 +99,31 @@ function forbidden(request: NextRequest, message: string) {
   return new NextResponse(message, { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8" } });
 }
 
+/**
+ * The security headers, on every response this file returns. They are decided
+ * here rather than in `headers()` in next.config because a config entry is
+ * evaluated once during `next build` and frozen into
+ * `.next/routes-manifest.json`; the production server reads the manifest and
+ * never consults the config again, so anything decided from the environment —
+ * HSTS reads `APP_BASE_URL` — would carry the build machine's answer. The
+ * Docker image is built without a `.env` and given one at `docker compose up`,
+ * which is exactly that shape. `process.env` is passed as an object rather
+ * than read field by field so that nothing can be substituted at build time.
+ *
+ * Every branch goes through here: the pass-through, the two refusals and the
+ * login redirect are all documents a browser acts on, and a refusal that could
+ * be framed or sniffed is still a page.
+ */
+function secured(response: NextResponse): NextResponse {
+  for (const { key, value } of securityHeaders(process.env)) response.headers.set(key, value);
+  return response;
+}
+
 export async function proxy(request: NextRequest) {
+  return secured(await answer(request));
+}
+
+async function answer(request: NextRequest): Promise<NextResponse> {
   const host = (request.headers.get("host") ?? request.nextUrl.host).trim().toLowerCase();
   if (!hostAllowed(hostname(host))) {
     return forbidden(request, "This server does not answer to that host name. Set ALLOWED_HOSTS to add it.");
@@ -125,6 +150,9 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except Next's own assets and the favicon.
+  // Everything except Next's own assets and the favicon. Those carry none of
+  // the security headers as a result: `_next/static` and `_next/image` are
+  // scripts, styles and images rather than documents, so a policy on them
+  // governs nothing, and every page and every route is inside the pattern.
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

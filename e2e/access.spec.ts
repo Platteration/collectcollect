@@ -32,15 +32,48 @@ test.describe("access guards", () => {
   });
 
   test("every response carries the security headers", async ({ request }) => {
-    const page = await request.get("/", { headers: { "sec-fetch-site": "same-origin" } });
-    const csp = page.headers()["content-security-policy"] ?? "";
-    expect(csp).toContain("default-src 'self'");
-    expect(csp).toContain("frame-ancestors 'none'");
-    // Card art and price-source links come from third-party https hosts.
-    expect(csp).toContain("img-src 'self' https: data: blob:");
-    expect(page.headers()["x-content-type-options"]).toBe("nosniff");
-    expect(page.headers()["referrer-policy"]).toBe("no-referrer");
-    expect(page.headers()["x-frame-options"]).toBe("DENY");
+    // A page and an API route: both are inside the proxy's matcher, and the
+    // headers come from there rather than from a build-time config entry.
+    for (const path of ["/", "/api/cards"]) {
+      const res = await request.get(path, { headers: { "sec-fetch-site": "same-origin" } });
+      const csp = res.headers()["content-security-policy"] ?? "";
+      expect(csp).toContain("default-src 'self'");
+      expect(csp).toContain("frame-ancestors 'none'");
+      // Card art and price-source links come from third-party https hosts.
+      expect(csp).toContain("img-src 'self' https: data: blob:");
+      // A built server: no eval and no dev socket.
+      expect(csp).not.toContain("unsafe-eval");
+      expect(res.headers()["x-content-type-options"]).toBe("nosniff");
+      expect(res.headers()["referrer-policy"]).toBe("no-referrer");
+      expect(res.headers()["x-frame-options"]).toBe("DENY");
+      expect(res.headers()["permissions-policy"]).toContain("camera=(self)");
+      expect(res.headers()["x-powered-by"]).toBeUndefined();
+      // The test servers are plain http with no APP_BASE_URL, so no HSTS.
+      expect(res.headers()["strict-transport-security"]).toBeUndefined();
+    }
+  });
+
+  test("no page violates its own content security policy", async ({ page }) => {
+    // A policy that blocked one of the app's own scripts, styles or images
+    // would only show as a console error, which nothing else here reads.
+    const violations: string[] = [];
+    await page.addInitScript(() => {
+      document.addEventListener("securitypolicyviolation", (e) => {
+        document.documentElement.dataset.cspViolations =
+          `${document.documentElement.dataset.cspViolations ?? ""}${e.violatedDirective} ${e.blockedURI}\n`;
+      });
+    });
+    page.on("console", (m) => {
+      if (m.type() === "error") violations.push(`console: ${m.text()}`);
+    });
+    page.on("pageerror", (e) => violations.push(`page: ${e.message}`));
+    for (const path of ["/", "/add", "/collection", "/settings"]) {
+      await page.goto(path);
+      await page.waitForLoadState("networkidle");
+      const reported = await page.evaluate(() => document.documentElement.dataset.cspViolations ?? "");
+      if (reported) violations.push(`${path}: ${reported}`);
+    }
+    expect(violations).toEqual([]);
   });
 
   test("bytes that came from a client are served as the image they are", async ({ page, request }) => {
@@ -63,7 +96,7 @@ test.describe("access guards", () => {
     expect(served.headers()["content-type"]).toBe("image/jpeg");
     expect(served.headers()["cache-control"]).toBe("private, max-age=31536000, immutable");
     // Client-supplied bytes served from this origin must not be sniffed. The
-    // header comes from the app-wide config, which has to keep covering this
+    // header comes from the proxy, whose matcher has to keep covering this
     // route and not only the pages.
     expect(served.headers()["x-content-type-options"]).toBe("nosniff");
     // A name that is well formed but has never been stored is still a 404.

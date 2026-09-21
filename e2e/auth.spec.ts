@@ -32,6 +32,20 @@ test.describe("password gate", () => {
     expect((await request.get("/api/cards")).status()).toBe(401);
   });
 
+  test("the refusal and the login redirect carry the security headers too", async ({ request }) => {
+    // Every branch of the proxy is a document a browser acts on, not only the
+    // pass-through; a 401 or a redirect without the policy would be the one
+    // response an attacker could frame.
+    const refused = await request.get("/api/cards");
+    expect(refused.status()).toBe(401);
+    expect(refused.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+    expect(refused.headers()["x-powered-by"]).toBeUndefined();
+    const redirected = await request.get("/collection", { maxRedirects: 0 });
+    expect(redirected.status()).toBe(307);
+    expect(redirected.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+    expect(redirected.headers()["x-content-type-options"]).toBe("nosniff");
+  });
+
   test("signing out sends you back to the login form", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("Password").fill("e2e-secret");
