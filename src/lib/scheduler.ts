@@ -18,10 +18,7 @@ export function startPriceScheduler(): void {
 
   const tick = async () => {
     try {
-      const r = await refreshAll({ staleHours: hours });
-      if (r.refreshed || r.unpriced || r.failed.length) {
-        console.log(`[prices] auto-refresh: ${r.refreshed} refreshed, ${r.unpriced} returned no prices, ${r.skipped} fresh, ${r.failed.length} failed`);
-      }
+      await refreshAll({ staleHours: hours });
     } catch (e) {
       console.error("[prices] auto-refresh failed", e);
     }
@@ -43,8 +40,7 @@ export function startUploadSweeper(): void {
 
   const sweep = async () => {
     try {
-      const { removed, bytes } = await sweepOrphanedUploads();
-      if (removed) console.log(`[uploads] removed ${removed} photo${removed === 1 ? "" : "s"} no card points at (${Math.round(bytes / 1024)} KB)`);
+      await sweepOrphanedUploads();
     } catch (e) {
       console.error("[uploads] sweep failed", e);
     }
