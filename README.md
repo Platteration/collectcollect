@@ -120,7 +120,7 @@ the database, runs for real. It covers adding a card by hand, duplicate
 merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
 grading submission from draft to booked outcome, and the password gate. Both
 suites, lint, typecheck, the conventions test and the build run in CI on every
-push.
+push, and a second job builds the Docker image.
 
 ## Project layout
 

@@ -4,6 +4,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+# The app ships no static assets, so there is no public/ to copy in, but the
+# runtime stage copies it and COPY refuses a path that does not exist.
+RUN mkdir -p public
 ENV NEXT_TELEMETRY_DISABLED=1 BUILD_STANDALONE=1
 RUN npm run build
 

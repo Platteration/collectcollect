@@ -54,3 +54,12 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+
+  # The Dockerfile and compose file are otherwise never built anywhere.
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - run: docker build -t collectcollect .
