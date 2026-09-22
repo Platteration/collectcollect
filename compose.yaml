@@ -11,6 +11,12 @@ services:
     volumes:
       - collectcollect-data:/data
     restart: unless-stopped
+    # The same check the image declares, so a `docker compose ps` shows it.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
     # A request body is buffered whole before a route sees it — up to 64 MB, per
     # request rather than across them — so a few concurrent uploads or restores
     # are the app's memory high-water mark, not its idle ~200 MB. Without a

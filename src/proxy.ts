@@ -2,8 +2,22 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, authEnabled, verifyToken } from "@/lib/auth";
 import { securityHeaders } from "@/lib/security-headers";
 
-/** Paths that must stay reachable without a session, or the login page cannot load. */
-const PUBLIC = ["/login", "/api/auth"];
+/**
+ * Paths that must stay reachable without a session: the login page and its
+ * route, or nobody could sign in, and the health check, which no container
+ * runtime signs in for.
+ */
+const PUBLIC = ["/login", "/api/auth", "/api/health"];
+
+/**
+ * The container's own liveness check. It arrives by address — 127.0.0.1 from
+ * inside the container — whatever ALLOWED_HOSTS names, so a deployment that
+ * lists only its domain would otherwise be reported unhealthy by the very
+ * check meant to watch it. The route answers nothing but `ok` and the
+ * version, which a rebound page could already infer from the 403 it would
+ * have got instead, so this one path is not held to the host list.
+ */
+const HEALTH = "/api/health";
 
 /** Methods a browser may send cross-site without changing anything. */
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -125,7 +139,7 @@ export async function proxy(request: NextRequest) {
 
 async function answer(request: NextRequest): Promise<NextResponse> {
   const host = (request.headers.get("host") ?? request.nextUrl.host).trim().toLowerCase();
-  if (!hostAllowed(hostname(host))) {
+  if (request.nextUrl.pathname !== HEALTH && !hostAllowed(hostname(host))) {
     return forbidden(request, "This server does not answer to that host name. Set ALLOWED_HOSTS to add it.");
   }
   if (crossSiteWrite(request, host)) {

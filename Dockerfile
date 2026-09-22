@@ -20,4 +20,8 @@ COPY --from=build --chown=node:node /app/public ./public
 USER node
 VOLUME ["/data"]
 EXPOSE 3000
+# No curl in the image: node can make the one request itself. The check goes
+# by address and needs no session; the proxy allows that for this path alone.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "server.js"]

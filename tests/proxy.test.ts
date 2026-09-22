@@ -87,6 +87,19 @@ describe("cross-site writes", () => {
   });
 });
 
+describe("health check", () => {
+  it("answers the container's own check without a session and whatever ALLOWED_HOSTS names", async () => {
+    process.env.APP_PASSWORD = "hunter2";
+    expect(await status(request("http://127.0.0.1:3000/api/health"))).toBe(200);
+    // Docker reaches the app by address from inside the container; an
+    // instance that lists only its domain must not fail its own check.
+    process.env.ALLOWED_HOSTS = "cards.example.com";
+    expect(await status(request("http://127.0.0.1:3000/api/health"))).toBe(200);
+    // That exemption is for the one path: the collection stays behind the list.
+    expect(await status(request("http://127.0.0.1:3000/api/cards"))).toBe(403);
+  });
+});
+
 describe("password gate", () => {
   it("still refuses an API call without a session, and only after the host check", async () => {
     process.env.APP_PASSWORD = "hunter2";

@@ -86,7 +86,7 @@ npm run dev               # http://localhost:3000
 
 Production: `npm run build && npm start`. Everything is stored locally in `./data` (SQLite database plus uploaded photos); set `DATA_DIR` to move it.
 
-Docker: `docker compose up --build` (reads `.env`, keeps data in a named volume at `/data`).
+Docker: `docker compose up --build` (reads `.env`, keeps data in a named volume at `/data`). The image declares a health check against `/api/health`, which answers `{ "ok": true, "version": "…" }` without a session and whatever `ALLOWED_HOSTS` names, and nothing else.
 
 **Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach (the app says so at startup). Signing out ends that session for good, not just in the browser holding it — and if that cannot be written down, the app says so rather than reporting success, because a session it cannot record as retired is one it still honours. Wrong guesses cost wall clock that doubles with each one, including the ones that have already run past the limit: a refusal is added to the cost, never swapped for it, or the cheapest answer would be the one an attacker wants. The cookie is signed with a random key kept in the data directory, so the cookie is no help to anyone guessing the password; `APP_SECRET` replaces that key if you would rather set one. Behind a reverse proxy that terminates TLS the app cannot see that the connection was secure on its own — set `TRUST_PROXY=1` (or `TRUSTED_PROXY_HOPS`) so it believes the forwarded scheme, or `COOKIE_SECURE=1` to settle it outright, and the session cookie is marked `Secure`.
 
