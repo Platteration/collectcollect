@@ -1,6 +1,4 @@
-// The version comes from package.json rather than npm_package_version: under
-// `next start` in the Docker image nothing sets that variable.
-import pkg from "../../../../package.json";
+import { APP_VERSION } from "@/lib/version";
 
 /**
  * Liveness for a container check: `{ ok, version }` and nothing more. The
@@ -9,5 +7,5 @@ import pkg from "../../../../package.json";
  * no data directory, no environment, no counts from the collection.
  */
 export function GET() {
-  return Response.json({ ok: true, version: pkg.version });
+  return Response.json({ ok: true, version: APP_VERSION });
 }

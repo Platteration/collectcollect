@@ -51,6 +51,21 @@ test.describe("access guards", () => {
       // The test servers are plain http with no APP_BASE_URL, so no HSTS.
       expect(res.headers()["strict-transport-security"]).toBeUndefined();
     }
+    // Next's own assets too: a real chunk the page loads, and the favicon
+    // request every browser makes, which this app answers with a 404.
+    const html = await (await request.get("/")).text();
+    const chunk = /\/_next\/static\/[^"]+\.js/.exec(html)?.[0];
+    expect(chunk).toBeDefined();
+    for (const [path, status] of [
+      [chunk!, 200],
+      ["/favicon.ico", 404],
+    ] as const) {
+      const res = await request.get(path);
+      expect(res.status()).toBe(status);
+      expect(res.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+      expect(res.headers()["x-content-type-options"]).toBe("nosniff");
+      expect(res.headers()["x-powered-by"]).toBeUndefined();
+    }
   });
 
   test("no page violates its own content security policy", async ({ page }) => {

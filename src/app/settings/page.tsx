@@ -4,9 +4,7 @@ import { backupSummary } from "@/lib/backup";
 import { RestoreForm } from "@/components/RestoreForm";
 import { providerStatuses } from "@/lib/status";
 import { GAMES } from "@/lib/types";
-// The version comes from package.json rather than npm_package_version: under
-// `next start` in the Docker image nothing sets that variable.
-import pkg from "../../../package.json";
+import { APP_NAME, APP_VERSION, LICENSE_URL, SOURCE_URL } from "@/lib/version";
 
 export const dynamic = "force-dynamic";
 
@@ -75,22 +73,24 @@ export default function SettingsPage() {
       <footer className="card-surface p-4 text-sm text-neutral-500">
         <h2 className="font-semibold text-foreground">About</h2>
         <p className="mt-1">
-          <span className="font-medium text-foreground">CollectCollect</span> {pkg.version} — photograph, identify and price
+          <span className="font-medium text-foreground">{APP_NAME}</span> {APP_VERSION} — photograph, identify and price
           your trading cards, and keep the collection on your own machine.
         </p>
         <p className="mt-1">
-          <a href="https://github.com/Platteration/collectcollect/blob/HEAD/LICENSE" className="underline">
+          <a href={LICENSE_URL} className="underline">
             MIT licence
           </a>{" "}
           ·{" "}
-          <a href="https://github.com/Platteration/collectcollect" className="underline">
+          <a href={SOURCE_URL} className="underline">
             source
           </a>
         </p>
         <p className="mt-1">
-          Your collection and photos stay in this server&apos;s data directory. A photo is sent to Anthropic when you ask
-          for it to be identified, a card&apos;s name and set go to the price sources you have configured when it is
-          priced, and an alert is posted to the webhook URL you set; nothing else leaves this server.
+          Your collection and photos stay in this server&apos;s data directory. A photo, and any hint you type with it,
+          goes to Anthropic when you ask for identification; a card&apos;s name, set and number go to the price sources you
+          have configured when it is priced, and a set&apos;s name or code goes to its game&apos;s card database (the
+          Pokémon TCG API, Scryfall or YGOPRODeck) when you fetch a checklist; an alert is posted to the webhook URL you
+          set. Nothing else leaves this server.
         </p>
       </footer>
     </div>

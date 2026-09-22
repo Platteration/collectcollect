@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import nextConfig from "../next.config";
 import { contentSecurityPolicy, securityHeaders } from "@/lib/security-headers";
-import { config as proxyConfig, proxy } from "@/proxy";
+import * as proxyModule from "@/proxy";
+
+const { proxy } = proxyModule;
 
 /** The policy as a lookup of directive -> sources, so assertions read like the header does. */
 function directives(csp: string): Record<string, string[]> {
@@ -162,12 +164,27 @@ describe("where the headers are decided", () => {
     expect(nextConfig.headers).toBeUndefined();
   });
 
-  it("keeps the matcher that leaves Next's own assets alone", () => {
-    // `_next/static` and `_next/image` are scripts, styles and images, not
-    // documents: a policy on them governs nothing, and the auth redirect on
-    // them would break the login page's own stylesheet. Every route and every
-    // page is inside the matcher, so a path that a browser navigates to or a
-    // route that answers JSON always carries the headers.
-    expect(proxyConfig.matcher).toEqual(["/((?!_next/static|_next/image|favicon.ico).*)"]);
+  it("runs for every request: no matcher narrows the proxy", () => {
+    // A matcher would silently uncover paths; the config entry this replaced
+    // was `/(.*)`, which reached the assets too.
+    expect((proxyModule as { config?: unknown }).config).toBeUndefined();
+  });
+
+  it("gives Next's own assets the headers without the gate", async () => {
+    // A login redirect on a stylesheet is a login page with no styles, and a
+    // hashed chunk is the app's own public code, so neither the session nor
+    // the host list applies — but the headers do, as they did when a
+    // config-time `headers()` entry covered `/(.*)`.
+    process.env.APP_PASSWORD = "hunter2";
+    for (const path of ["/_next/static/chunks/main.js", "/_next/image?url=%2Fx.png&w=64&q=75", "/favicon.ico"]) {
+      const res = await served(request(`http://localhost:3000${path}`, { host: "rebind.attacker.example" }));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("x-frame-options")).toBe("DENY");
+      expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+    }
+    // Only those: a page beside them is still gated.
+    expect((await served(request("http://localhost:3000/_nextish"))).status).toBe(307);
   });
 });

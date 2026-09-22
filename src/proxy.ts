@@ -13,11 +13,25 @@ const PUBLIC = ["/login", "/api/auth", "/api/health"];
  * The container's own liveness check. It arrives by address — 127.0.0.1 from
  * inside the container — whatever ALLOWED_HOSTS names, so a deployment that
  * lists only its domain would otherwise be reported unhealthy by the very
- * check meant to watch it. The route answers nothing but `ok` and the
- * version, which a rebound page could already infer from the 403 it would
- * have got instead, so this one path is not held to the host list.
+ * check meant to watch it. So this one path is not held to the host list.
+ * What a rebound page gains by that is the version string, and only that: the
+ * 403 it would otherwise get is a fixed sentence, and the route answers
+ * nothing but `ok` and the version, which the shared contract asks it to.
  */
 const HEALTH = "/api/health";
+
+/**
+ * Next's own assets: the hashed chunks under /_next/static, the image
+ * optimiser and the favicon request every browser makes. They are answered
+ * before any host or session logic — a login redirect on a stylesheet is a
+ * login page with no styles, and a matcher used to keep the proxy off them
+ * entirely — but they still carry the security headers, which a config-time
+ * `headers()` entry once gave them and the README promises every response.
+ * `public/` is empty, so there is no other static path to name.
+ */
+function isAsset(pathname: string): boolean {
+  return pathname.startsWith("/_next/") || pathname === "/favicon.ico";
+}
 
 /** Methods a browser may send cross-site without changing anything. */
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -124,17 +138,20 @@ function forbidden(request: NextRequest, message: string) {
  * which is exactly that shape. `process.env` is passed as an object rather
  * than read field by field so that nothing can be substituted at build time.
  *
- * Every branch goes through here: the pass-through, the two refusals and the
- * login redirect are all documents a browser acts on, and a refusal that could
- * be framed or sniffed is still a page.
+ * Every branch goes through here: the pass-through, the two refusals, the
+ * login redirect and the assets are all things a browser acts on, and a
+ * refusal that could be framed or a script that could be sniffed is still a
+ * response.
  */
 function secured(response: NextResponse): NextResponse {
   for (const { key, value } of securityHeaders(process.env)) response.headers.set(key, value);
   return response;
 }
 
+// No matcher: the proxy runs for every request, so every response carries the
+// headers. What must not be gated is decided inside, by path.
 export async function proxy(request: NextRequest) {
-  return secured(await answer(request));
+  return secured(isAsset(request.nextUrl.pathname) ? NextResponse.next() : await answer(request));
 }
 
 async function answer(request: NextRequest): Promise<NextResponse> {
@@ -162,11 +179,3 @@ async function answer(request: NextRequest): Promise<NextResponse> {
   url.search = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname + search)}`;
   return NextResponse.redirect(url);
 }
-
-export const config = {
-  // Everything except Next's own assets and the favicon. Those carry none of
-  // the security headers as a result: `_next/static` and `_next/image` are
-  // scripts, styles and images rather than documents, so a policy on them
-  // governs nothing, and every page and every route is inside the pattern.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
-};
