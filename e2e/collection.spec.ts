@@ -3,6 +3,13 @@ import { addCardByHand, stubPrices } from "./helpers";
 
 test.describe("adding and viewing cards", () => {
   test("a card added by hand appears in the collection and on its own page", async ({ page }) => {
+    // Its first price refresh answers a second late, as a price API can on a CI
+    // runner. addCardByHand waits for it, so the card's page below has the
+    // snapshot its grading outlook is drawn from.
+    await page.route(/\/api\/cards\/\d+\/price$/, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await route.continue();
+    });
     await addCardByHand(page, { name: "Machamp", set: "Base Set", number: "8/102", purchase: "12" });
 
     await page.goto("/collection");
@@ -12,6 +19,7 @@ test.describe("adding and viewing cards", () => {
     await page.getByRole("link", { name: /Machamp/ }).click();
     await expect(page.getByRole("heading", { name: "Machamp" })).toBeVisible();
     await expect(page.getByText("$12.00")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Grading outlook" })).toBeVisible();
   });
 
   test("a card matching one already owned offers to become another copy", async ({ page }) => {

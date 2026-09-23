@@ -102,6 +102,12 @@ export async function addCardByHand(
   if (fields.number) await form.getByLabel("Card number").fill(fields.number);
   if (fields.quantity) await form.getByLabel("Quantity").fill(fields.quantity);
   if (fields.purchase) await form.getByLabel("Purchase price (USD)").fill(fields.purchase);
+  // Saving fires the card's first price refresh without waiting for it, and the
+  // card's page draws its grading plan and outlook only once that snapshot is
+  // stored. Wait for its answer, so the next step reads a card that has one.
+  const priced = page.waitForResponse((r) => r.request().method() === "POST" && /^\/api\/cards\/\d+\/price$/.test(new URL(r.url()).pathname));
+  priced.catch(() => undefined); // the save can fail first; that is what the test reports
   await page.getByRole("button", { name: "Save to collection" }).click();
   await expect(page.getByText(/Saved/).first()).toBeVisible();
+  expect((await priced).status()).toBe(200);
 }

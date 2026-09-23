@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 /**
  * End-to-end tests run against a real production build with its own throwaway
@@ -10,6 +11,9 @@ import path from "node:path";
 const OPEN_PORT = 3210;
 const LOCKED_PORT = 3211;
 const dataRoot = path.join(os.tmpdir(), `collectcollect-e2e-${process.pid}`);
+// Both servers reach no host but their own (see e2e/offline.mjs), so a price
+// lookup made on the server fails at once rather than calling a real API.
+const offline = [process.env.NODE_OPTIONS, `--import=${pathToFileURL(path.join(__dirname, "e2e", "offline.mjs")).href}`].filter(Boolean).join(" ");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -39,14 +43,14 @@ export default defineConfig({
       timeout: 120_000,
       // A placeholder key makes the client take the identify path, which the
       // tests intercept; no request ever reaches Anthropic.
-      env: { DATA_DIR: path.join(dataRoot, "open"), ANTHROPIC_API_KEY: "sk-ant-e2e-placeholder", AUTO_REFRESH_HOURS: "0" },
+      env: { DATA_DIR: path.join(dataRoot, "open"), ANTHROPIC_API_KEY: "sk-ant-e2e-placeholder", AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: offline },
     },
     {
       command: `npm start -- --port ${LOCKED_PORT}`,
       port: LOCKED_PORT,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { DATA_DIR: path.join(dataRoot, "locked"), APP_PASSWORD: "e2e-secret", AUTO_REFRESH_HOURS: "0" },
+      env: { DATA_DIR: path.join(dataRoot, "locked"), APP_PASSWORD: "e2e-secret", AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: offline },
     },
   ],
 });

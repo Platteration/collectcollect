@@ -114,9 +114,11 @@ valuation and grading-outlook maths, the repository and its migrations, sales,
 submissions, alert rules, and the password gate.
 
 The end-to-end suite drives a real production build in Chromium against a
-throwaway data directory. Identification and price lookups are intercepted, so
-the tests never call Anthropic or a price API, but everything else, including
-the database, runs for real. It covers adding a card by hand, duplicate
+throwaway data directory. Identification and price lookups are intercepted in
+the browser, and the servers the suite starts can reach no host but their own
+(`e2e/offline.mjs`), so the price refresh a saved card triggers on the server
+fails at once, and the tests never call Anthropic or a price API; everything
+else, including the database, runs for real. It covers adding a card by hand, duplicate
 merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
 grading submission from draft to booked outcome, and the password gate. Both
 suites, lint, typecheck, the conventions test and the build run in CI on every
