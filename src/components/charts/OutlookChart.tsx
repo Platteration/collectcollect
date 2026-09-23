@@ -42,8 +42,9 @@ export function OutlookChart({ series, compact = false }: Props) {
       </div>
     );
   }
-  // The crosshair's index is state and the series is a prop, so it can be
-  // left past the end of a shorter series, where it names no point at all.
+  // The crosshair's index is state and the series is a prop: in the render
+  // where a shorter series arrives, before useCrosshair has dropped it, it can
+  // be past the end, where it names no point at all.
   const active = index !== null ? series[index] : undefined;
   const activeX = index !== null ? xs[index] : undefined;
   const last = series[series.length - 1]!;

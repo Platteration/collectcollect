@@ -48,8 +48,9 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
     );
   }
 
-  // The crosshair's index is state and the points are a prop: choosing a
-  // shorter range can leave it past the end, where it names no point at all.
+  // The crosshair's index is state and the points are a prop: in the render
+  // where a shorter range arrives, before useCrosshair has dropped it, it can
+  // be past the end, where it names no point at all.
   const active = index !== null ? points[index] : undefined;
   const activeX = index !== null ? xs[index] : undefined;
 

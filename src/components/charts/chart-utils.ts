@@ -106,6 +106,13 @@ export function timeTicks(times: number[], xs: number[], labels: string[], count
 /** Tracks the pointer over an SVG and snaps to the nearest data index. */
 export function useCrosshair(xs: number[]) {
   const [index, setIndex] = useState<number | null>(null);
+  // The index is state and the series is a prop: choosing a shorter range can
+  // leave it past the end, where it names no point. It is dropped then rather
+  // than kept, so the arrow keys start again from an end of the new series
+  // instead of stepping through points that are not there, and a longer range
+  // chosen later does not bring the old crosshair back. React re-renders at
+  // once, but this render still returns the old index to the chart.
+  if (index !== null && index >= xs.length) setIndex(null);
   const onMove = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
       const rect = e.currentTarget.getBoundingClientRect();
