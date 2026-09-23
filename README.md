@@ -120,7 +120,8 @@ the database, runs for real. It covers adding a card by hand, duplicate
 merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
 grading submission from draft to booked outcome, and the password gate. Both
 suites, lint, typecheck, the conventions test and the build run in CI on every
-push, and a second job builds the Docker image.
+push, a second job builds the Docker image, and a third, `audit`, runs
+`npm audit --omit=dev --audit-level=high` against the lockfile.
 
 ## Project layout
 
