@@ -120,7 +120,7 @@ describe("the database inside an archive", () => {
     // collection is still the one that was there.
     expect(restored()).toEqual([]);
     expect(listCards()).toHaveLength(1);
-    expect(listCards()[0].name).toBe("Ragavan");
+    expect(listCards()[0]!.name).toBe("Ragavan");
   });
 
   it("still says plainly when the file is not a database at all", async () => {

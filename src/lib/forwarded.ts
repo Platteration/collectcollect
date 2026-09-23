@@ -43,13 +43,15 @@ export function forwardedEntry(header: string | null | undefined, hops: number):
     .split(",")
     .map((part) => part.trim())
     .filter(Boolean);
-  return chain.length >= hops ? chain[chain.length - hops] : null;
+  // `?? null` for a hop count that is not a whole number, which names no entry.
+  return chain.length >= hops ? (chain[chain.length - hops] ?? null) : null;
 }
 
 /** An `X-Forwarded-For` entry that really is an address, with any port removed. */
 export function asAddress(entry: string): string | null {
   if (net.isIP(entry)) return entry;
   // `[::1]:8080` and `198.51.100.9:8080` are both legal in a forwarded chain.
-  const bare = entry.startsWith("[") ? entry.slice(1).split("]")[0] : entry.split(":").length === 2 ? entry.split(":")[0] : entry;
+  // split() always answers at least one piece, so [0] is there.
+  const bare = entry.startsWith("[") ? entry.slice(1).split("]")[0]! : entry.split(":").length === 2 ? entry.split(":")[0]! : entry;
   return net.isIP(bare) ? bare : null;
 }

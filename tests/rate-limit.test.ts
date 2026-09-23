@@ -14,6 +14,7 @@ import {
   recordLoginFailure,
   resetLimiters,
 } from "@/lib/rate-limit";
+import { forwardedEntry } from "@/lib/forwarded";
 import { openLiveDatabase, setDb } from "@/lib/db";
 import { createCard } from "@/lib/cards";
 import { refreshAll } from "@/lib/pricing/refresh";
@@ -68,6 +69,13 @@ describe("login attempt limiter", () => {
     process.env.TRUSTED_PROXY_HOPS = "2";
     expect(clientKey(req("198.51.100.9, 203.0.113.5, 10.0.0.1"))).toBe("203.0.113.5");
     expect(clientKey(req("203.0.113.5"))).toBeNull();
+  });
+
+  it("names no entry for a hop count that is not a whole number", () => {
+    // trustedProxyHops only ever answers a whole number, but forwardedEntry is
+    // exported, and what it answers is an entry or null, never undefined.
+    expect(forwardedEntry("198.51.100.9, 203.0.113.5", 1.5)).toBeNull();
+    expect(forwardedEntry("198.51.100.9, 203.0.113.5", 1)).toBe("203.0.113.5");
   });
 
   it("gives no key at all for anything that is not an address", () => {

@@ -41,12 +41,12 @@ describe("portfolioSeries", () => {
     const pts = portfolioSeries(cards, snaps);
     expect(pts.map((p) => p.value)).toEqual([100, 130, 150]);
     expect(pts.map((p) => p.ungraded)).toEqual([100, 124, 144]);
-    expect(pts[2].priced).toBe(2);
+    expect(pts[2]!.priced).toBe(2);
   });
   it("collapses snapshots taken at the same instant", () => {
     const pts = portfolioSeries([card(1), card(2)], [snap(1, 1, 0, { yourCopyValue: 5 }), snap(2, 2, 0, { yourCopyValue: 7 })]);
     expect(pts).toHaveLength(1);
-    expect(pts[0].value).toBe(12);
+    expect(pts[0]!.value).toBe(12);
   });
 });
 
@@ -133,13 +133,13 @@ describe("returns and allocation", () => {
   const values: Record<number, number | null> = { 1: 150, 2: 8, 3: 500 };
   it("computes total return only over cards with a known cost", async () => {
     const { totalReturn } = await import("@/lib/analytics");
-    expect(totalReturn(cards, (c) => values[c.id])).toEqual({ invested: 120, valueOfInvested: 166, amount: 46, percent: 38.33, cardsWithCost: 2 });
+    expect(totalReturn(cards, (c) => values[c.id] ?? null)).toEqual({ invested: 120, valueOfInvested: 166, amount: 46, percent: 38.33, cardsWithCost: 2 });
     expect(totalReturn([], () => null).percent).toBeNull();
   });
   it("splits value by game, largest first", async () => {
     const { allocationByGame } = await import("@/lib/analytics");
-    const a = allocationByGame(cards, (c) => values[c.id]);
+    const a = allocationByGame(cards, (c) => values[c.id] ?? null);
     expect(a.map((x) => [x.game, x.value, x.cards])).toEqual([["pokemon", 650, 2], ["yugioh", 16, 1]]);
-    expect(a[0].share).toBeCloseTo(650 / 666);
+    expect(a[0]!.share).toBeCloseTo(650 / 666);
   });
 });

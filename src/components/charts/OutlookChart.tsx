@@ -26,10 +26,13 @@ export function OutlookChart({ series, compact = false }: Props) {
   const sx = xScale(times, layout);
   const sy = yScale(lo, hi, layout);
   const xs = times.map((t) => sx(t));
-  const isEnd = (i: number) => i === times.length - 1 || xs[i] > layout.width - layout.right - 40;
-  const upper: Array<[number, number]> = series.map((p, i) => [xs[i], sy(p.max)]);
-  const lower: Array<[number, number]> = series.map((p, i) => [xs[i], sy(p.min)]);
-  const raw: Array<[number, number]> = series.map((p, i) => [xs[i], sy(p.raw)]);
+  // `i` is one of timeTicks' indexes into `times`, which `xs` runs parallel to.
+  const isEnd = (i: number) => i === times.length - 1 || xs[i]! > layout.width - layout.right - 40;
+  const upper: Array<[number, number]> = series.map((p, i) => [xs[i]!, sy(p.max)]);
+  const lower: Array<[number, number]> = series.map((p, i) => [xs[i]!, sy(p.min)]);
+  const raw: Array<[number, number]> = series.map((p, i) => [xs[i]!, sy(p.raw)]);
+  // Only the full chart draws a time axis.
+  const labels = compact ? [] : series.map((p) => shortDate(p.t));
   const { index, onMove, onLeave, onKey, setIndex } = useCrosshair(xs);
 
   if (series.length === 0) {
@@ -39,8 +42,11 @@ export function OutlookChart({ series, compact = false }: Props) {
       </div>
     );
   }
-  const active = index !== null ? series[index] : null;
-  const last = series[series.length - 1];
+  // The crosshair's index is state and the series is a prop, so it can be
+  // left past the end of a shorter series, where it names no point at all.
+  const active = index !== null ? series[index] : undefined;
+  const activeX = index !== null ? xs[index] : undefined;
+  const last = series[series.length - 1]!;
   const single = series.length === 1;
 
   return (
@@ -81,27 +87,27 @@ export function OutlookChart({ series, compact = false }: Props) {
           </g>
         )}
         {!compact &&
-          timeTicks(times, xs, series.map((p) => shortDate(p.t)), narrow ? 3 : 4).map((i) => (
+          timeTicks(times, xs, labels, narrow ? 3 : 4).map((i) => (
             <text key={i} x={xs[i]} y={layout.height - 6} fontSize={11} fill={INK.muted} textAnchor={i === 0 ? "start" : isEnd(i) ? "end" : "middle"}>
-              {shortDate(series[i].t)}
+              {labels[i]}
             </text>
           ))}
-        {index !== null && (
+        {active && activeX !== undefined && (
           <g>
-            <line x1={xs[index]} x2={xs[index]} y1={layout.top} y2={layout.height - layout.bottom} stroke={INK.axis} strokeWidth={1} />
-            <circle cx={upper[index][0]} cy={upper[index][1]} r={4} fill={INK.max} stroke={INK.surface} strokeWidth={2} />
-            <circle cx={lower[index][0]} cy={lower[index][1]} r={4} fill={INK.min} stroke={INK.surface} strokeWidth={2} />
-            <circle cx={raw[index][0]} cy={raw[index][1]} r={4} fill={INK.raw} stroke={INK.surface} strokeWidth={2} />
+            <line x1={activeX} x2={activeX} y1={layout.top} y2={layout.height - layout.bottom} stroke={INK.axis} strokeWidth={1} />
+            <circle cx={activeX} cy={sy(active.max)} r={4} fill={INK.max} stroke={INK.surface} strokeWidth={2} />
+            <circle cx={activeX} cy={sy(active.min)} r={4} fill={INK.min} stroke={INK.surface} strokeWidth={2} />
+            <circle cx={activeX} cy={sy(active.raw)} r={4} fill={INK.raw} stroke={INK.surface} strokeWidth={2} />
           </g>
         )}
         {xs.map((x, i) => (
           <rect key={i} x={x - 12} y={0} width={24} height={layout.height} fill="transparent" onPointerEnter={() => setIndex(i)} />
         ))}
       </svg>
-      {active && (
+      {active && activeX !== undefined && (
         <div
           className="pointer-events-none absolute top-0 z-10 rounded-md border border-black/10 bg-white px-2 py-1 text-xs shadow dark:border-white/10 dark:bg-neutral-900"
-          style={{ left: `${(xs[index!] / layout.width) * 100}%`, transform: xs[index!] > layout.width / 2 ? "translateX(-105%)" : "translateX(8px)" }}
+          style={{ left: `${(activeX / layout.width) * 100}%`, transform: activeX > layout.width / 2 ? "translateX(-105%)" : "translateX(8px)" }}
         >
           <div className="text-neutral-500">{shortDate(active.t, true)}</div>
           <Row color={INK.max} label={active.maxLabel} value={active.max} />

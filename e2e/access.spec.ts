@@ -104,7 +104,7 @@ test.describe("access guards", () => {
     const { uploads } = (await stored.json()) as { uploads: Array<{ name: string }> };
     expect(uploads).toHaveLength(1);
 
-    const served = await request.get(`/api/uploads/${uploads[0].name}`);
+    const served = await request.get(`/api/uploads/${uploads[0]!.name}`);
     expect(served.status()).toBe(200);
     // The route's own contribution: every upload is re-encoded to JPEG, and the
     // name is a fresh UUID, so the bytes are immutable and private to this user.

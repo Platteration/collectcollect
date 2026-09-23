@@ -27,8 +27,10 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
   const sx = xScale(times, layout);
   const sy = yScale(lo, hi, layout);
   const xs = times.map((t) => sx(t));
-  const isEnd = (i: number) => i === times.length - 1 || xs[i] > layout.width - layout.right - 40;
-  const coords: Array<[number, number]> = points.map((p, i) => [xs[i], sy(p.value)]);
+  // `i` is one of timeTicks' indexes into `times`, which `xs` runs parallel to.
+  const isEnd = (i: number) => i === times.length - 1 || xs[i]! > layout.width - layout.right - 40;
+  const coords: Array<[number, number]> = points.map((p, i) => [xs[i]!, sy(p.value)]);
+  const labels = points.map((p) => shortDate(p.t));
   const { index, onMove, onLeave, onKey, setIndex } = useCrosshair(xs);
   const color = up ? INK.good : INK.bad;
   const baseline = sy(lo);
@@ -46,7 +48,10 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
     );
   }
 
-  const active = index !== null ? points[index] : null;
+  // The crosshair's index is state and the points are a prop: choosing a
+  // shorter range can leave it past the end, where it names no point at all.
+  const active = index !== null ? points[index] : undefined;
+  const activeX = index !== null ? xs[index] : undefined;
 
   return (
     <div ref={ref} className="relative">
@@ -72,16 +77,16 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
         ))}
         <path d={areaPath(coords, baseline)} fill={color} opacity={0.1} />
         <path d={linePath(coords)} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-        {points.length === 1 && <circle cx={coords[0][0]} cy={coords[0][1]} r={4} fill={color} stroke={INK.surface} strokeWidth={2} />}
-        {timeTicks(times, xs, points.map((p) => shortDate(p.t)), narrow ? 3 : 4).map((i) => (
+        {points.length === 1 && <circle cx={coords[0]![0]} cy={coords[0]![1]} r={4} fill={color} stroke={INK.surface} strokeWidth={2} />}
+        {timeTicks(times, xs, labels, narrow ? 3 : 4).map((i) => (
           <text key={i} x={xs[i]} y={layout.height - 6} fontSize={11} fill={INK.muted} textAnchor={i === 0 ? "start" : isEnd(i) ? "end" : "middle"}>
-            {shortDate(points[i].t)}
+            {labels[i]}
           </text>
         ))}
-        {index !== null && (
+        {active && activeX !== undefined && (
           <g>
-            <line x1={xs[index]} x2={xs[index]} y1={layout.top} y2={layout.height - layout.bottom} stroke={INK.axis} strokeWidth={1} />
-            <circle cx={coords[index][0]} cy={coords[index][1]} r={5} fill={color} stroke={INK.surface} strokeWidth={2} />
+            <line x1={activeX} x2={activeX} y1={layout.top} y2={layout.height - layout.bottom} stroke={INK.axis} strokeWidth={1} />
+            <circle cx={activeX} cy={sy(active.value)} r={5} fill={color} stroke={INK.surface} strokeWidth={2} />
           </g>
         )}
         {/* Invisible hit areas so keyboard/touch users can land on points. */}
@@ -89,10 +94,10 @@ export function PortfolioChart({ points, up, onHover, height = 260, detail, labe
           <rect key={i} x={x - 12} y={layout.top} width={24} height={layout.height - layout.top - layout.bottom} fill="transparent" onPointerEnter={() => setIndex(i)} />
         ))}
       </svg>
-      {active && (
+      {active && activeX !== undefined && (
         <div
           className="pointer-events-none absolute top-0 rounded-md border border-black/10 bg-white px-2 py-1 text-xs shadow dark:border-white/10 dark:bg-neutral-900"
-          style={{ left: `${(xs[index!] / layout.width) * 100}%`, transform: xs[index!] > layout.width / 2 ? "translateX(-105%)" : "translateX(8px)" }}
+          style={{ left: `${(activeX / layout.width) * 100}%`, transform: activeX > layout.width / 2 ? "translateX(-105%)" : "translateX(8px)" }}
         >
           <div className="font-semibold">{money(active.value)}</div>
           <div className="text-neutral-500">{shortDate(active.t, true)}</div>

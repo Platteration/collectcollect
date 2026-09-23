@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { openLiveDatabase, setDb, uploadsDir } from "@/lib/db";
 import { createCard } from "@/lib/cards";
-import { saveUpload } from "@/lib/images";
+import { dominantColor, saveUpload } from "@/lib/images";
 import { sweepOrphanedUploads } from "@/lib/uploads";
 
 let dir: string;
@@ -63,6 +63,22 @@ describe("saveUpload", () => {
     await expect(saveUpload(upload(Buffer.from("not an image at all"), "image/jpeg"))).rejects.toThrow(
       /not a JPEG, PNG, WebP or HEIC/,
     );
+  });
+});
+
+describe("dominantColor", () => {
+  it("reads three colour bytes from a photo whatever channels it was stored with", async () => {
+    // The tint reads data[0..2] of a one-pixel raw render, which sharp gives
+    // in sRGB: a one-channel greyscale photo still comes back as three bytes.
+    const background = { r: 90, g: 90, b: 90 };
+    const photos = [
+      await sharp({ create: { width: 40, height: 40, channels: 3, background } }).toColourspace("b-w").png().toBuffer(),
+      await sharp({ create: { width: 40, height: 40, channels: 4, background: { ...background, alpha: 0.5 } } }).toColourspace("b-w").png().toBuffer(),
+      await sharp({ create: { width: 40, height: 40, channels: 3, background } }).toColourspace("cmyk").jpeg().toBuffer(),
+    ];
+    // The fixtures are what they say: one channel, grey with alpha, CMYK.
+    expect(await Promise.all(photos.map(async (p) => (await sharp(p).metadata()).channels))).toEqual([1, 2, 4]);
+    for (const photo of photos) expect(await dominantColor(photo)).toMatch(/^#[0-9a-f]{6}$/);
   });
 });
 

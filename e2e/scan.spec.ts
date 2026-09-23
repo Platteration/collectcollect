@@ -28,3 +28,14 @@ test("scan mode adds, merges and sets aside cards without intervention", async (
   // The uncertain card was not saved.
   await expect(page.getByRole("link", { name: /Scanned Blastoise/ })).toHaveCount(0);
 });
+
+test("an upload answer that names no stored photo fails that card in words", async ({ page }) => {
+  await page.goto("/scan");
+  // This app's server names one stored photo per file it was sent; this stands
+  // in for anything between the two that answers 200 without one.
+  await page.route("**/api/uploads", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ uploads: [] }) }),
+  );
+  await page.locator("input[type=file]").setInputFiles([await cardPhoto(page, [120, 90, 30])]);
+  await expect(page.getByText("The server did not store the photo. Try this one again.")).toBeVisible();
+});

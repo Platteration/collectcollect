@@ -125,16 +125,17 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
   const numbered = parseCsv(text)
     .map((cells, i) => ({ cells, line: i + 1 }))
     .filter((r) => r.cells.some((cell) => cell.trim() !== ""));
-  if (numbered.length === 0) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0, skippedForSize: 0 };
+  const [head] = numbered;
+  if (!head) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0, skippedForSize: 0 };
 
-  const headers = numbered[0].cells.map((h) => h.trim());
+  const headers = head.cells.map((h) => h.trim());
   const keys = headers.map(headerKey);
   const mapping: Record<string, string> = {};
   const index: Record<string, number> = {};
   for (const [field, aliases] of Object.entries(COLUMNS)) {
     const at = keys.findIndex((k) => aliases.includes(k));
     if (at !== -1) {
-      mapping[field] = headers[at];
+      mapping[field] = headers[at]!;
       index[field] = at;
     }
   }
@@ -245,7 +246,7 @@ const COMPANY_PATTERN = /\b(PSA|BGS|BVG|CGC|SGC|TAG|HGA|ACE)\b/i;
  */
 function readGrade(cell: string, companyColumn: string): { grade: string | null; company: string | null; asCondition: string } {
   const text = cell.trim();
-  const company = companyColumn.trim() || COMPANY_PATTERN.exec(text)?.[1].toUpperCase() || null;
+  const company = companyColumn.trim() || COMPANY_PATTERN.exec(text)?.[1]!.toUpperCase() || null;
   const number = /(\d+(?:\.\d+)?)/.exec(text)?.[1];
   if (!number) return { grade: null, company: companyColumn.trim() || null, asCondition: text };
   return { grade: number, company, asCondition: "" };

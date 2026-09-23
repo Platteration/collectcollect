@@ -11,7 +11,8 @@ export async function cardPhoto(page: Page, rgb: [number, number, number]): Prom
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     return canvas.toDataURL("image/jpeg", 0.8);
   }, rgb);
-  return { name: `card-${rgb.join("-")}.jpg`, mimeType: "image/jpeg", buffer: Buffer.from(dataUrl.split(",")[1], "base64") };
+  // A data URL always has the comma that ends its header.
+  return { name: `card-${rgb.join("-")}.jpg`, mimeType: "image/jpeg", buffer: Buffer.from(dataUrl.split(",")[1]!, "base64") };
 }
 
 export interface StubCard {
@@ -26,10 +27,10 @@ export interface StubCard {
  * Answer identification requests with canned results, in order. Keeps the whole
  * client pipeline under test while never calling the real model.
  */
-export async function stubIdentify(page: Page, cards: StubCard[]) {
+export async function stubIdentify(page: Page, cards: [StubCard, ...StubCard[]]) {
   let i = 0;
   await page.route("**/api/identify", async (route) => {
-    const c = cards[Math.min(i++, cards.length - 1)];
+    const c = cards[Math.min(i++, cards.length - 1)]!;
     await route.fulfill({
       status: 200,
       contentType: "application/json",

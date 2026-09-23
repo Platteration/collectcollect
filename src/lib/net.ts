@@ -26,7 +26,9 @@ export function isPrivateAddress(address: string): boolean {
 
   const v4 = parseIpv4(host);
   if (v4) {
-    const [a, b] = v4;
+    // parseIpv4 answers four bytes or null.
+    const a = v4[0]!;
+    const b = v4[1]!;
     if (a === 0) return true; // "this network"
     if (a === 10 || a === 127) return true; // private, loopback
     if (a === 169 && b === 254) return true; // link-local, including 169.254.169.254

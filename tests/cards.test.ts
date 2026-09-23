@@ -302,7 +302,7 @@ describe("a snapshot whose summary is not readable", () => {
 
     // The good reading survives; the unreadable one simply is not there.
     expect(listSnapshots(card.id)).toHaveLength(1);
-    expect(listSnapshots(card.id)[0].summary.ungraded).toBe(5);
+    expect(listSnapshots(card.id)[0]!.summary.ungraded).toBe(5);
     expect(allSnapshots()).toHaveLength(1);
     expect(latestSnapshotsByCard().get(card.id)?.summary.ungraded).toBe(5);
   });

@@ -44,7 +44,8 @@ export function portfolioSeries(cards: CardRecord[], snapshots: PriceSnapshot[])
     }
     const point = { t: s.fetchedAt, value: round2(value), ungraded: round2(ungraded), priced };
     // Snapshots taken in the same second (e.g. "refresh all") collapse into one point.
-    if (points.length && points[points.length - 1].t === point.t) points[points.length - 1] = point;
+    const previous = points[points.length - 1];
+    if (previous?.t === point.t) points[points.length - 1] = point;
     else points.push(point);
   }
   return points;
@@ -77,8 +78,8 @@ export interface Change {
 
 export function change(points: Array<{ t: string; value: number }>): Change {
   if (points.length < 2) return { amount: 0, percent: null, from: null };
-  const first = points[0];
-  const last = points[points.length - 1];
+  const first = points[0]!;
+  const last = points[points.length - 1]!;
   const amount = round2(last.value - first.value);
   return { amount, percent: first.value > 0 ? round2((amount / first.value) * 100) : null, from: first.t };
 }
@@ -204,7 +205,7 @@ export function gradingVerdict(series: OutlookPoint[]): Verdict {
   }
   const peak = Math.max(...series.map((p) => p.upside));
   const ratio = peak > 0 ? last.upside / peak : 0;
-  const trend = last.upside - series[Math.max(0, series.length - 4)].upside;
+  const trend = last.upside - series[Math.max(0, series.length - 4)]!.upside;
   if (ratio >= 0.9) {
     return {
       kind: "prime",

@@ -47,8 +47,8 @@ export function linePath(points: Array<[number, number]>): string {
 
 export function areaPath(points: Array<[number, number]>, baseline: number): string {
   if (points.length === 0) return "";
-  const first = points[0];
-  const last = points[points.length - 1];
+  const first = points[0]!;
+  const last = points[points.length - 1]!;
   return `${linePath(points)} L${last[0].toFixed(1)},${baseline.toFixed(1)} L${first[0].toFixed(1)},${baseline.toFixed(1)} Z`;
 }
 
@@ -77,7 +77,8 @@ export function shortDate(iso: string, withTime = false): string {
  * X-axis tick indexes: points nearest to `count` evenly spaced instants, with
  * neighbours dropped when they would sit closer than `minGap` (viewBox px) or
  * repeat the same label. Points are often unevenly spaced in time (manual
- * refreshes), so ticking by index would bunch labels together.
+ * refreshes), so ticking by index would bunch labels together. `xs` and
+ * `labels` run parallel to `times`, one entry per point.
  */
 export function timeTicks(times: number[], xs: number[], labels: string[], count = 4, minGap = 70): number[] {
   if (times.length === 0) return [];
@@ -96,7 +97,7 @@ export function timeTicks(times: number[], xs: number[], labels: string[], count
       }
     });
     const prev = chosen[chosen.length - 1];
-    if (prev !== undefined && (best === prev || xs[best] - xs[prev] < minGap || labels[best] === labels[prev])) continue;
+    if (prev !== undefined && (best === prev || xs[best]! - xs[prev]! < minGap || labels[best] === labels[prev])) continue;
     chosen.push(best);
   }
   return chosen;

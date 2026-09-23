@@ -253,7 +253,10 @@ function validateStagedDatabase(db: Database.Database): void {
   };
 
   // --- the rows ------------------------------------------------------------
-  const cards = rows<{ id: number } & Record<string, string | null>>("cards", [
+  // The three JSON columns are in the first schema, not in MIGRATIONS, so the
+  // column check above has already refused a cards table without them.
+  type CardRow = { id: number; external_ids: string | null; identification: string | null; manual_graded: string | null };
+  const cards = rows<CardRow & Record<string, string | null>>("cards", [
     "id",
     "game",
     "condition",

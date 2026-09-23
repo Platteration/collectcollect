@@ -164,7 +164,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
     .reverse()
     .filter((s) => s.summary.yourCopyValue)
     .map((s) => ({ t: s.fetchedAt, value: s.summary.yourCopyValue!, ungraded: s.summary.ungraded ?? 0, priced: 1 }));
-  const valueChange = valuePoints.length > 1 ? valuePoints[valuePoints.length - 1].value - valuePoints[0].value : 0;
+  const valueChange = valuePoints.length > 1 ? valuePoints[valuePoints.length - 1]!.value - valuePoints[0]!.value : 0;
   const ret = card.purchasePrice !== null && latest?.yourCopyValue ? latest.yourCopyValue - card.purchasePrice : null;
   const assessment = card.identification?.condition_assessment ?? null;
   const expectedGrade = assessment?.estimated_grade_high ?? assessment?.estimated_grade_low ?? null;
@@ -281,7 +281,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h3 className="font-semibold">Value of your copy</h3>
               <span className={`text-sm font-medium ${valueChange >= 0 ? "delta-up" : "delta-down"}`}>
-                {valueChange >= 0 ? "▲" : "▼"} {money(Math.abs(valueChange))} since {when(valuePoints[0].t)}
+                {valueChange >= 0 ? "▲" : "▼"} {money(Math.abs(valueChange))} since {when(valuePoints[0]!.t)}
               </span>
             </div>
             {ret !== null && (

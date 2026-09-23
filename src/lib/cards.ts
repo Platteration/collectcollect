@@ -306,7 +306,7 @@ export function intakeCard(input: CardInput): IntakeOutcome {
       return { result: "ambiguous", candidates };
     }
     if (interchangeable.length === 1) {
-      const existing = interchangeable[0];
+      const existing = interchangeable[0]!;
       const patch: Partial<CardInput> = { quantity: existing.quantity + (clean.quantity || 1) };
       if (!existing.imagePath && clean.imagePath) {
         patch.imagePath = clean.imagePath;

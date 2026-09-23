@@ -129,7 +129,7 @@ export function AddCardFlow({ claudeConfigured }: { claudeConfigured: boolean })
       await Promise.all(
         fresh.map(async (item, i) => {
           const fd = new FormData();
-          fd.append("files", images[i]);
+          fd.append("files", images[i]!); // fresh was mapped from images
           try {
             const { uploads } = await api<{ uploads: Array<{ name: string; color: string | null }> }>("/api/uploads", { method: "POST", body: fd });
             const names = uploads.map((u) => u.name);

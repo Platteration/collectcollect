@@ -120,7 +120,7 @@ describe("backup archive", () => {
 
     // The extracted database opens and still holds the card.
     const restored = openDatabase(pathm.join(dir, "out", "collectcollect.db"));
-    expect((restored.prepare("SELECT name FROM cards").all() as Array<{ name: string }>)[0].name).toBe("Backed-up Charizard");
+    expect((restored.prepare("SELECT name FROM cards").all() as Array<{ name: string }>)[0]?.name).toBe("Backed-up Charizard");
 
     delete process.env.DATA_DIR;
     fsm.rmSync(dir, { recursive: true, force: true });
@@ -166,7 +166,7 @@ describe("zip reader", () => {
     // Corrupting a payload byte trips the checksum. The header is 30 bytes and
     // the name 13, so the payload starts at 43.
     const corruptPayload = new Uint8Array(good);
-    corruptPayload[50] ^= 0xff;
+    corruptPayload[50]! ^= 0xff;
     await expect(readZip(corruptPayload, limits)).rejects.toThrow(/failed its checksum/);
     // Renaming the entry in its local header, but not the directory, is caught.
     const renamed = new Uint8Array(good);

@@ -74,7 +74,7 @@ describe("summarize", () => {
     expect(s.ungradedSource).toBe("Manual entry");
     expect(s.graded["PSA 10"]).toBe(1000);
     expect(s.yourCopyValue).toBe(1000);
-    expect(s.quotes[0].source).toBe("manual");
+    expect(s.quotes[0]?.source).toBe("manual");
   });
   it("prices a legacy condition at face value rather than at NaN", () => {
     // `condition` is cast off a card row, so a row written before the
@@ -109,7 +109,7 @@ describe("fetchQuotes", () => {
     const { quotes, errors } = await fetchQuotes({ game: "pokemon", name: "Pikachu" }, fetchImpl);
     expect(quotes).toEqual([]);
     expect(errors[0]).toMatchObject({ source: "pokemontcg" });
-    expect(errors[0].message).toMatch(/HTTP 500/);
+    expect(errors[0]!.message).toMatch(/HTTP 500/);
   });
   it("only runs providers for the card's game", async () => {
     const fetchImpl = fakeFetch([["ygoprodeck", { data: [{ id: 1, name: "Kuriboh", card_prices: [{ tcgplayer_price: "0.50" }] }] }]]);
@@ -144,7 +144,7 @@ describe("refreshCard", () => {
       expect(r.stored).toBe(false);
       expect(r.snapshot.summary.errors).toHaveLength(1);
       expect(listSnapshots(card.id)).toHaveLength(1);
-      expect(listSnapshots(card.id)[0].summary.ungraded).toBe(50);
+      expect(listSnapshots(card.id)[0]!.summary.ungraded).toBe(50);
     } finally {
       globalThis.fetch = original;
     }

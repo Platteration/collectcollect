@@ -115,6 +115,9 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
         fd.append("files", file);
         const { uploads } = await api<{ uploads: Array<{ name: string; color: string | null }> }>("/api/uploads", { method: "POST", body: fd });
         const upload = uploads[0];
+        // A 200 names one stored photo per file sent; an answer without one is
+        // a failure for this item, said in words rather than as a TypeError.
+        if (!upload) throw new Error("The server did not store the photo. Try this one again.");
         // The server has the photo now: show its copy and let go of both the
         // capture and the blob URL that was holding it in memory.
         patch(item.key, { upload: upload.name, accentColor: upload.color, preview: `/api/uploads/${upload.name}`, file: null });
@@ -170,12 +173,12 @@ export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
         });
 
         if (outcome.result === "ambiguous") {
+          const only = outcome.candidates.length === 1 ? outcome.candidates[0] : undefined;
           patch(item.key, {
             status: "review",
-            message:
-              outcome.candidates.length === 1
-                ? `You already have a ${outcome.candidates[0].grade ? `${outcome.candidates[0].gradingCompany ?? "graded"} ${outcome.candidates[0].grade}` : "raw"} copy; this one looks different.`
-                : `${outcome.candidates.length} cards in your collection look like this one.`,
+            message: only
+              ? `You already have a ${only.grade ? `${only.gradingCompany ?? "graded"} ${only.grade}` : "raw"} copy; this one looks different.`
+              : `${outcome.candidates.length} cards in your collection look like this one.`,
           });
           return;
         }

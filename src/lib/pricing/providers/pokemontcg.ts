@@ -45,7 +45,7 @@ export function pickVariantKey(variant: string | null | undefined, available: st
   if (v.includes("holo") || v.includes("foil")) prefer.push("holofoil", "unlimitedHolofoil");
   prefer.push("normal", "holofoil", "reverseHolofoil", "unlimitedHolofoil", "1stEditionNormal", "1stEditionHolofoil");
   for (const key of prefer) if (available.includes(key)) return key;
-  return available[0];
+  return available[0]!;
 }
 
 function escapeQuery(s: string): string {
@@ -103,7 +103,7 @@ export const pokemonTcgProvider: PriceProvider = {
     }
     if (cards.length === 0) return [];
 
-    const best = cards.map((c) => ({ c, s: scoreCandidate(q, c) })).sort((a, b) => b.s - a.s)[0].c;
+    const best = cards.map((c) => ({ c, s: scoreCandidate(q, c) })).sort((a, b) => b.s - a.s)[0]!.c;
     const fetchedAt = new Date().toISOString();
     const quotes: PriceQuote[] = [];
     const detail = `${best.set.name} · #${best.number}${best.rarity ? ` · ${best.rarity}` : ""}`;
@@ -114,7 +114,7 @@ export const pokemonTcgProvider: PriceProvider = {
     const variants: Record<string, number> = {};
     // The keys come from the upstream API's JSON, so the table is read the way
     // every other display table in this app is read: own-property or the raw key.
-    for (const k of keys) variants[label(VARIANT_LABELS, k)] = round2(prices[k].market!);
+    for (const k of keys) variants[label(VARIANT_LABELS, k)] = round2(prices[k]!.market!);
     quotes.push({
       source: "pokemontcg",
       sourceLabel: "TCGplayer market (via Pokémon TCG API)",
@@ -122,7 +122,8 @@ export const pokemonTcgProvider: PriceProvider = {
       url: best.tcgplayer?.url ?? null,
       matchedName: best.name,
       matchedDetail: chosen ? `${detail} · ${label(VARIANT_LABELS, chosen)}` : detail,
-      ungraded: chosen ? round2(prices[chosen].market!) : null,
+      // pickVariantKey answers one of `keys`.
+      ungraded: chosen ? round2(prices[chosen]!.market!) : null,
       ungradedVariants: variants,
       graded: {},
       fetchedAt,

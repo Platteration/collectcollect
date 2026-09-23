@@ -19,7 +19,7 @@ export function has<T extends object>(table: T, key: unknown): key is keyof T {
  * anything: a card the owner needs to find and delete must render, not throw.
  */
 export function label<T extends Record<string, string>>(table: T, key: string): string {
-  return has(table, key) ? table[key] : key;
+  return has(table, key) ? table[key]! : key;
 }
 
 export type Game = "pokemon" | "yugioh" | "mtg" | "sports" | "other";

@@ -27,7 +27,7 @@ describe("the automatic price refresh", () => {
     await priceTick(24);
     expect(refreshAll).toHaveBeenCalledWith({ staleHours: 24 });
     expect(warn).toHaveBeenCalledTimes(1);
-    const line = String(warn.mock.calls[0][0]);
+    const line = String(warn.mock.calls[0]![0]);
     // Which card and why, not only a count: the count alone cannot be acted on.
     expect(line).toContain("1 failed");
     expect(line).toContain("card 7: HTTP 404");
@@ -55,8 +55,8 @@ describe("the upload sweeper", () => {
     vi.mocked(sweepOrphanedUploads).mockResolvedValue({ removed: 2, bytes: 4096 });
     await sweepTick();
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0][0])).toContain("removed 2 photos");
-    expect(String(warn.mock.calls[0][0])).toContain("4 KB");
+    expect(String(warn.mock.calls[0]![0])).toContain("removed 2 photos");
+    expect(String(warn.mock.calls[0]![0])).toContain("4 KB");
   });
 
   it("is silent when there was nothing to remove", async () => {

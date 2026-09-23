@@ -1,12 +1,12 @@
 import { GRADING_COMPANIES, has } from "@/lib/types";
 
-const COMPANY_CLASS: Record<string, string> = {
+const COMPANY_CLASS = {
   PSA: "slab-psa",
   BGS: "slab-bgs",
   CGC: "slab-cgc",
   SGC: "slab-sgc",
   TAG: "slab-tag",
-};
+} satisfies Record<string, string>;
 
 export function slabClass(company: string | null | undefined): string {
   // A class name, so has() rather than label(): an unknown company gets no

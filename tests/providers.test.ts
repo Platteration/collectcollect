@@ -48,7 +48,7 @@ describe("Pokémon TCG provider", () => {
     );
     expect(quotes).toHaveLength(2);
     expect(quotes[0]).toMatchObject({ source: "pokemontcg", currency: "USD", ungraded: 400, externalId: "base1-4", referenceImageUrl: "https://img.example/base1-4.png" });
-    expect(quotes[0].ungradedVariants).toEqual({ Holofoil: 400, "1st Edition Holofoil": 5000 });
+    expect(quotes[0]!.ungradedVariants).toEqual({ Holofoil: 400, "1st Edition Holofoil": 5000 });
     expect(quotes[1]).toMatchObject({ currency: "EUR", ungraded: 380.5 });
   });
   it("uses a stored id directly", async () => {
@@ -56,7 +56,7 @@ describe("Pokémon TCG provider", () => {
       ["v2/cards/base1-4", { data: { id: "base1-4", name: "Charizard", number: "4", set: { id: "base1", name: "Base" }, tcgplayer: { prices: { holofoil: { market: 410 } } } } }],
     ]);
     const quotes = await pokemonTcgProvider.lookup({ game: "pokemon", name: "Charizard", externalIds: { pokemontcg: "base1-4" } }, fetchImpl);
-    expect(quotes[0].ungraded).toBe(410);
+    expect(quotes[0]?.ungraded).toBe(410);
   });
   it("returns nothing when there is no match", async () => {
     const quotes = await pokemonTcgProvider.lookup({ game: "pokemon", name: "Nope" }, fakeFetch([["v2/cards?q=", { data: [] }]]));
@@ -89,8 +89,8 @@ describe("YGOPRODeck provider", () => {
     ]);
     const quotes = await ygoprodeckProvider.lookup({ game: "yugioh", name: "Dark Magician", setCode: "LOB-005" }, fetchImpl);
     expect(quotes[0]).toMatchObject({ source: "ygoprodeck", ungraded: 120, matchedDetail: "Legend of Blue Eyes White Dragon · LOB-005 · Ultra Rare" });
-    expect(quotes[0].ungradedVariants).toMatchObject({ TCGplayer: 4.2, eBay: 9.99, "This set (LOB-005)": 120 });
-    expect(quotes[0].ungradedVariants).not.toHaveProperty("Amazon");
+    expect(quotes[0]!.ungradedVariants).toMatchObject({ TCGplayer: 4.2, eBay: 9.99, "This set (LOB-005)": 120 });
+    expect(quotes[0]!.ungradedVariants).not.toHaveProperty("Amazon");
     expect(quotes[1]).toMatchObject({ currency: "EUR", ungraded: 3.5 });
   });
   it("falls back to fuzzy search and treats 400 as no match", async () => {
@@ -120,7 +120,7 @@ describe("Scryfall provider", () => {
       [/cards\/named\?fuzzy=/, { id: "x", name: "Black Lotus", set: "lea", set_name: "Limited Edition Alpha", collector_number: "232", prices: { usd: "100000" } }],
     ]);
     const quotes = await scryfallProvider.lookup({ game: "mtg", name: "Black Lotus", setCode: "zzz" }, fetchImpl);
-    expect(quotes[0].ungraded).toBe(100000);
+    expect(quotes[0]?.ungraded).toBe(100000);
   });
 });
 
@@ -143,14 +143,13 @@ describe("PriceCharting provider", () => {
   });
   it("ranks the product whose number and set match", async () => {
     process.env.PRICECHARTING_TOKEN = "t";
-    const products = [
-      { id: "a", "product-name": "Charizard #4", "console-name": "Pokemon Base Set 2", "loose-price": 10000 },
-      { id: "b", "product-name": "Charizard #4", "console-name": "Pokemon Base Set", "loose-price": 25000, "manual-only-price": 500000 },
-      { id: "c", "product-name": "Charizard #11", "console-name": "Pokemon Base Set", "loose-price": 3000 },
-    ];
+    const otherSet = { id: "a", "product-name": "Charizard #4", "console-name": "Pokemon Base Set 2", "loose-price": 10000 };
+    const match = { id: "b", "product-name": "Charizard #4", "console-name": "Pokemon Base Set", "loose-price": 25000, "manual-only-price": 500000 };
+    const otherNumber = { id: "c", "product-name": "Charizard #11", "console-name": "Pokemon Base Set", "loose-price": 3000 };
+    const products = [otherSet, match, otherNumber];
     const q = { game: "pokemon" as const, name: "Charizard", cardNumber: "4/102", setName: "Base Set" };
-    expect(scoreProduct(q, products[1])).toBeGreaterThan(scoreProduct(q, products[0]));
-    expect(scoreProduct(q, products[1])).toBeGreaterThan(scoreProduct(q, products[2]));
+    expect(scoreProduct(q, match)).toBeGreaterThan(scoreProduct(q, otherSet));
+    expect(scoreProduct(q, match)).toBeGreaterThan(scoreProduct(q, otherNumber));
     const quotes = await priceChartingProvider.lookup(q, fakeFetch([["api/products", { status: "success", products }]]));
     expect(quotes[0]).toMatchObject({ externalId: "b", ungraded: 250, graded: { "PSA 10": 5000 } });
   });
@@ -158,6 +157,6 @@ describe("PriceCharting provider", () => {
     process.env.PRICECHARTING_TOKEN = "t";
     const fetchImpl = fakeFetch([["api/product?", { status: "success", id: "b", "product-name": "Charizard #4", "console-name": "Pokemon Base Set", "loose-price": 26000 }]]);
     const quotes = await priceChartingProvider.lookup({ game: "pokemon", name: "Charizard", externalIds: { pricecharting: "b" } }, fetchImpl);
-    expect(quotes[0].ungraded).toBe(260);
+    expect(quotes[0]?.ungraded).toBe(260);
   });
 });

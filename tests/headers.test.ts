@@ -39,7 +39,7 @@ afterEach(() => {
 describe("security headers", () => {
   it("stops the app being framed: the settings page has one-click restore and sign-out", () => {
     const production = headerMap({ NODE_ENV: "production" });
-    expect(directives(production["Content-Security-Policy"])["frame-ancestors"]).toEqual(["'none'"]);
+    expect(directives(production["Content-Security-Policy"] ?? "")["frame-ancestors"]).toEqual(["'none'"]);
     // The older header too, for anything that does not implement frame-ancestors.
     expect(production["X-Frame-Options"]).toBe("DENY");
   });

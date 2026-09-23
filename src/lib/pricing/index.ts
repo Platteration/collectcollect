@@ -30,8 +30,9 @@ export async function fetchQuotes(
   query: CardQuery,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ quotes: PriceQuote[]; errors: PriceSummary["errors"] }> {
+  const active = providersFor(query.game);
   const results = await Promise.allSettled(
-    providersFor(query.game).map(async (p) => {
+    active.map(async (p) => {
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new ProviderError(p.id, `${p.label} timed out`)), 20_000),
       );
@@ -40,13 +41,12 @@ export async function fetchQuotes(
   );
   const quotes: PriceQuote[] = [];
   const errors: PriceSummary["errors"] = [];
-  const active = providersFor(query.game);
   results.forEach((r, i) => {
     if (r.status === "fulfilled") quotes.push(...r.value);
     else {
       const err = r.reason;
       errors.push({
-        source: err instanceof ProviderError ? err.source : active[i].id,
+        source: err instanceof ProviderError ? err.source : active[i]!.id,
         message: err instanceof Error ? err.message : String(err),
       });
     }
@@ -146,12 +146,12 @@ export function summarize(
     const keys = gradeLookupKeys(owner.gradingCompany, owner.grade);
     const hit = keys.find((k) => k in graded);
     if (hit) {
-      yourCopyValue = graded[hit];
+      yourCopyValue = graded[hit]!;
       yourCopyBasis = `${hit} price from ${gradedSource}.`;
     } else {
       const est = keys.find((k) => k in estimatedGraded);
       if (est) {
-        yourCopyValue = estimatedGraded[est];
+        yourCopyValue = estimatedGraded[est]!;
         yourCopyBasis = `Estimated: ungraded price × ${settings.gradeMultipliers[est]} (${est} multiplier from Settings).`;
       } else if (ungraded) {
         yourCopyValue = ungraded;
