@@ -6,13 +6,17 @@ import { normalizeScheme, normalizeTheme } from "@collectcollect/core/appearance
 const css = readFileSync(new URL("../../../packages/core/src/family-theme.css", import.meta.url), "utf8");
 
 function luminance(hex: string) {
-  const rgb = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255)
-    .map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
-  return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+  if (!/^#[\da-f]{6}$/i.test(hex)) throw new Error(`Invalid contrast color: ${hex}`);
+  const channel = (offset: number) => {
+    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return channel(1) * 0.2126 + channel(3) * 0.7152 + channel(5) * 0.0722;
 }
 function contrast(a: string, b: string) {
-  const [low, high] = [luminance(a), luminance(b)].sort((x, y) => x - y);
-  return (high + 0.05) / (low + 0.05);
+  const first = luminance(a);
+  const second = luminance(b);
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
 
 describe("shared hobby appearance", () => {
