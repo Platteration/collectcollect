@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { imageSrc, money } from "@/lib/format";
 import { GAMES, type CardRecord, type PriceSummary } from "@/lib/types";
-import { Slab } from "./Slab";
+import { Card3D } from "./Card3D";
 
 export function CardTile({ card, price, selected = false }: { card: CardRecord; price: PriceSummary | null; selected?: boolean }) {
   const src = imageSrc(card);
@@ -12,13 +12,7 @@ export function CardTile({ card, price, selected = false }: { card: CardRecord; 
         className={`relative aspect-[3/4] well p-2 ${card.accentColor ? "accent-wash" : ""}`}
         style={card.accentColor ? ({ "--accent": card.accentColor } as React.CSSProperties) : undefined}
       >
-        {graded ? (
-          <Slab company={card.gradingCompany} grade={card.grade!} compact>
-            <Art src={src} name={card.name} className="h-full w-full object-contain" />
-          </Slab>
-        ) : (
-          <Art src={src} name={card.name} className="h-full w-full object-contain" />
-        )}
+        <Card3D compact src={src} name={card.name} seed={card.id} grade={card.grade} condition={card.condition} gradingCompany={card.gradingCompany} />
         <span className="badge absolute left-11 top-2 bg-black/70 text-white">{GAMES[card.game]}</span>
         {card.quantity > 1 && (
           <span className="badge absolute right-2 top-2 bg-amber-600 text-white">×{card.quantity}</span>
@@ -50,12 +44,4 @@ export function CardTile({ card, price, selected = false }: { card: CardRecord; 
       </div>
     </Link>
   );
-}
-
-function Art({ src, name, className }: { src: string | null; name: string; className: string }) {
-  if (!src) {
-    return <div className="flex h-full min-h-24 items-center justify-center text-sm text-neutral-400">No image</div>;
-  }
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={src} alt={name} className={className} loading="lazy" />;
 }

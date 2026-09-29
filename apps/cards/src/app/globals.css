@@ -211,23 +211,11 @@ body {
 }
 
 /*
- * Slab frame: a graded card sits in a plastic case with a printed label.
- * The label strip is tinted per grading company so a slab reads at a glance.
+ * The slab's printed label, tinted per grading company so a slab reads at a
+ * glance. The case itself is drawn by the .slab3d rules below.
  */
-.slab {
-  --slab-label: #6b7280;
-  border-radius: 0.6rem;
-  padding: 4px;
-  background: linear-gradient(150deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.08) 38%, rgba(0, 0, 0, 0.06));
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08);
-}
-:root:not([data-theme="light"]) .slab,
-[data-theme="dark"] .slab {
-  background: linear-gradient(150deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.03) 38%, rgba(0, 0, 0, 0.35));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), 0 1px 3px rgba(0, 0, 0, 0.5);
-}
 .slab-label {
-  background: var(--slab-label);
+  background: var(--slab-label, #6b7280);
   color: #fff;
   border-radius: 0.35rem 0.35rem 0 0;
   padding: 2px 6px;
@@ -241,6 +229,171 @@ body {
 .slab-cgc { --slab-label: #1d6f42; }
 .slab-sgc { --slab-label: #2f2f34; }
 .slab-tag { --slab-label: #5b3fa8; }
+
+/*
+ * The card as an object. This is the one place the tabletop's shallow depth
+ * gives way: a card face that tilts a few degrees towards the pointer and
+ * catches the light, and for a graded card three planes — case back, card,
+ * acrylic front — that separate as it turns. Nothing here has overflow,
+ * opacity or a filter of its own, which would flatten the 3D context.
+ */
+.card3d-scene {
+  perspective: 900px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  touch-action: pan-y;
+}
+.card3d-scene-compact {
+  height: 100%;
+}
+.card3d-body {
+  --rx: 0deg;
+  --ry: 0deg;
+  --mx: 32%;
+  --my: 22%;
+  --gloss: 1;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--rx)) rotateY(var(--ry));
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  width: 100%;
+  max-height: 100%;
+}
+.card3d-scene-compact .card3d-body {
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+}
+.card3d-body[data-tilting] {
+  transition-duration: 70ms;
+}
+/* Tiles do not follow the pointer, but the whole tile lifts a little on hover. */
+.group:hover .card3d-scene-compact .card3d-body {
+  transform: rotateX(4deg) rotateY(-5deg);
+}
+
+.card3d-face {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.35rem;
+  width: 100%;
+  /* A card has a rounded cut edge; a hairline keeps a white border from bleeding into the panel. */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+.card3d-face-compact {
+  width: auto;
+  height: 100%;
+  margin: 0 auto;
+}
+.card3d-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  transform-origin: center;
+}
+.card3d-face-compact .card3d-art {
+  width: auto;
+  height: 100%;
+  max-width: 100%;
+}
+.card3d-blank {
+  display: flex;
+  aspect-ratio: 3 / 4;
+  height: 100%;
+  min-height: 6rem;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+  color: #9ca3af;
+}
+/* The light on the surface: a soft highlight that moves with the tilt and fades with wear. */
+.card3d-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 60% 45% at var(--mx) var(--my),
+    rgba(255, 255, 255, calc(0.34 * var(--gloss))),
+    rgba(255, 255, 255, calc(0.1 * var(--gloss))) 45%,
+    rgba(255, 255, 255, 0) 75%
+  );
+  mix-blend-mode: screen;
+}
+.card3d-wear {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* The slab: a tinted case behind, the card, and a sheet of acrylic in front. */
+.slab3d {
+  position: relative;
+  transform-style: preserve-3d;
+  padding: 4px;
+  border-radius: 0.6rem;
+}
+.card3d-scene-compact .slab3d {
+  height: 100%;
+}
+.slab3d-back {
+  position: absolute;
+  inset: -3px;
+  border-radius: 0.75rem;
+  transform: translateZ(-8px);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--slab-label, #6b7280) 22%, #d9d4c7), color-mix(in srgb, var(--slab-label, #6b7280) 10%, #b8b2a4));
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.22);
+}
+[data-theme="dark"] .slab3d-back {
+  background: linear-gradient(150deg, color-mix(in srgb, var(--slab-label, #6b7280) 30%, #3a4652), color-mix(in srgb, var(--slab-label, #6b7280) 12%, #1c2630));
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.55);
+}
+.slab3d-inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  transform: translateZ(0);
+}
+.slab3d-window {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0 0 0.35rem 0.35rem;
+  background: rgba(255, 255, 255, 0.6);
+}
+[data-theme="dark"] .slab3d-window {
+  background: rgba(0, 0, 0, 0.3);
+}
+.slab3d-front {
+  position: absolute;
+  inset: 0;
+  border-radius: 0.6rem;
+  pointer-events: none;
+  transform: translateZ(10px);
+  background:
+    radial-gradient(ellipse 55% 40% at var(--mx) var(--my), rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 70%),
+    linear-gradient(150deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.04) 40%, rgba(0, 0, 0, 0.05));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+[data-theme="dark"] .slab3d-front {
+  background:
+    radial-gradient(ellipse 55% 40% at var(--mx) var(--my), rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 70%),
+    linear-gradient(150deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02) 40%, rgba(0, 0, 0, 0.25));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card3d-body {
+    transition: none;
+  }
+  .group:hover .card3d-scene-compact .card3d-body {
+    transform: none;
+  }
+}
 
 /* A card's own art tints its detail header. */
 .accent-wash {
@@ -294,6 +447,13 @@ body {
   main {
     max-width: none;
     padding: 0 0.25in;
+  }
+  .card3d-body {
+    transform: none !important;
+  }
+  .card3d-sheen,
+  .slab3d-front {
+    display: none;
   }
   .report table {
     font-size: 11px;

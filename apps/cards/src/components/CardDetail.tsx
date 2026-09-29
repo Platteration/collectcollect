@@ -9,7 +9,7 @@ import { gradingVerdict, isReadyToGrade, outlookSeries } from "@/lib/analytics";
 import { OutlookChart } from "./charts/OutlookChart";
 import { PortfolioChart } from "./charts/PortfolioChart";
 import { CardPhoto } from "./CardPhoto";
-import { Slab } from "./Slab";
+import { Card3D } from "./Card3D";
 import { VERDICT_STYLE } from "./verdict";
 import { CardForm, formFromCard, formToInput } from "./CardForm";
 import type { Acquisition } from "@/lib/acquisitions";
@@ -296,13 +296,17 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
           className={`card-surface overflow-hidden p-2 ${card.accentColor ? "accent-wash" : ""}`}
           style={card.accentColor ? ({ "--accent": card.accentColor } as React.CSSProperties) : undefined}
         >
-          {graded ? (
-            <Slab company={card.gradingCompany} grade={card.grade!} certNumber={card.certNumber}>
-              <CardArt src={src} name={card.name} />
-            </Slab>
-          ) : (
-            <CardArt src={src} name={card.name} />
-          )}
+          <Card3D
+            interactive
+            src={src}
+            name={card.name}
+            seed={card.id}
+            grade={card.grade}
+            condition={card.condition}
+            gradingCompany={card.gradingCompany}
+            certNumber={card.certNumber}
+            assessment={card.identification?.condition_assessment}
+          />
         </div>
         {card.imagePath && card.referenceImageUrl && (
           <a href={card.referenceImageUrl} target="_blank" rel="noreferrer" className="block text-xs text-neutral-500 underline">
@@ -747,10 +751,3 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CardArt({ src, name }: { src: string | null; name: string }) {
-  if (!src) {
-    return <div className="flex aspect-[3/4] items-center justify-center text-sm text-neutral-400">No image</div>;
-  }
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={src} alt={name} className="w-full rounded-[0.35rem] object-contain" />;
-}
