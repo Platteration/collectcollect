@@ -107,7 +107,11 @@ function Face({ src, name, profile, compact }: { src: string | null; name: strin
   const { dx, dy } = profile.centering;
   const offCentre = dx || dy ? { transform: `scale(1.03) translate(${dx.toFixed(2)}%, ${dy.toFixed(2)}%)` } : undefined;
   // A played card has lost some of its colour along with its shine.
-  const faded = profile.wear > 0.5 ? { filter: `saturate(${(1 - (profile.wear - 0.5) * 0.4).toFixed(2)})` } : undefined;
+  const filters = [
+    profile.wear > 0.5 ? `saturate(${(1 - (profile.wear - 0.5) * 0.4).toFixed(2)})` : "",
+    profile.toning > 0 ? `sepia(${(profile.toning * 0.6).toFixed(2)})` : "",
+  ].filter(Boolean);
+  const faded = filters.length ? { filter: filters.join(" ") } : undefined;
   return (
     <div className={`card3d-face ${compact ? "card3d-face-compact" : ""}`}>
       {src ? (
@@ -133,6 +137,8 @@ const CORNER = [
 function Wear({ profile }: { profile: ReturnType<typeof wearProfile> }) {
   const id = useId();
   const fade = `${id}-fade`;
+  const smudge = `${id}-smudge`;
+  const stain = `${id}-stain`;
   return (
     <svg className="card3d-wear" viewBox="0 0 100 140" preserveAspectRatio="none" aria-hidden data-wear-count={profile.count}>
       <defs>
@@ -140,6 +146,16 @@ function Wear({ profile }: { profile: ReturnType<typeof wearProfile> }) {
           <stop offset="0" stopColor="#fff" stopOpacity="0.85" />
           <stop offset="0.55" stopColor="#fff" stopOpacity="0.35" />
           <stop offset="1" stopColor="#fff" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id={smudge}>
+          <stop offset="0" stopColor="#5a5248" stopOpacity="0.5" />
+          <stop offset="0.6" stopColor="#5a5248" stopOpacity="0.2" />
+          <stop offset="1" stopColor="#5a5248" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id={stain}>
+          <stop offset="0" stopColor="#7a4f1c" stopOpacity="0.55" />
+          <stop offset="0.7" stopColor="#7a4f1c" stopOpacity="0.3" />
+          <stop offset="1" stopColor="#7a4f1c" stopOpacity="0" />
         </radialGradient>
       </defs>
       {profile.corners.map((c) => (
@@ -160,6 +176,29 @@ function Wear({ profile }: { profile: ReturnType<typeof wearProfile> }) {
           <line x1={c.x1 + 0.5} y1={c.y1 + 0.5} x2={c.x2 + 0.5} y2={c.y2 + 0.5} stroke="#fff" strokeWidth="0.5" opacity="0.55" />
         </g>
       ))}
+      {profile.printLines.map((l, i) => (
+        <line key={`p${i}`} x1="0" y1={l.y} x2="100" y2={l.y} stroke="#fff" strokeWidth="0.3" opacity={l.opacity} />
+      ))}
+      {profile.dust.map((d, i) => (
+        <circle key={`d${i}`} cx={d.x} cy={d.y} r={d.r} fill={d.dark ? "#000" : "#fff"} opacity={d.dark ? 0.3 : 0.55} />
+      ))}
+      {/* A ding: the shadow its lower lip casts, and the light its upper edge catches. */}
+      {profile.dents.map((d, i) => (
+        <g key={`n${i}`}>
+          <path d={`M ${d.x - d.r} ${d.y} A ${d.r} ${d.r} 0 0 0 ${d.x + d.r} ${d.y}`} fill="none" stroke="#000" strokeWidth={d.r * 0.5} strokeLinecap="round" opacity="0.28" />
+          <path d={`M ${d.x - d.r * 0.8} ${d.y - d.r * 0.2} A ${d.r} ${d.r} 0 0 1 ${d.x + d.r * 0.8} ${d.y - d.r * 0.2}`} fill="none" stroke="#fff" strokeWidth={d.r * 0.35} strokeLinecap="round" opacity="0.5" />
+        </g>
+      ))}
+      {/* The greasy and the stained sit into the print rather than on top of it. */}
+      <g style={{ mixBlendMode: "multiply" }}>
+        {profile.toning > 0 && <rect x="0" y="0" width="100" height="140" fill="#c9a24a" opacity={profile.toning * 0.5} />}
+        {profile.smudges.map((m, i) => (
+          <ellipse key={`m${i}`} cx={m.x} cy={m.y} rx={m.rx} ry={m.ry} transform={`rotate(${m.angle.toFixed(1)} ${m.x} ${m.y})`} fill={`url(#${smudge})`} opacity={m.opacity * 2} />
+        ))}
+        {profile.stains.map((t, i) => (
+          <ellipse key={`t${i}`} cx={t.x} cy={t.y} rx={t.rx} ry={t.ry} transform={`rotate(${t.angle.toFixed(1)} ${t.x} ${t.y})`} fill={`url(#${stain})`} opacity={t.opacity * 2} />
+        ))}
+      </g>
     </svg>
   );
 }

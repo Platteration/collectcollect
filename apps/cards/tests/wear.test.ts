@@ -31,6 +31,12 @@ describe("wear from a grade", () => {
       expect(p.edges).toEqual([]);
       expect(p.scratches).toEqual([]);
       expect(p.creases).toEqual([]);
+      expect(p.dust).toEqual([]);
+      expect(p.smudges).toEqual([]);
+      expect(p.printLines).toEqual([]);
+      expect(p.dents).toEqual([]);
+      expect(p.stains).toEqual([]);
+      expect(p.toning).toBe(0);
       expect(p.centering).toEqual({ dx: 0, dy: 0 });
     }
     expect(wearProfile({ seed: 42, grade: 10 }).gloss).toBe(1);
@@ -55,16 +61,47 @@ describe("wear from a grade", () => {
         expect(Math.hypot(p.centering.dx, p.centering.dy)).toBeGreaterThanOrEqual(Math.hypot(previous.centering.dx, previous.centering.dy));
         previous = p;
       }
-      expect(previous.count).toBeGreaterThan(10);
+      expect(previous.count).toBeGreaterThan(30);
       expect(previous.creases.length).toBe(2);
       expect(previous.corners.length).toBe(4);
+      expect(previous.stains.length).toBe(2);
+      expect(previous.printLines.length).toBe(2);
+      expect(previous.dents.length).toBe(4);
     }
   });
 
-  it("gives a damaged raw card creases and a played one none", () => {
-    expect(wearProfile({ seed: 3, grade: gradeValue(null, "DMG") }).creases.length).toBeGreaterThan(0);
-    expect(wearProfile({ seed: 3, grade: gradeValue(null, "MP") }).creases).toEqual([]);
-    expect(wearProfile({ seed: 3, grade: gradeValue(null, "NM") }).scratches).toEqual([]);
+  it("gives a damaged raw card creases and stains, a played one dents and a print line, and a near-mint one only dust", () => {
+    const dmg = wearProfile({ seed: 3, grade: gradeValue(null, "DMG") });
+    expect(dmg.creases.length).toBeGreaterThan(0);
+    expect(dmg.stains.length).toBeGreaterThan(0);
+    const mp = wearProfile({ seed: 3, grade: gradeValue(null, "MP") });
+    expect(mp.creases).toEqual([]);
+    expect(mp.stains).toEqual([]);
+    expect(mp.dents.length).toBeGreaterThan(0);
+    expect(mp.printLines.length).toBeGreaterThan(0);
+    const nm = wearProfile({ seed: 3, grade: gradeValue(null, "NM") });
+    expect(nm.scratches).toEqual([]);
+    expect(nm.dents).toEqual([]);
+    expect(nm.smudges).toEqual([]);
+    expect(nm.dust.length).toBeGreaterThan(0);
+  });
+
+  it("keeps smudges and dents off the art, and puts a stain against an edge", () => {
+    const inArt = (x: number, y: number) => x > 28 && x < 72 && y > 34 && y < 104;
+    for (const seed of [21, 22, 23, 24]) {
+      const p = wearProfile({ seed, grade: 1 });
+      for (const m of p.smudges) expect(inArt(m.x, m.y)).toBe(false);
+      for (const d of p.dents) expect(inArt(d.x, d.y)).toBe(false);
+      for (const t of p.stains) expect(Math.min(t.x, 100 - t.x, t.y, 140 - t.y)).toBeLessThanOrEqual(7);
+      for (const l of p.printLines) expect(l.y).toBeGreaterThan(0);
+    }
+  });
+
+  it("only tones some cards, and never a gem-mint one", () => {
+    const toned = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((seed) => wearProfile({ seed, grade: 4 }).toning);
+    expect(toned.some((t) => t > 0.05)).toBe(true);
+    expect(toned.every((t) => t <= 0.35)).toBe(true);
+    expect(wearProfile({ seed: 1, grade: 10 }).toning).toBe(0);
   });
 
   it("keeps scratches out of the art and creases across a corner", () => {
@@ -91,5 +128,11 @@ describe("wear from a grade", () => {
     expect(wearProfile({ seed: 5, grade: 10, assessment: { corners: "soft", surface: "scratched" } }).count).toBe(0);
     const offCentre = wearProfile({ seed: 5, grade: 8, assessment: { centering: "60/40 left to right" } });
     expect(Math.hypot(offCentre.centering.dx, offCentre.centering.dy)).toBeGreaterThan(0);
+    expect(wearProfile({ seed: 5, grade: 7, assessment: { surface: "a fingerprint smudge" } }).smudges.length).toBe(plain.smudges.length + 1);
+    expect(wearProfile({ seed: 5, grade: 7, assessment: { surface: "some dust" } }).dust.length).toBe(plain.dust.length + 3);
+    expect(wearProfile({ seed: 5, grade: 7, assessment: { surface: "a print line" } }).printLines.length).toBe(plain.printLines.length + 1);
+    const stained = wearProfile({ seed: 5, grade: 7, assessment: { surface: "yellowing and a stain" } });
+    expect(stained.stains.length).toBe(plain.stains.length + 1);
+    expect(stained.toning).toBeGreaterThanOrEqual(0.12);
   });
 });

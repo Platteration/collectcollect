@@ -1,9 +1,11 @@
 import type { Condition } from "./types";
 
 /**
- * What a card's grade implies about its surface, decided once from the grade
- * and a seed so the same card always shows the same marks. Everything here
- * is geometry for `Card3D`; nothing touches the database.
+ * What a card's grade implies about its surface — corner and edge wear,
+ * scratches, creases, dust, fingerprints, print lines, dents, stains and
+ * yellowing — decided once from the grade and a seed so the same card
+ * always shows the same marks. Everything here is geometry for `Card3D`;
+ * nothing touches the database.
  */
 
 /** The condition the vision model read from the photo, when it left one. */
@@ -31,7 +33,19 @@ export interface WearProfile {
   scratches: Array<{ x1: number; y1: number; x2: number; y2: number; opacity: number }>;
   /** Folds across a corner; only a heavily played card has any. */
   creases: Array<{ x1: number; y1: number; x2: number; y2: number }>;
-  /** Every mark above, for tests and a data attribute. */
+  /** Specks anywhere on the surface; some light, some dark. */
+  dust: Array<{ x: number; y: number; r: number; dark: boolean }>;
+  /** Fingerprints: soft ovals, kept off the art like scratches are. */
+  smudges: Array<{ x: number; y: number; rx: number; ry: number; angle: number; opacity: number }>;
+  /** A factory defect: one faint line the full width of the card. */
+  printLines: Array<{ y: number; opacity: number }>;
+  /** Small dings pressed into the surface. */
+  dents: Array<{ x: number; y: number; r: number }>;
+  /** Blotches near an edge; only a heavily played card has any. */
+  stains: Array<{ x: number; y: number; rx: number; ry: number; angle: number; opacity: number }>;
+  /** Age yellowing over the whole card, 0 none to about 0.35. */
+  toning: number;
+  /** Every mark above (toning aside), for tests and a data attribute. */
   count: number;
 }
 
@@ -89,6 +103,12 @@ export function wearProfile({ seed, grade, assessment }: { seed: number; grade: 
   let edgeCount = pristine ? 0 : Math.round(wear * 6);
   let scratchCount = pristine ? 0 : Math.round(wear * wear * 10);
   const creaseCount = g <= 2 ? 2 : g <= 3 ? 1 : 0;
+  let dustCount = pristine ? 0 : Math.round(2 + wear * 12);
+  let smudgeCount = pristine ? 0 : Math.round(wear * 4);
+  let printLineCount = g <= 5 ? 2 : g <= 8.5 ? 1 : 0;
+  const dentCount = g <= 6 ? Math.round(((6 - g) / 5) * 3) + 1 : 0;
+  let stainCount = g <= 2 ? 2 : g <= 4 ? 1 : 0;
+  let toningFloor = 0;
   let centeringScale = pristine ? 0 : wear * 4;
 
   // What the photo showed decides where the wear concentrates, never whether
@@ -96,7 +116,14 @@ export function wearProfile({ seed, grade, assessment }: { seed: number; grade: 
   if (!pristine && assessment) {
     if (mentions(assessment.corners, /soft|round|worn|whit|ding|fray|bent/i)) cornerCount = Math.min(4, cornerCount + 1);
     if (mentions(assessment.edges, /whit|chip|wear|rough|nick|fray/i)) edgeCount = Math.min(8, edgeCount + 1);
-    if (mentions(assessment.surface, /scratch|scuff|print line|dent|crease|wear|scuf/i)) scratchCount = Math.min(14, scratchCount + 2);
+    if (mentions(assessment.surface, /scratch|scuff|crease|wear|scuf/i)) scratchCount = Math.min(14, scratchCount + 2);
+    if (mentions(assessment.surface, /smudge|fingerprint|print\b|grease|oil/i)) smudgeCount = Math.min(6, smudgeCount + 1);
+    if (mentions(assessment.surface, /dust|speck|debris|particle/i)) dustCount = Math.min(20, dustCount + 3);
+    if (mentions(assessment.surface, /print line|printing line|roller/i)) printLineCount = Math.min(3, printLineCount + 1);
+    if (mentions(assessment.surface, /stain|discolo|yellow|toning|toned|foxing|tan/i)) {
+      stainCount = Math.min(3, stainCount + 1);
+      toningFloor = 0.12;
+    }
     if (mentions(assessment.centering, /off|oc\b|\d{2}\s*\/\s*\d{2}|left|right|high|low/i) && !mentions(assessment.centering, /well|good|centered|50\s*\/\s*50/i)) {
       centeringScale = Math.max(1, centeringScale * 1.5);
     }
@@ -157,6 +184,51 @@ export function wearProfile({ seed, grade, assessment }: { seed: number; grade: 
     creases.push({ x1: cx + sx * a, y1: cy, x2: cx, y2: cy + sy * b });
   }
 
+  /** A point off the art, after a few tries; failing that, in the bottom margin. */
+  const offArt = (): [number, number] => {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const x = between(4, 96);
+      const y = between(4, 136);
+      if (!inArt(x, y)) return [x, y];
+    }
+    return [between(4, 96), between(108, 136)];
+  };
+
+  const dust: WearProfile["dust"] = [];
+  for (let i = 0; i < dustCount; i++) {
+    dust.push({ x: between(1, 99), y: between(1, 139), r: between(0.3, 0.7), dark: rand() < 0.4 });
+  }
+
+  const smudges: WearProfile["smudges"] = [];
+  for (let i = 0; i < smudgeCount; i++) {
+    const [x, y] = offArt();
+    smudges.push({ x, y, rx: between(5, 9) + wear * 4, ry: between(3, 6) + wear * 2, angle: between(0, 180), opacity: between(0.08, 0.14) + wear * 0.06 });
+  }
+
+  const printLines: WearProfile["printLines"] = [];
+  for (let i = 0; i < printLineCount; i++) {
+    printLines.push({ y: between(6, 134), opacity: between(0.2, 0.35) });
+  }
+
+  const dents: WearProfile["dents"] = [];
+  for (let i = 0; i < dentCount; i++) {
+    const [x, y] = offArt();
+    dents.push({ x, y, r: between(0.8, 1.4) + wear * 0.8 });
+  }
+
+  // A stain sits against an edge, where a card is picked up and put down.
+  const stains: WearProfile["stains"] = [];
+  for (let i = 0; i < stainCount; i++) {
+    const side = Math.floor(rand() * 4);
+    const along = between(8, 92);
+    const inset = between(2, 7);
+    const [x, y] = side === 0 ? [along, inset] : side === 1 ? [100 - inset, along * 1.4] : side === 2 ? [along, 140 - inset] : [inset, along * 1.4];
+    stains.push({ x, y, rx: between(4, 8) + wear * 4, ry: between(2.5, 5) + wear * 2, angle: between(0, 180), opacity: between(0.14, 0.22) + wear * 0.08 });
+  }
+
+  // Some cards yellow with age and some do not; how far is the seed's choice, within what the grade allows.
+  const toning = pristine ? 0 : Math.max(toningFloor, rand() * wear * 0.35);
+
   return {
     grade: g,
     wear,
@@ -166,6 +238,12 @@ export function wearProfile({ seed, grade, assessment }: { seed: number; grade: 
     edges,
     scratches,
     creases,
-    count: corners.length + edges.length + scratches.length + creases.length,
+    dust,
+    smudges,
+    printLines,
+    dents,
+    stains,
+    toning,
+    count: corners.length + edges.length + scratches.length + creases.length + dust.length + smudges.length + printLines.length + dents.length + stains.length,
   };
 }
