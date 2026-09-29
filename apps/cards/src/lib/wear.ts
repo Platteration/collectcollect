@@ -16,6 +16,27 @@ export interface Assessment {
   surface?: string | null;
 }
 
+/** The surface a card was printed with, where it has one worth drawing. */
+export type Finish = "holo" | "reverse" | "foil" | "refractor";
+
+/**
+ * A card's finish, read from what the collection already records: the
+ * printing variant ("reverse holo", "etched foil", "gold refractor") and,
+ * failing that, the rarity ("Holo Rare"). Rarity alone never says reverse,
+ * and a rarity like "Mythic" or "Ultra Rare" says nothing about foil.
+ */
+export function finishOf({ variant, rarity }: { variant?: string | null; rarity?: string | null }): Finish | null {
+  const read = (text: string | null | undefined, allowReverse: boolean): Finish | null => {
+    if (!text) return null;
+    if (allowReverse && /reverse/i.test(text)) return "reverse";
+    if (/refractor|prizm|chrome/i.test(text)) return "refractor";
+    if (/holo/i.test(text)) return "holo";
+    if (/foil|etched/i.test(text)) return "foil";
+    return null;
+  };
+  return read(variant, true) ?? read(rarity, false);
+}
+
 export interface WearProfile {
   /** The 1–10 number the marks were drawn from. */
   grade: number;
@@ -45,7 +66,13 @@ export interface WearProfile {
   stains: Array<{ x: number; y: number; rx: number; ry: number; angle: number; opacity: number }>;
   /** Age yellowing over the whole card, 0 none to about 0.35. */
   toning: number;
-  /** Every mark above (toning aside), for tests and a data attribute. */
+  /** Foil lifting away at a corner; only a finished card has any. */
+  peels: Array<{ corner: 0 | 1 | 2 | 3; size: number }>;
+  /** Worn edges on a finished card show the foil: drawn silver, not white. */
+  silvering: boolean;
+  /** How far a raw card has curled, and along which axis; a slab holds it flat. */
+  warp: { axis: "x" | "y"; degrees: number };
+  /** Every mark above (toning, silvering and warp aside), for tests and a data attribute. */
   count: number;
 }
 
@@ -90,7 +117,20 @@ const mentions = (text: string | null | undefined, words: RegExp) => Boolean(tex
 const ART = { x1: 28, y1: 34, x2: 72, y2: 104 };
 const inArt = (x: number, y: number) => x > ART.x1 && x < ART.x2 && y > ART.y1 && y < ART.y2;
 
-export function wearProfile({ seed, grade, assessment }: { seed: number; grade: number; assessment?: Assessment | null }): WearProfile {
+export function wearProfile({
+  seed,
+  grade,
+  assessment,
+  finish = null,
+  graded = false,
+}: {
+  seed: number;
+  grade: number;
+  assessment?: Assessment | null;
+  finish?: Finish | null;
+  /** Sealed in a slab, which holds a card flat. */
+  graded?: boolean;
+}): WearProfile {
   const g = Math.min(10, Math.max(1, grade));
   const wear = (10 - g) / 9;
   const rand = mulberry32(Math.round(seed) || 1);
@@ -229,6 +269,22 @@ export function wearProfile({ seed, grade, assessment }: { seed: number; grade: 
   // Some cards yellow with age and some do not; how far is the seed's choice, within what the grade allows.
   const toning = pristine ? 0 : Math.max(toningFloor, rand() * wear * 0.35);
 
+  // Everything below draws after the marks above, so adding it changed no
+  // card's existing marks.
+
+  const peelCount = !finish ? 0 : g <= 2 ? 2 : g <= 4 ? 1 : 0;
+  const peelOrder = ([0, 1, 2, 3] as const).map((c) => ({ c, k: rand() })).sort((a, b) => a.k - b.k);
+  const peels = peelOrder.slice(0, peelCount).map(({ c }) => ({ corner: c, size: between(0.5, 0.9) + wear * 0.4 }));
+
+  // A played card curls; a foil one curls sooner, because the foil layer
+  // shrinks and swells differently from the card stock. How far is the
+  // grade's; which way is the seed's.
+  const axis: "x" | "y" = rand() < 0.5 ? "x" : "y";
+  const sign = rand() < 0.5 ? -1 : 1;
+  let curl = g < 5 ? ((5 - g) / 4) * 4 : 0;
+  if (finish && g <= 8) curl = Math.max(curl, 1.5 + ((8 - g) / 7) * 2.5);
+  const degrees = graded || pristine ? 0 : curl;
+
   return {
     grade: g,
     wear,
@@ -244,6 +300,10 @@ export function wearProfile({ seed, grade, assessment }: { seed: number; grade: 
     dents,
     stains,
     toning,
-    count: corners.length + edges.length + scratches.length + creases.length + dust.length + smudges.length + printLines.length + dents.length + stains.length,
+    peels,
+    silvering: Boolean(finish) && edges.length > 0,
+    warp: { axis, degrees: degrees ? sign * degrees : 0 },
+    count:
+      corners.length + edges.length + scratches.length + creases.length + dust.length + smudges.length + printLines.length + dents.length + stains.length + peels.length,
   };
 }

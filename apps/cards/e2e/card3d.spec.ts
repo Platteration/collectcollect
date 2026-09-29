@@ -48,6 +48,32 @@ test.describe("the card as an object", () => {
     await expect.poll(() => body.evaluate((el) => getComputedStyle(el).transform), { timeout: 3000 }).toBe(resting);
   });
 
+  test("a finish shimmers where it should, and a worn foil peels and curls unless it is slabbed", async ({ page }) => {
+    const holo = await create(page, { name: "Shiny Scyther", variant: "holo" });
+    const plain = await create(page, { name: "Plain Pidgey" });
+    const foil = await create(page, { name: "Curled Kabuto", variant: "Etched Foil", condition: "DMG" });
+    const slabbed = await create(page, { name: "Flat Kabutops", variant: "foil", gradingCompany: "PSA", grade: "3" });
+
+    await page.goto(`/cards/${holo}`);
+    await expect(page.locator(".card3d-face").first()).toHaveAttribute("data-finish", "holo");
+    await expect(page.locator(".card3d-holo-holo")).toHaveCount(1);
+
+    await page.goto(`/cards/${plain}`);
+    await expect(page.locator(".card3d-holo")).toHaveCount(0);
+    await expect(page.locator(".card3d-face").first()).not.toHaveAttribute("data-finish", /.+/);
+
+    await page.goto(`/cards/${foil}`);
+    await expect(page.locator(".card3d-holo-foil")).toHaveCount(1);
+    expect(await page.locator("[data-peel]").count()).toBeGreaterThan(0);
+    const warp = Number(await page.locator(".card3d-body").first().getAttribute("data-warp"));
+    expect(Math.abs(warp)).toBeGreaterThan(0);
+    await expect(page.locator(".card3d-curve")).toHaveCount(1);
+
+    await page.goto(`/cards/${slabbed}`);
+    await expect(page.locator(".card3d-body").first()).toHaveAttribute("data-warp", "0.00");
+    await expect(page.locator(".card3d-curve")).toHaveCount(0);
+  });
+
   test("in the grid a slab keeps its label and a raw card its own colour", async ({ page }) => {
     await create(page, { name: "Gridded Gengar", gradingCompany: "BGS", grade: "9.5" });
     await create(page, { name: "Gridded Golem", accentColor: "#2f6feb" });

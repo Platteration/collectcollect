@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gradeValue, wearProfile } from "@/lib/wear";
+import { finishOf, gradeValue, wearProfile } from "@/lib/wear";
 
 describe("reading a grade", () => {
   it("takes the number a grade carries, and the last one when there are several", () => {
@@ -134,5 +134,92 @@ describe("wear from a grade", () => {
     const stained = wearProfile({ seed: 5, grade: 7, assessment: { surface: "yellowing and a stain" } });
     expect(stained.stains.length).toBe(plain.stains.length + 1);
     expect(stained.toning).toBeGreaterThanOrEqual(0.12);
+  });
+});
+
+describe("a card's finish", () => {
+  it("is read from the variant, then the rarity", () => {
+    expect(finishOf({ variant: "holo" })).toBe("holo");
+    expect(finishOf({ variant: "Reverse Holo" })).toBe("reverse");
+    expect(finishOf({ variant: "1st Edition Holofoil" })).toBe("holo");
+    expect(finishOf({ variant: "Etched Foil" })).toBe("foil");
+    expect(finishOf({ variant: "foil" })).toBe("foil");
+    expect(finishOf({ variant: "Gold Refractor /50" })).toBe("refractor");
+    expect(finishOf({ variant: "Prizm Silver" })).toBe("refractor");
+    expect(finishOf({ variant: null, rarity: "Holo Rare" })).toBe("holo");
+    expect(finishOf({ variant: "1st edition", rarity: "Rare Holo" })).toBe("holo");
+  });
+
+  it("is nothing when neither says so, and never reverse from a rarity alone", () => {
+    expect(finishOf({ variant: "1st edition" })).toBeNull();
+    expect(finishOf({ variant: "shadowless", rarity: "Rare" })).toBeNull();
+    expect(finishOf({ rarity: "Mythic" })).toBeNull();
+    expect(finishOf({ rarity: "Ultra Rare" })).toBeNull();
+    expect(finishOf({ rarity: "Reverse Holo" })).toBe("holo");
+    expect(finishOf({})).toBeNull();
+  });
+});
+
+describe("wear on a finished card", () => {
+  it("leaves every card without a finish exactly as it was before finishes existed", () => {
+    // Taken from the code as it stood before peels and warp were added.
+    const before = [
+      { seed: 7, count: 36, toning: 0.193, dx: -3.038, corner0: 3, scratch0x: 66.929, dust0x: 52.933, stain0x: 42.023 },
+      { seed: 42, count: 36, toning: 0.187, dx: 0.629, corner0: 2, scratch0x: 19.262, dust0x: 48.209, stain0x: 22.35 },
+      { seed: 1234, count: 36, toning: 0.061, dx: -2.655, corner0: 2, scratch0x: 33.482, dust0x: 96.53, stain0x: 34.687 },
+    ];
+    const r = (n: number) => Math.round(n * 1000) / 1000;
+    for (const b of before) {
+      for (const finish of [null, "foil"] as const) {
+        const p = wearProfile({ seed: b.seed, grade: 3, finish });
+        expect(p.count - p.peels.length).toBe(b.count);
+        expect(r(p.toning)).toBe(b.toning);
+        expect(r(p.centering.dx)).toBe(b.dx);
+        expect(p.corners[0]!.corner).toBe(b.corner0);
+        expect(r(p.scratches[0]!.x1)).toBe(b.scratch0x);
+        expect(r(p.dust[0]!.x)).toBe(b.dust0x);
+        expect(r(p.stains[0]!.x)).toBe(b.stain0x);
+      }
+    }
+  });
+
+  it("peels only a finished card, only from grade 4 down, and never less as the grade falls", () => {
+    for (const grade of [1, 2, 3, 4, 5, 8]) expect(wearProfile({ seed: 9, grade }).peels).toEqual([]);
+    expect(wearProfile({ seed: 9, grade: 5, finish: "foil" }).peels).toEqual([]);
+    expect(wearProfile({ seed: 9, grade: 4, finish: "holo" }).peels.length).toBe(1);
+    expect(wearProfile({ seed: 9, grade: 2, finish: "reverse" }).peels.length).toBe(2);
+    let previous = 0;
+    for (const grade of [10, 8, 6, 4, 3, 2, 1]) {
+      const n = wearProfile({ seed: 9, grade, finish: "refractor" }).peels.length;
+      expect(n).toBeGreaterThanOrEqual(previous);
+      previous = n;
+    }
+  });
+
+  it("silvers the edges of a finished card that has worn ones, and no other", () => {
+    expect(wearProfile({ seed: 4, grade: 5, finish: "holo" }).silvering).toBe(true);
+    expect(wearProfile({ seed: 4, grade: 5 }).silvering).toBe(false);
+    expect(wearProfile({ seed: 4, grade: 10, finish: "holo" }).silvering).toBe(false);
+  });
+
+  it("curls a raw card as it wears, a foil one sooner, and never one in a slab", () => {
+    const tilt = (p: ReturnType<typeof wearProfile>) => Math.abs(p.warp.degrees);
+    expect(tilt(wearProfile({ seed: 2, grade: 10 }))).toBe(0);
+    expect(tilt(wearProfile({ seed: 2, grade: 6 }))).toBe(0);
+    expect(tilt(wearProfile({ seed: 2, grade: 3 }))).toBeGreaterThan(0);
+    expect(tilt(wearProfile({ seed: 2, grade: 7, finish: "foil" }))).toBeGreaterThanOrEqual(1.5);
+    expect(tilt(wearProfile({ seed: 2, grade: 9, finish: "foil" }))).toBe(0);
+    for (const grade of [1, 3, 5, 7, 9]) expect(tilt(wearProfile({ seed: 2, grade, finish: "holo", graded: true }))).toBe(0);
+    for (const seed of [2, 3, 50]) {
+      for (const finish of [null, "holo"] as const) {
+        let previous = 0;
+        for (const grade of [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]) {
+          const d = tilt(wearProfile({ seed, grade, finish }));
+          expect(d).toBeGreaterThanOrEqual(previous);
+          expect(d).toBeLessThanOrEqual(4.5);
+          previous = d;
+        }
+      }
+    }
   });
 });

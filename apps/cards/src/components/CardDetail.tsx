@@ -306,6 +306,8 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             gradingCompany={card.gradingCompany}
             certNumber={card.certNumber}
             assessment={card.identification?.condition_assessment}
+            variant={card.variant}
+            rarity={card.rarity}
           />
         </div>
         {card.imagePath && card.referenceImageUrl && (

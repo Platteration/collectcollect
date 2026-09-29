@@ -12,7 +12,7 @@ export function CardTile({ card, price, selected = false }: { card: CardRecord; 
         className={`relative aspect-[3/4] well p-2 ${card.accentColor ? "accent-wash" : ""}`}
         style={card.accentColor ? ({ "--accent": card.accentColor } as React.CSSProperties) : undefined}
       >
-        <Card3D compact src={src} name={card.name} seed={card.id} grade={card.grade} condition={card.condition} gradingCompany={card.gradingCompany} />
+        <Card3D compact src={src} name={card.name} seed={card.id} grade={card.grade} condition={card.condition} gradingCompany={card.gradingCompany} variant={card.variant} rarity={card.rarity} />
         <span className="badge absolute left-11 top-2 bg-black/70 text-white">{GAMES[card.game]}</span>
         {card.quantity > 1 && (
           <span className="badge absolute right-2 top-2 bg-amber-600 text-white">×{card.quantity}</span>
