@@ -186,7 +186,10 @@ export function blendedCost(lots: Consumed[]): number | null {
     spend += lot.unitCost * lot.quantity;
     copies += lot.quantity;
   }
-  return copies > 0 ? Math.round((spend / copies) * 100) / 100 : null;
+  // The exact quotient, not one rounded to a cent: rounding here and then
+  // multiplying back by the copies sold put the sale's cost a cent or two off
+  // what those copies cost. Display rounds; the ledger does not.
+  return copies > 0 ? Math.round((spend / copies) * 1e6) / 1e6 : null;
 }
 
 export function recordSaleLots(saleId: number, lots: Consumed[]): void {

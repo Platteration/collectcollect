@@ -2,6 +2,15 @@
 // package; picking a card's picture does not, so it stays here.
 export { day, money, when } from "@collectcollect/core/format";
 
+/**
+ * Today as an <input type="date"> value, in the viewer's own zone. The UTC
+ * date is tomorrow's for anyone in the Americas after about 7pm, which is when
+ * most sales and purchases get written down.
+ */
+export function localDateInput(now = new Date(), offsetMinutes = now.getTimezoneOffset()): string {
+  return new Date(now.getTime() - offsetMinutes * 60_000).toISOString().slice(0, 10);
+}
+
 export function imageSrc(card: { imagePath: string | null; referenceImageUrl: string | null }): string | null {
   if (card.imagePath) return `/api/uploads/${card.imagePath}`;
   return card.referenceImageUrl;

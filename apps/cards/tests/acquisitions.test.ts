@@ -223,3 +223,16 @@ describe("collections that predate lots", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe("what a sale across purchases is booked at", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("keeps the blended cost exact rather than a cent per copy off", () => {
+    const card = createCard({ game: "pokemon", name: "Charizard", purchasePrice: 10 });
+    addAcquisition(card.id, { quantity: 2, unitCost: 10.01 });
+    const sale = recordSale(card.id, { quantity: 3, unitPrice: 20 });
+    // 10.00 + 10.01 + 10.01 is 30.02; rounding the average to a cent first and multiplying back said 30.03.
+    expect(Math.round((sale.unitCost ?? 0) * 3 * 100) / 100).toBe(30.02);
+    expect(realizedReturn(listSalesForCard(card.id)).cost).toBe(30.02);
+  });
+});
