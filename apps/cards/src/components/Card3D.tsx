@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef } from "react";
 import type { Condition } from "@/lib/types";
-import { finishOf, gradeValue, wearProfile, type Assessment, type Finish } from "@/lib/wear";
+import { finishOf, gradeValue, holoPattern, wearProfile, type Assessment, type Finish, type HoloPattern } from "@/lib/wear";
 import { slabClass } from "./Slab";
 
 /**
@@ -51,6 +51,7 @@ export function Card3D({
   const value = gradeValue(grade, condition);
   const finish = finishOf({ variant, rarity });
   const profile = useMemo(() => wearProfile({ seed, grade: value, assessment, finish, graded }), [seed, value, assessment, finish, graded]);
+  const pattern = holoPattern({ seed, grade: value, finish });
   const { axis, degrees } = profile.warp;
   const bodyRef = useRef<HTMLDivElement>(null);
   const reduced = useRef(false);
@@ -82,7 +83,7 @@ export function Card3D({
     for (const v of ["--rx", "--ry", "--mx", "--my"]) body.style.removeProperty(v);
   };
 
-  const face = <Face src={src} name={name} profile={profile} finish={finish} compact={compact} />;
+  const face = <Face src={src} name={name} profile={profile} finish={finish} pattern={pattern} compact={compact} />;
   return (
     <div
       className={`card3d-scene ${compact ? "card3d-scene-compact" : ""}`}
@@ -128,12 +129,14 @@ function Face({
   name,
   profile,
   finish,
+  pattern,
   compact,
 }: {
   src: string | null;
   name: string;
   profile: ReturnType<typeof wearProfile>;
   finish: Finish | null;
+  pattern: HoloPattern | null;
   compact: boolean;
 }) {
   const { axis, degrees } = profile.warp;
@@ -153,7 +156,7 @@ function Face({
       ) : (
         <div className="card3d-blank">No image</div>
       )}
-      {finish && <div className={`card3d-holo card3d-holo-${finish}`} aria-hidden />}
+      {finish && pattern && <div className={`card3d-holo card3d-holo-${finish} card3d-holo-pattern-${pattern}`} data-pattern={pattern} aria-hidden />}
       <div className="card3d-sheen" aria-hidden />
       {degrees !== 0 && (
         <div

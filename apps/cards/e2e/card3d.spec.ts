@@ -24,8 +24,8 @@ test.describe("the card as an object", () => {
     const wear = page.locator(".card3d-wear").first();
     const count = Number(await wear.getAttribute("data-wear-count"));
     expect(count).toBeGreaterThan(10);
-    // A damaged card is creased across two corners.
-    await expect(wear.locator("line[stroke='#000']")).toHaveCount(2);
+    // A damaged card is always creased; how often is the card's own draw.
+    expect(await wear.locator("line[stroke='#000']").count()).toBeGreaterThanOrEqual(1);
     // The marks come from the card's id, so a reload draws the same ones.
     await page.reload();
     await expect(wear).toHaveAttribute("data-wear-count", String(count));
@@ -57,6 +57,7 @@ test.describe("the card as an object", () => {
     await page.goto(`/cards/${holo}`);
     await expect(page.locator(".card3d-face").first()).toHaveAttribute("data-finish", "holo");
     await expect(page.locator(".card3d-holo-holo")).toHaveCount(1);
+    expect(["sheen", "stripes", "cosmos", "cracked-ice", "starlight"]).toContain(await page.locator(".card3d-holo").getAttribute("data-pattern"));
 
     await page.goto(`/cards/${plain}`);
     await expect(page.locator(".card3d-holo")).toHaveCount(0);

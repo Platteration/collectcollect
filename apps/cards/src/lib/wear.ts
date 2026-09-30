@@ -2,10 +2,12 @@ import type { Condition } from "./types";
 
 /**
  * What a card's grade implies about its surface — corner and edge wear,
- * scratches, creases, dust, fingerprints, print lines, dents, stains and
- * yellowing — decided once from the grade and a seed so the same card
- * always shows the same marks. Everything here is geometry for `Card3D`;
- * nothing touches the database.
+ * scratches, creases, dust, fingerprints, print lines, dents, stains,
+ * yellowing, and on a foil, peeling — and which holo pattern it shows. The
+ * grade decides how much wear there is and how likely each kind is; a hash
+ * of the card's id decides which kinds it actually has and where, so the
+ * same card always looks the same and two cards of one grade do not.
+ * Everything here is geometry for `Card3D`; nothing touches the database.
  */
 
 /** The condition the vision model read from the photo, when it left one. */
@@ -111,11 +113,110 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+/**
+ * A 32-bit hash of named parts: FNV-1a over the parts, finished with
+ * murmur3's mixer so neighbouring ids land far apart. Every random choice a
+ * card's look makes is a hash of its seed and the choice's name, so one
+ * choice never shifts another: a card's second scratch is in the same place
+ * however many specks of dust it has.
+ */
+export function hash32(...parts: Array<string | number>): number {
+  let h = 0x811c9dc5;
+  const text = parts.join("\u001f");
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+/** A hash as a number in [0, 1). */
+export function unit(...parts: Array<string | number>): number {
+  return hash32(...parts) / 4294967296;
+}
+
+/** Pick one key by weight, using a number in [0, 1); null when every weight is zero. */
+function pick<K extends string>(weights: Record<K, number>, u: number): K | null {
+  const entries = (Object.entries(weights) as Array<[K, number]>).filter(([, w]) => w > 0);
+  const total = entries.reduce((sum, [, w]) => sum + w, 0);
+  if (total <= 0) return null;
+  let at = u * total;
+  for (const [key, w] of entries) {
+    if (at < w) return key;
+    at -= w;
+  }
+  return entries[entries.length - 1]![0];
+}
+
 const mentions = (text: string | null | undefined, words: RegExp) => Boolean(text && words.test(text));
 
 /** The art sits roughly in this box of the 100 × 140 card; scratches stay out of it. */
 const ART = { x1: 28, y1: 34, x2: 72, y2: 104 };
 const inArt = (x: number, y: number) => x > ART.x1 && x < ART.x2 && y > ART.y1 && y < ART.y2;
+
+/** Every kind of mark a card can carry, which the grade weights and the seed draws from. */
+export const MARK_KINDS = ["dust", "smudge", "printLine", "corner", "edge", "scratch", "dent", "stain", "crease", "peel"] as const;
+export type MarkKind = (typeof MARK_KINDS)[number];
+
+/** How many of one kind a card can physically carry. */
+const CAP: Partial<Record<MarkKind, number>> = { corner: 4, peel: 2, crease: 2, printLine: 3 };
+
+/**
+ * How likely each kind of mark is at a grade. `w` is 0 at a 10 and 1 at a 1;
+ * a kind that does not belong at a grade — a stain on a near-mint card, a
+ * crease on anything better than a 3 — has no weight there at all.
+ */
+export function markWeights(g: number, finish: Finish | null): Record<MarkKind, number> {
+  const w = (10 - g) / 9;
+  return {
+    dust: 6 - 3 * w,
+    smudge: 1 + 3 * w,
+    printLine: g <= 8.5 ? 0.8 : 0,
+    corner: 1 + 3 * w,
+    edge: 0.5 + 4 * w,
+    scratch: g <= 8.5 ? 4 * w : 0,
+    dent: g <= 7 ? 3 * w : 0,
+    stain: g <= 5 ? 3 * w * w : 0,
+    crease: g <= 3 ? 2 * w : 0,
+    peel: finish && g <= 5 ? 2 * w : 0,
+  };
+}
+
+/** How many marks a card carries in all: the grade's alone, so a lower grade never has fewer. */
+export function markBudget(g: number): number {
+  return g >= 9.5 ? 0 : Math.round(3 + ((10 - g) / 9) * 37);
+}
+
+/** The finish a holo card's foil was printed with, drawn by weight like the wear. */
+export type HoloPattern = "sheen" | "stripes" | "cosmos" | "cracked-ice" | "starlight";
+
+/** [weight at a 10, weight at a 1]; the weight in between follows the grade. */
+const PATTERN_WEIGHTS: Record<HoloPattern, [number, number]> = {
+  sheen: [1, 6],
+  stripes: [2, 3],
+  cosmos: [3, 1.5],
+  "cracked-ice": [3, 0.5],
+  starlight: [3, 0.5],
+};
+
+/**
+ * Which holo pattern a finished card shows. The fancier patterns are the
+ * likelier on a better-graded card, the plain sheen on a played one; which
+ * one a given card gets is a hash of its seed, so it never changes.
+ */
+export function holoPattern({ seed, grade, finish }: { seed: number; grade: number; finish: Finish | null }): HoloPattern | null {
+  if (!finish) return null;
+  const w = (10 - Math.min(10, Math.max(1, grade))) / 9;
+  const weights = Object.fromEntries(
+    (Object.entries(PATTERN_WEIGHTS) as Array<[HoloPattern, [number, number]]>).map(([k, [top, bottom]]) => [k, top + (bottom - top) * w]),
+  ) as Record<HoloPattern, number>;
+  return pick(weights, unit(seed, "pattern")) ?? "sheen";
+}
 
 export function wearProfile({
   seed,
@@ -133,35 +234,34 @@ export function wearProfile({
 }): WearProfile {
   const g = Math.min(10, Math.max(1, grade));
   const wear = (10 - g) / 9;
-  const rand = mulberry32(Math.round(seed) || 1);
-  const between = (lo: number, hi: number) => lo + rand() * (hi - lo);
-
-  // How many of each mark is decided by the grade alone; the seed only says
-  // where they fall. So a lower grade never has fewer marks than a higher one.
+  const id = Math.round(seed) || 1;
   const pristine = g >= 9.5;
-  let cornerCount = pristine ? 0 : Math.min(4, Math.ceil(wear * 4.4));
-  let edgeCount = pristine ? 0 : Math.round(wear * 6);
-  let scratchCount = pristine ? 0 : Math.round(wear * wear * 10);
-  const creaseCount = g <= 2 ? 2 : g <= 3 ? 1 : 0;
-  let dustCount = pristine ? 0 : Math.round(2 + wear * 12);
-  let smudgeCount = pristine ? 0 : Math.round(wear * 4);
-  let printLineCount = g <= 5 ? 2 : g <= 8.5 ? 1 : 0;
-  const dentCount = g <= 6 ? Math.round(((6 - g) / 5) * 3) + 1 : 0;
-  let stainCount = g <= 2 ? 2 : g <= 4 ? 1 : 0;
+
+  // The grade says how likely each kind is on cards in general; this card's
+  // own leaning, a hash of its id, scales that, so one played card is mostly
+  // scuffed and dented and another mostly stained. The leaning averages 1
+  // (the square of an exponential, halved), so across a collection the
+  // grade's weights still hold; the small floor keeps every kind possible.
+  const weights = markWeights(g, finish);
+  for (const kind of MARK_KINDS) {
+    const x = -Math.log(1 - unit(id, "affinity", kind));
+    weights[kind] *= Math.max(0.02, (x * x) / 2);
+  }
+
+  // What the photo showed makes a kind likelier; it never gives a gem-mint
+  // card wear, because the budget already settled that it has none.
   let toningFloor = 0;
   let centeringScale = pristine ? 0 : wear * 4;
-
-  // What the photo showed decides where the wear concentrates, never whether
-  // a gem-mint card has any: the grade already settled that.
   if (!pristine && assessment) {
-    if (mentions(assessment.corners, /soft|round|worn|whit|ding|fray|bent/i)) cornerCount = Math.min(4, cornerCount + 1);
-    if (mentions(assessment.edges, /whit|chip|wear|rough|nick|fray/i)) edgeCount = Math.min(8, edgeCount + 1);
-    if (mentions(assessment.surface, /scratch|scuff|crease|wear|scuf/i)) scratchCount = Math.min(14, scratchCount + 2);
-    if (mentions(assessment.surface, /smudge|fingerprint|print\b|grease|oil/i)) smudgeCount = Math.min(6, smudgeCount + 1);
-    if (mentions(assessment.surface, /dust|speck|debris|particle/i)) dustCount = Math.min(20, dustCount + 3);
-    if (mentions(assessment.surface, /print line|printing line|roller/i)) printLineCount = Math.min(3, printLineCount + 1);
+    const boost = (kind: MarkKind) => (weights[kind] *= 3);
+    if (mentions(assessment.corners, /soft|round|worn|whit|ding|fray|bent/i)) boost("corner");
+    if (mentions(assessment.edges, /whit|chip|wear|rough|nick|fray/i)) boost("edge");
+    if (mentions(assessment.surface, /scratch|scuff|crease|wear|scuf/i)) boost("scratch");
+    if (mentions(assessment.surface, /smudge|fingerprint|print\b|grease|oil/i)) boost("smudge");
+    if (mentions(assessment.surface, /dust|speck|debris|particle/i)) boost("dust");
+    if (mentions(assessment.surface, /print line|printing line|roller/i)) boost("printLine");
     if (mentions(assessment.surface, /stain|discolo|yellow|toning|toned|foxing|tan/i)) {
-      stainCount = Math.min(3, stainCount + 1);
+      boost("stain");
       toningFloor = 0.12;
     }
     if (mentions(assessment.centering, /off|oc\b|\d{2}\s*\/\s*\d{2}|left|right|high|low/i) && !mentions(assessment.centering, /well|good|centered|50\s*\/\s*50/i)) {
@@ -169,21 +269,53 @@ export function wearProfile({
     }
   }
 
-  const centering = { dx: centeringScale ? between(-1, 1) * centeringScale : 0, dy: centeringScale ? between(-1, 1) * centeringScale : 0 };
+  // How many of each kind: first what defines the grade (a 2 or worse is
+  // creased; a worn foil that bad has lifted), then the rest of the budget,
+  // each mark's kind drawn by weight from those not already at their cap.
+  const counts = Object.fromEntries(MARK_KINDS.map((k) => [k, 0])) as Record<MarkKind, number>;
+  let budget = markBudget(g);
+  const take = (kind: MarkKind) => {
+    counts[kind] += 1;
+    budget -= 1;
+  };
+  if (budget > 0 && g <= 2) take("crease");
+  if (budget > 0 && g <= 2 && finish) take("peel");
+  for (let slot = 0; budget > 0; slot++) {
+    const open = { ...weights };
+    for (const k of MARK_KINDS) if (CAP[k] !== undefined && counts[k] >= CAP[k]!) open[k] = 0;
+    const kind = pick(open, unit(id, "kind", slot));
+    if (!kind) break;
+    take(kind);
+  }
 
-  // Corners wear in a random order, one at a time.
-  const order = ([0, 1, 2, 3] as const).map((c) => ({ c, k: rand() })).sort((a, b) => a.k - b.k);
-  const corners = order.slice(0, cornerCount).map(({ c }) => ({ corner: c, size: between(0.3, 0.6) + wear * 0.4 }));
+  // Each mark's shape comes from its own generator, named by its kind and index.
+  const mark = (kind: string, index: number) => {
+    const rand = mulberry32(hash32(id, kind, index));
+    return { rand, between: (lo: number, hi: number) => lo + rand() * (hi - lo) };
+  };
+
+  const centering = centeringScale
+    ? { dx: (unit(id, "centering", "x") * 2 - 1) * centeringScale, dy: (unit(id, "centering", "y") * 2 - 1) * centeringScale }
+    : { dx: 0, dy: 0 };
+
+  /** The four corners in the order this card wears them. */
+  const cornerOrder = (name: string) => ([0, 1, 2, 3] as const).map((c) => ({ c, k: unit(id, name, c) })).sort((a, b) => a.k - b.k).map(({ c }) => c);
+
+  const corners = cornerOrder("corner-order")
+    .slice(0, counts.corner)
+    .map((corner, i) => ({ corner, size: mark("corner", i).between(0.3, 0.6) + wear * 0.4 }));
 
   const edges: WearProfile["edges"] = [];
-  for (let i = 0; i < edgeCount; i++) {
+  for (let i = 0; i < counts.edge; i++) {
+    const { rand, between } = mark("edge", i);
     const side = Math.floor(rand() * 4) as 0 | 1 | 2 | 3;
     const length = between(0.08, 0.2) + wear * 0.15;
     edges.push({ side, start: between(0, 1 - length), length, strength: between(0.3, 0.6) + wear * 0.3 });
   }
 
   const scratches: WearProfile["scratches"] = [];
-  for (let i = 0; i < scratchCount; i++) {
+  for (let i = 0; i < counts.scratch; i++) {
+    const { between } = mark("scratch", i);
     let x1 = 0;
     let y1 = 0;
     // A few tries to land outside the art; a scratch that will not is put along the bottom margin.
@@ -214,7 +346,8 @@ export function wearProfile({
 
   // A crease runs across a corner, from one edge to the next.
   const creases: WearProfile["creases"] = [];
-  for (let i = 0; i < creaseCount; i++) {
+  for (let i = 0; i < counts.crease; i++) {
+    const { rand, between } = mark("crease", i);
     const corner = Math.floor(rand() * 4);
     const a = between(12, 45);
     const b = between(12, 45);
@@ -225,7 +358,7 @@ export function wearProfile({
   }
 
   /** A point off the art, after a few tries; failing that, in the bottom margin. */
-  const offArt = (): [number, number] => {
+  const offArt = (between: (lo: number, hi: number) => number): [number, number] => {
     for (let attempt = 0; attempt < 8; attempt++) {
       const x = between(4, 96);
       const y = between(4, 136);
@@ -235,30 +368,35 @@ export function wearProfile({
   };
 
   const dust: WearProfile["dust"] = [];
-  for (let i = 0; i < dustCount; i++) {
+  for (let i = 0; i < counts.dust; i++) {
+    const { rand, between } = mark("dust", i);
     dust.push({ x: between(1, 99), y: between(1, 139), r: between(0.3, 0.7), dark: rand() < 0.4 });
   }
 
   const smudges: WearProfile["smudges"] = [];
-  for (let i = 0; i < smudgeCount; i++) {
-    const [x, y] = offArt();
+  for (let i = 0; i < counts.smudge; i++) {
+    const { between } = mark("smudge", i);
+    const [x, y] = offArt(between);
     smudges.push({ x, y, rx: between(5, 9) + wear * 4, ry: between(3, 6) + wear * 2, angle: between(0, 180), opacity: between(0.08, 0.14) + wear * 0.06 });
   }
 
   const printLines: WearProfile["printLines"] = [];
-  for (let i = 0; i < printLineCount; i++) {
+  for (let i = 0; i < counts.printLine; i++) {
+    const { between } = mark("printLine", i);
     printLines.push({ y: between(6, 134), opacity: between(0.2, 0.35) });
   }
 
   const dents: WearProfile["dents"] = [];
-  for (let i = 0; i < dentCount; i++) {
-    const [x, y] = offArt();
+  for (let i = 0; i < counts.dent; i++) {
+    const { between } = mark("dent", i);
+    const [x, y] = offArt(between);
     dents.push({ x, y, r: between(0.8, 1.4) + wear * 0.8 });
   }
 
   // A stain sits against an edge, where a card is picked up and put down.
   const stains: WearProfile["stains"] = [];
-  for (let i = 0; i < stainCount; i++) {
+  for (let i = 0; i < counts.stain; i++) {
+    const { rand, between } = mark("stain", i);
     const side = Math.floor(rand() * 4);
     const along = between(8, 92);
     const inset = between(2, 7);
@@ -266,21 +404,18 @@ export function wearProfile({
     stains.push({ x, y, rx: between(4, 8) + wear * 4, ry: between(2.5, 5) + wear * 2, angle: between(0, 180), opacity: between(0.14, 0.22) + wear * 0.08 });
   }
 
+  const peels = cornerOrder("peel-order")
+    .slice(0, counts.peel)
+    .map((corner, i) => ({ corner, size: mark("peel", i).between(0.5, 0.9) + wear * 0.4 }));
+
   // Some cards yellow with age and some do not; how far is the seed's choice, within what the grade allows.
-  const toning = pristine ? 0 : Math.max(toningFloor, rand() * wear * 0.35);
-
-  // Everything below draws after the marks above, so adding it changed no
-  // card's existing marks.
-
-  const peelCount = !finish ? 0 : g <= 2 ? 2 : g <= 4 ? 1 : 0;
-  const peelOrder = ([0, 1, 2, 3] as const).map((c) => ({ c, k: rand() })).sort((a, b) => a.k - b.k);
-  const peels = peelOrder.slice(0, peelCount).map(({ c }) => ({ corner: c, size: between(0.5, 0.9) + wear * 0.4 }));
+  const toning = pristine ? 0 : Math.max(toningFloor, unit(id, "toning") * wear * 0.35);
 
   // A played card curls; a foil one curls sooner, because the foil layer
   // shrinks and swells differently from the card stock. How far is the
   // grade's; which way is the seed's.
-  const axis: "x" | "y" = rand() < 0.5 ? "x" : "y";
-  const sign = rand() < 0.5 ? -1 : 1;
+  const axis: "x" | "y" = unit(id, "warp", "axis") < 0.5 ? "x" : "y";
+  const sign = unit(id, "warp", "sign") < 0.5 ? -1 : 1;
   let curl = g < 5 ? ((5 - g) / 4) * 4 : 0;
   if (finish && g <= 8) curl = Math.max(curl, 1.5 + ((8 - g) / 7) * 2.5);
   const degrees = graded || pristine ? 0 : curl;

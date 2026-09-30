@@ -369,8 +369,59 @@ body {
   opacity: calc(0.45 * var(--gloss));
 }
 .card3d-holo-refractor {
-  background-size: 300% 300%, 140% 140%;
   opacity: calc(0.6 * var(--gloss));
+}
+/*
+ * The pattern pressed into the foil, drawn by weight from the card's id —
+ * the plain sheen above is the default. Each keeps the moving rainbow as its
+ * last layer and adds a texture over it that stays put, as a real pattern
+ * does while the colour slides across it.
+ */
+.card3d-holo-pattern-stripes {
+  background-image:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.4) 0 1px, transparent 1px 5px),
+    linear-gradient(115deg, rgba(255, 70, 140, 0.85) 20%, rgba(255, 210, 60, 0.85) 32%, rgba(80, 240, 150, 0.85) 44%, rgba(60, 170, 255, 0.85) 56%, rgba(170, 90, 255, 0.85) 68%, rgba(255, 70, 140, 0.85) 80%);
+  background-size: auto, 220% 220%;
+  background-position: 0 0, var(--mx) var(--my);
+}
+.card3d-holo-pattern-cosmos {
+  background-image:
+    radial-gradient(circle at 18% 22%, rgba(255, 120, 200, 0.7) 0 5%, transparent 9%),
+    radial-gradient(circle at 72% 18%, rgba(120, 220, 255, 0.7) 0 4%, transparent 8%),
+    radial-gradient(circle at 40% 48%, rgba(255, 230, 120, 0.7) 0 6%, transparent 10%),
+    radial-gradient(circle at 82% 58%, rgba(170, 120, 255, 0.7) 0 5%, transparent 9%),
+    radial-gradient(circle at 24% 74%, rgba(120, 255, 180, 0.7) 0 4%, transparent 8%),
+    radial-gradient(circle at 62% 86%, rgba(255, 150, 110, 0.7) 0 5%, transparent 9%),
+    linear-gradient(115deg, rgba(255, 70, 140, 0.85) 20%, rgba(255, 210, 60, 0.85) 32%, rgba(80, 240, 150, 0.85) 44%, rgba(60, 170, 255, 0.85) 56%, rgba(170, 90, 255, 0.85) 68%, rgba(255, 70, 140, 0.85) 80%);
+  background-size: auto, auto, auto, auto, auto, auto, 220% 220%;
+  background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, var(--mx) var(--my);
+}
+.card3d-holo-pattern-cracked-ice {
+  background-image:
+    repeating-linear-gradient(60deg, rgba(255, 255, 255, 0.5) 0 1px, transparent 1px 13px),
+    repeating-linear-gradient(-60deg, rgba(255, 255, 255, 0.5) 0 1px, transparent 1px 17px),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.3) 0 1px, transparent 1px 23px),
+    linear-gradient(115deg, rgba(255, 70, 140, 0.85) 20%, rgba(255, 210, 60, 0.85) 32%, rgba(80, 240, 150, 0.85) 44%, rgba(60, 170, 255, 0.85) 56%, rgba(170, 90, 255, 0.85) 68%, rgba(255, 70, 140, 0.85) 80%);
+  background-size: auto, auto, auto, 220% 220%;
+  background-position: 0 0, 0 0, 0 0, var(--mx) var(--my);
+}
+.card3d-holo-pattern-starlight {
+  background-image:
+    radial-gradient(circle at 12% 16%, #fff 0 0.5%, transparent 1.2%),
+    radial-gradient(circle at 34% 9%, #fff 0 0.4%, transparent 1%),
+    radial-gradient(circle at 58% 21%, #fff 0 0.6%, transparent 1.3%),
+    radial-gradient(circle at 86% 12%, #fff 0 0.4%, transparent 1%),
+    radial-gradient(circle at 22% 38%, #fff 0 0.5%, transparent 1.2%),
+    radial-gradient(circle at 71% 36%, #fff 0 0.4%, transparent 1%),
+    radial-gradient(circle at 44% 57%, #fff 0 0.6%, transparent 1.3%),
+    radial-gradient(circle at 90% 55%, #fff 0 0.5%, transparent 1.2%),
+    radial-gradient(circle at 15% 69%, #fff 0 0.4%, transparent 1%),
+    radial-gradient(circle at 62% 74%, #fff 0 0.5%, transparent 1.2%),
+    radial-gradient(circle at 33% 88%, #fff 0 0.6%, transparent 1.3%),
+    radial-gradient(circle at 81% 90%, #fff 0 0.4%, transparent 1%),
+    linear-gradient(115deg, rgba(255, 70, 140, 0.85) 20%, rgba(255, 210, 60, 0.85) 32%, rgba(80, 240, 150, 0.85) 44%, rgba(60, 170, 255, 0.85) 56%, rgba(170, 90, 255, 0.85) 68%, rgba(255, 70, 140, 0.85) 80%);
+  background-size: auto, auto, auto, auto, auto, auto, auto, auto, auto, auto, auto, auto, 220% 220%;
+  background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, var(--mx) var(--my);
 }
 /* A curled card: lit along its crown, shaded where it bends away. */
 .card3d-curve {
