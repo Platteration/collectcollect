@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { HasSalesError, deleteItem, getItem, latestSnapshot, updateItem } from "@/lib/items";
-import { errorMessage, jsonError, parseId } from "@collectcollect/core/http";
+import { BodyLimitError, errorMessage, jsonError, parseId, readJsonLimited } from "@collectcollect/core/http";
 import type { ItemInput } from "@/lib/types";
 
 export async function GET(_request: Request, ctx: RouteContext<"/api/items/[id]">) {
@@ -15,8 +15,10 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/items/[id]
   if (!id) return jsonError("Item not found", 404);
   let body: Partial<ItemInput>;
   try {
-    body = (await request.json()) as Partial<ItemInput>;
-  } catch {
+    // A record the form sends is far under 64 KB; a runaway client cannot buffer more.
+    body = (await readJsonLimited(request, 64 * 1024)) as Partial<ItemInput>;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   try {

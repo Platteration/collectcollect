@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getItem } from "@/lib/items";
 import { listSalesForItem, recordSale, type SaleInput } from "@/lib/sales";
-import { errorMessage, jsonError, parseId } from "@collectcollect/core/http";
+import { BodyLimitError, errorMessage, jsonError, parseId, readJsonLimited } from "@collectcollect/core/http";
 
 export async function GET(_request: Request, ctx: RouteContext<"/api/items/[id]/sales">) {
   const id = parseId((await ctx.params).id);
@@ -15,8 +15,10 @@ export async function POST(request: Request, ctx: RouteContext<"/api/items/[id]/
   if (!id || !getItem(id)) return jsonError("Item not found", 404);
   let body: SaleInput;
   try {
-    body = (await request.json()) as SaleInput;
-  } catch {
+    // A record the form sends is far under 16 KB; a runaway client cannot buffer more.
+    body = (await readJsonLimited(request, 16 * 1024)) as SaleInput;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   try {

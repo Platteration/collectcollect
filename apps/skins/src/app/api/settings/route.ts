@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isWebhookUrl, jsonError } from "@collectcollect/core/http";
+import { BodyLimitError, isWebhookUrl, jsonError, readJsonLimited } from "@collectcollect/core/http";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { providerStatuses } from "@/lib/status";
 import type { Settings } from "@/lib/types";
@@ -11,8 +11,10 @@ export async function GET() {
 export async function PUT(request: Request) {
   let body: Partial<Settings>;
   try {
-    body = (await request.json()) as Partial<Settings>;
-  } catch {
+    // A record the form sends is far under 64 KB; a runaway client cannot buffer more.
+    body = (await readJsonLimited(request, 64 * 1024)) as Partial<Settings>;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   const current = getSettings();

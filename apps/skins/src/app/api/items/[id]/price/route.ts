@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getItem, updateItem } from "@/lib/items";
-import { errorMessage, jsonError, logError, parseId } from "@collectcollect/core/http";
+import { BodyLimitError, errorMessage, jsonError, logError, parseId, readJsonLimited } from "@collectcollect/core/http";
 import { refreshItem } from "@/lib/pricing/refresh";
 import { proceedsByMarket } from "@/lib/pricing/index";
 import { getSettings } from "@/lib/settings";
@@ -44,8 +44,10 @@ export async function PUT(request: Request, ctx: RouteContext<"/api/items/[id]/p
   if (!id || !getItem(id)) return jsonError("Item not found", 404);
   let body: { manualPrice?: unknown };
   try {
-    body = (await request.json()) as { manualPrice?: unknown };
-  } catch {
+    // A record the form sends is far under 4 KB; a runaway client cannot buffer more.
+    body = (await readJsonLimited(request, 4 * 1024)) as { manualPrice?: unknown };
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   const raw = body.manualPrice;

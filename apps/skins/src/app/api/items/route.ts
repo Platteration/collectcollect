@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createItem, latestSnapshotsByItem, listItems, type ListOptions } from "@/lib/items";
-import { errorMessage, jsonError } from "@collectcollect/core/http";
+import { BodyLimitError, errorMessage, jsonError, readJsonLimited } from "@collectcollect/core/http";
 import type { Category, Exterior, ItemInput, Rarity } from "@/lib/types";
 import { CATEGORY_IDS, EXTERIOR_IDS, RARITY_IDS } from "@/lib/types";
 
@@ -30,8 +30,10 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   let body: ItemInput;
   try {
-    body = (await request.json()) as ItemInput;
-  } catch {
+    // A record the form sends is far under 64 KB; a runaway client cannot buffer more.
+    body = (await readJsonLimited(request, 64 * 1024)) as ItemInput;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   try {

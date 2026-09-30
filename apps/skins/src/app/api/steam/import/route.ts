@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { itemsMissingFrom, syncFromInventory } from "@/lib/items";
-import { errorMessage, jsonError, logError } from "@collectcollect/core/http";
+import { BodyLimitError, errorMessage, jsonError, logError, readJsonLimited } from "@collectcollect/core/http";
 import { SteamInventoryError, fetchInventory, parseInventory } from "@/lib/steam/inventory";
 import type { ItemInput } from "@/lib/types";
 import { createThrottle } from "@collectcollect/core/throttle";
@@ -49,8 +49,10 @@ export async function POST(request: Request) {
   if (refused) return refused;
   let body: { steamId?: unknown; preview?: unknown; previewToken?: unknown };
   try {
-    body = (await request.json()) as typeof body;
-  } catch {
+    // A record the form sends is far under 4 KB; a runaway client cannot buffer more.
+    body = (await readJsonLimited(request, 4 * 1024)) as typeof body;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   const steamId = typeof body?.steamId === "string" ? body.steamId.trim() : "";

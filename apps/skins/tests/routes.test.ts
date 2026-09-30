@@ -146,3 +146,39 @@ describe("reading a Steam inventory over HTTP", () => {
     expect((await ask()).status).toBe(429);
   });
 });
+
+describe("bodies a runaway client could grow without limit", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  /** One byte over is enough: the limit is on bytes read, not on what the JSON means. */
+  const oversized = (limit: number) => JSON.stringify({ pad: "x".repeat(limit) });
+  const send = (url: string, body: string, method = "POST") => new Request(url, { method, headers: { "content-type": "application/json" }, body });
+
+  it("refuses a body over the route's limit with a 413 that names the limit, on every JSON route", async () => {
+    const item = seedRedline();
+    const ctx = { params: Promise.resolve({ id: String(item.id) }) } as never;
+    (await import("@/app/api/steam/import/route")).throttle.reset();
+    (await import("@/app/api/items/[id]/price/route")).throttle.reset();
+    (await import("@/lib/backup")).restoreThrottle.reset();
+    const routes: Array<{ name: string; limit: number; run: (body: string) => Promise<Response> }> = [
+      { name: "items", limit: 64 * 1024, run: async (b) => (await import("@/app/api/items/route")).POST(send("http://localhost/api/items", b)) },
+      { name: "items/intake", limit: 64 * 1024, run: async (b) => (await import("@/app/api/items/intake/route")).POST(send("http://localhost/api/items/intake", b)) },
+      { name: "items/[id]", limit: 64 * 1024, run: async (b) => (await import("@/app/api/items/[id]/route")).PATCH(send(`http://localhost/api/items/${item.id}`, b, "PATCH"), ctx) },
+      { name: "items/[id]/price", limit: 4 * 1024, run: async (b) => (await import("@/app/api/items/[id]/price/route")).PUT(send(`http://localhost/api/items/${item.id}/price`, b, "PUT"), ctx) },
+      { name: "items/[id]/sales", limit: 16 * 1024, run: async (b) => (await import("@/app/api/items/[id]/sales/route")).POST(send(`http://localhost/api/items/${item.id}/sales`, b), ctx) },
+      { name: "items/[id]/acquisitions", limit: 16 * 1024, run: async (b) => (await import("@/app/api/items/[id]/acquisitions/route")).POST(send(`http://localhost/api/items/${item.id}/acquisitions`, b), ctx) },
+      { name: "settings", limit: 64 * 1024, run: async (b) => (await import("@/app/api/settings/route")).PUT(send("http://localhost/api/settings", b, "PUT")) },
+      { name: "backup/replaced", limit: 4 * 1024, run: async (b) => (await import("@/app/api/backup/replaced/route")).POST(send("http://localhost/api/backup/replaced", b)) },
+      { name: "steam/import", limit: 4 * 1024, run: async (b) => (await import("@/app/api/steam/import/route")).POST(send("http://localhost/api/steam/import", b)) },
+    ];
+    for (const route of routes) {
+      const res = await route.run(oversized(route.limit));
+      expect(res.status, route.name).toBe(413);
+      expect((await read<{ error: string }>(res)).error, route.name).toBe(`Request body exceeds the ${route.limit} byte limit`);
+    }
+    // Under the limit, the body is read as before.
+    const { POST } = await import("@/app/api/items/intake/route");
+    const fine = await POST(send("http://localhost/api/items/intake", JSON.stringify({ marketHashName: "Chroma Case", category: "case", quantity: 1 })));
+    expect(fine.status).toBe(201);
+  });
+});

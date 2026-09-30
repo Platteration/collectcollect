@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { putBack, replacedCollections, restoreThrottle } from "@/lib/backup";
 import { BusyError } from "@collectcollect/core/gate";
-import { errorMessage, jsonError, logError } from "@collectcollect/core/http";
+import { BodyLimitError, errorMessage, jsonError, logError, readJsonLimited } from "@collectcollect/core/http";
 
 /** GET — the inventories a restore has moved aside, newest first. */
 export async function GET() {
@@ -19,8 +19,10 @@ export async function POST(request: Request) {
   if (refused) return refused;
   let body: { name?: unknown };
   try {
-    body = (await request.json()) as { name?: unknown };
-  } catch {
+    // A record the form sends is far under 4 KB; a runaway client cannot buffer more.
+    body = (await readJsonLimited(request, 4 * 1024)) as { name?: unknown };
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   if (typeof body.name !== "string" || !body.name) return jsonError("Say which inventory to put back");
