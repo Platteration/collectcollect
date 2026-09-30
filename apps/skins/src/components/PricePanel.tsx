@@ -11,9 +11,10 @@ import type { ItemRecord, PriceSummary } from "@/lib/types";
  *
  * A refresh that found nothing says so and leaves the last recorded value
  * alone — it is not stored, so the history does not gain a hole where a market
- * happened to be quiet.
+ * happened to be quiet. One that found the same prices as before says that,
+ * and the row it confirmed carries when.
  */
-export function PricePanel({ item, summary }: { item: ItemRecord; summary: PriceSummary | null }) {
+export function PricePanel({ item, summary, checkedAt = null }: { item: ItemRecord; summary: PriceSummary | null; checkedAt?: string | null }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"refresh" | "manual" | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -26,11 +27,13 @@ export function PricePanel({ item, summary }: { item: ItemRecord; summary: Price
     setError(null);
     setNote(null);
     try {
-      const body = await api<{ summary: PriceSummary; stored: boolean }>(`/api/items/${item.id}/price`, { method: "POST" });
+      const body = await api<{ summary: PriceSummary; stored: boolean; unchanged?: boolean; checkedAt?: string | null }>(`/api/items/${item.id}/price`, { method: "POST" });
       setNote(
         body.stored
           ? `Priced ${when(body.summary.fetchedAt)}.`
-          : "Nothing is listing one right now, so the last recorded price was left as it was.",
+          : body.unchanged
+            ? `The same prices as before; noted as checked ${when(body.checkedAt ?? new Date().toISOString())}.`
+            : "Nothing is listing one right now, so the last recorded price was left as it was.",
       );
       if (body.summary.errors.length) {
         setError(body.summary.errors.map((e) => `${e.source}: ${e.message}`).join(" · "));
@@ -68,6 +71,7 @@ export function PricePanel({ item, summary }: { item: ItemRecord; summary: Price
         {summary && (
           <span className="text-xs" style={{ color: "var(--muted)" }}>
             {when(summary.fetchedAt)}
+            {checkedAt && checkedAt !== summary.fetchedAt ? ` · checked ${when(checkedAt)}, unchanged` : ""}
           </span>
         )}
       </div>

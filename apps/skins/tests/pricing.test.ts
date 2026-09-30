@@ -1,6 +1,9 @@
+import fs from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openDatabase, setDb } from "@/lib/db";
-import { getItem, latestSnapshot, listSnapshots, updateItem } from "@/lib/items";
+import { getDb, openDatabase, setDb } from "@/lib/db";
+import { getItem, latestSnapshot, listSnapshots, markChecked, updateItem } from "@/lib/items";
+import { itemsDir } from "@/lib/markdown/mirror";
 import { fetchQuotes, netProceeds, primeProviders, proceedsByMarket, summarize } from "@/lib/pricing/index";
 import { cancelRefresh, refreshAll, refreshItem, refreshRunning, resetRefreshThrottle } from "@/lib/pricing/refresh";
 import { resetCatalogue, skinport } from "@/lib/pricing/providers/skinport";
@@ -52,6 +55,12 @@ const SKINPORT_CATALOGUE = [
 ];
 
 const STEAM_OK = { success: true, lowest_price: "$12.34", median_price: "$12.00", volume: "1,203" };
+
+/** The plain-text copy of one item, which a check must leave alone. */
+function fileOf(id: number): string {
+  const name = fs.readdirSync(itemsDir()).find((f) => f.startsWith(String(id).padStart(4, "0")))!;
+  return fs.readFileSync(path.join(itemsDir(), name), "utf8");
+}
 
 describe("Skinport", () => {
   it("loads the catalogue once and answers every lookup from it", async () => {
@@ -277,6 +286,49 @@ describe("refreshing", () => {
     expect(latestSnapshot(item.id)!.summary.market).toBe(12.34);
   });
 
+  it("notes a check that found the same prices on the row it has, rather than storing it again", async () => {
+    const item = seedRedline();
+    const markets = () => {
+      resetCatalogue();
+      return routes([["api.skinport.com", SKINPORT_CATALOGUE], ["priceoverview", STEAM_OK]]);
+    };
+    const first = await refreshItem(item, markets());
+    expect(first.stored).toBe(true);
+    const file = fileOf(item.id);
+    const again = await refreshItem(item, markets());
+    expect(again).toMatchObject({ stored: false, unchanged: true });
+    const rows = listSnapshots(item.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: first.snapshot.id, fetchedAt: first.snapshot.fetchedAt, checkedAt: again.snapshot.checkedAt });
+    expect(Date.parse(rows[0]!.checkedAt!)).toBeGreaterThanOrEqual(Date.parse(rows[0]!.fetchedAt));
+    // A check rewrites no file: the plain-text copy is of prices, not of checks.
+    expect(fileOf(item.id)).toBe(file);
+    // A whole-inventory pass counts it, and treats the item as fresh from then:
+    // the check decides staleness, not the row's date.
+    expect(await refreshAll({ fetchImpl: markets() })).toMatchObject({ refreshed: 0, unchanged: 1, unpriced: 0, skipped: 0 });
+    getDb().prepare("UPDATE price_snapshots SET fetched_at = ? WHERE id = ?").run(new Date(Date.now() - 72 * 3600e3).toISOString(), first.snapshot.id);
+    resetRefreshThrottle();
+    expect(await refreshAll({ staleHours: 24, fetchImpl: markets() })).toMatchObject({ refreshed: 0, unchanged: 0, skipped: 1 });
+    // A move is a new fact, and gets a row of its own; the checked one keeps its note.
+    const checked = listSnapshots(item.id)[0]?.checkedAt;
+    resetCatalogue();
+    const moved = routes([["api.skinport.com", [{ ...SKINPORT_CATALOGUE[0], min_price: 20 }]], ["priceoverview", STEAM_OK]]);
+    expect((await refreshItem(item, moved)).stored).toBe(true);
+    const after = listSnapshots(item.id);
+    expect(after).toHaveLength(2);
+    expect(after[0]?.checkedAt).toBeUndefined();
+    expect(after[1]?.checkedAt).toBe(checked);
+  });
+
+  it("records no holdings event for a check", () => {
+    const item = seedRedline();
+    const snapshot = addSnapshot(item.id, { currency: "USD", fetchedAt: new Date().toISOString(), market: 10, marketSource: "Skinport", yourCopyValue: 8.8, yourCopyBasis: "x", quotes: [], errors: [] });
+    const events = getDb().prepare("SELECT * FROM holdings_events ORDER BY id").all();
+    markChecked(snapshot.id, new Date().toISOString());
+    expect(getDb().prepare("SELECT * FROM holdings_events ORDER BY id").all()).toEqual(events);
+    expect(latestSnapshot(item.id)?.checkedAt).toBeDefined();
+  });
+
   it("does not write a failure over an item's last known value", async () => {
     const item = seedRedline();
     await refreshItem(item, routes([["api.skinport.com", SKINPORT_CATALOGUE]]));
@@ -298,8 +350,10 @@ describe("refreshing", () => {
     // The second caller is told, not queued: the pass it wants is the one running.
     await expect(refreshAll({ fetchImpl })).rejects.toBeInstanceOf(BusyError);
     expect(await first).toMatchObject({ refreshed: 1 });
+    // And the gate opens again once the first is done: the pass runs, and
+    // finds the same prices it stored a moment ago.
     resetCatalogue();
-    expect(await refreshAll({ fetchImpl })).toMatchObject({ refreshed: 1 });
+    expect(await refreshAll({ fetchImpl })).toMatchObject({ refreshed: 0, unchanged: 1 });
   });
 
   it("loads a catalogue once for a whole inventory", async () => {
@@ -403,6 +457,26 @@ describe("alerts", () => {
     expect(alert?.body).not.toContain("Steam");
   });
 
+  it("does not raise the same spread twice while prices stand still", async () => {
+    process.env.CSFLOAT_API_KEY = "key";
+    saveSettings({ ...DEFAULT_SETTINGS, spreadMinAmount: 1, spreadMinPercent: 5 });
+    const item = seedRedline();
+    const markets = (skinport: number) => {
+      resetCatalogue();
+      return routes([
+        ["api.skinport.com", [{ market_hash_name: item.marketHashName, min_price: skinport }]],
+        ["csfloat.com/api", { data: [{ id: "x", price: 9500 }] }],
+      ]);
+    };
+    await refreshItem(item, markets(100));
+    // The same prices again are a check, and a check has nothing to say.
+    expect(await refreshItem(item, markets(100))).toMatchObject({ unchanged: true });
+    expect(listAlerts().filter((a) => a.kind === "spread_opened")).toHaveLength(1);
+    // Once a price moves, the spread is news again: 90 × 0.88 against 95 × 0.98.
+    await refreshItem(item, markets(90));
+    expect(listAlerts().filter((a) => a.kind === "spread_opened")).toHaveLength(2);
+  });
+
   it("says a spread cannot be acted on while the item is locked", async () => {
     process.env.CSFLOAT_API_KEY = "key";
     const item = seedRedline({ tradableAfter: new Date(Date.now() + 5 * 864e5).toISOString() });
@@ -417,8 +491,13 @@ describe("alerts", () => {
     expect(alert?.body).toMatch(/trade locked until/);
   });
 
+  /** Time passes: a lock the app has known about since it was live ends. */
+  const lockEnds = (itemId: number, daysAgo: number) =>
+    getDb().prepare("UPDATE items SET tradable_after = ? WHERE id = ?").run(new Date(Date.now() - daysAgo * 864e5).toISOString(), itemId);
+
   it("says when a lock has ended, once", async () => {
-    seedRedline({ tradableAfter: new Date(Date.now() - 864e5).toISOString() });
+    const item = seedRedline({ tradableAfter: new Date(Date.now() + 5 * 864e5).toISOString() });
+    lockEnds(item.id, 1);
     await refreshAll({ fetchImpl: routes([["api.skinport.com", SKINPORT_CATALOGUE]]) });
     resetCatalogue();
     resetRefreshThrottle();
@@ -432,8 +511,24 @@ describe("alerts", () => {
     expect(listAlerts().filter((a) => a.kind === "trade_lock_lifted")).toEqual([]);
   });
 
+  it("does not announce a lock that had already ended when the item arrived", async () => {
+    // Added by hand, or brought in from a spreadsheet, with a lock that ended
+    // before the app knew the item: "can be traded again" would be stale news.
+    seedRedline({ tradableAfter: new Date(Date.now() - 864e5).toISOString() });
+    await refreshAll({ fetchImpl: routes([["api.skinport.com", SKINPORT_CATALOGUE]]) });
+    expect(listAlerts().filter((a) => a.kind === "trade_lock_lifted")).toEqual([]);
+    // The same for an edit that writes a lock already over.
+    const edited = seedCase({ tradableAfter: new Date(Date.now() + 5 * 864e5).toISOString() });
+    updateItem(edited.id, { tradableAfter: new Date(Date.now() - 864e5).toISOString() });
+    resetCatalogue();
+    resetRefreshThrottle();
+    await refreshAll({ fetchImpl: routes([["api.skinport.com", SKINPORT_CATALOGUE]]) });
+    expect(listAlerts().filter((a) => a.kind === "trade_lock_lifted")).toEqual([]);
+  });
+
   it("does not repeat a lock's ending once its alert is dismissed, and does announce a later lock", async () => {
-    const item = seedRedline({ tradableAfter: new Date(Date.now() - 2 * 864e5).toISOString() });
+    const item = seedRedline({ tradableAfter: new Date(Date.now() + 5 * 864e5).toISOString() });
+    lockEnds(item.id, 2);
     const refresh = async () => { resetCatalogue(); resetRefreshThrottle(); await refreshAll({ fetchImpl: routes([["api.skinport.com", SKINPORT_CATALOGUE]]) }); };
     await refresh();
     const [first] = listAlerts().filter((a) => a.kind === "trade_lock_lifted");
@@ -442,7 +537,8 @@ describe("alerts", () => {
     await refresh();
     expect(listAlerts().filter((a) => a.kind === "trade_lock_lifted")).toEqual([]);
     // Traded, locked again, and that lock has now ended too: worth saying once more.
-    updateItem(item.id, { tradableAfter: new Date(Date.now() - 864e5).toISOString() });
+    updateItem(item.id, { tradableAfter: new Date(Date.now() + 5 * 864e5).toISOString() });
+    lockEnds(item.id, 1);
     await refresh();
     expect(listAlerts().filter((a) => a.kind === "trade_lock_lifted")).toHaveLength(1);
     await refresh();

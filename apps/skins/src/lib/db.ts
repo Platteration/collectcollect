@@ -91,7 +91,8 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
   fetched_at TEXT NOT NULL,
-  summary TEXT NOT NULL
+  summary TEXT NOT NULL,
+  checked_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_item ON price_snapshots(item_id, fetched_at DESC);
 CREATE TABLE IF NOT EXISTS alerts (
@@ -114,7 +115,22 @@ CREATE TABLE IF NOT EXISTS settings (
 const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   // Which trade lock's ending was announced, so the alert fires once per lock.
   { table: "items", column: "lock_alerted_for", ddl: "ALTER TABLE items ADD COLUMN lock_alerted_for TEXT" },
+  // When a refresh last found these same prices, so an unchanged price is a
+  // note on the row rather than a copy of it.
+  { table: "price_snapshots", column: "checked_at", ddl: "ALTER TABLE price_snapshots ADD COLUMN checked_at TEXT" },
 ];
+
+/**
+ * The lookups that read whole tables without these: the inventory's order and
+ * its pages, the storage-unit filter, the lot a sale drew from (the target of
+ * its SET NULL), and the alerts that cascade from an item.
+ */
+const INDEXES = `
+CREATE INDEX IF NOT EXISTS idx_items_updated ON items(updated_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_items_storage_unit ON items(storage_unit);
+CREATE INDEX IF NOT EXISTS idx_sale_lots_acquisition ON sale_lots(acquisition_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_item ON alerts(item_id);
+`;
 
 export const SCHEMA_VERSION = 1;
 
@@ -126,6 +142,9 @@ export function initializeDatabase(db: Database.Database): void {
     const cols = db.prepare(`PRAGMA table_info(${m.table})`).all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === m.column)) db.exec(m.ddl);
   }
+  // After the migrations: an index on a column an older database gains above
+  // cannot exist before the column does.
+  db.exec(INDEXES);
   ensureAssetIndex(db);
   initializePriceJobs(db);
   initializeHoldingsHistory(db, { table: "items", foreignKey: "item_id", name: "market_hash_name", manualPrice: "manual_price" });

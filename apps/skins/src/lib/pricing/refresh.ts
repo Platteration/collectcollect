@@ -1,8 +1,8 @@
-import { addSnapshot, getItem, latestSnapshot, latestSnapshotsByItem, listItems, listSnapshots } from "../items";
+import { addSnapshot, getItem, latestSnapshot, latestSnapshotsByItem, listItems, markChecked } from "../items";
 import { alertsForRefresh, alertsForTradeLocks, createAlert, deliver, markLockAlerted } from "../alerts";
 import { getSettings } from "../settings";
 import type { ItemRecord, PriceSnapshot, PriceSummary } from "../types";
-import { primeProviders, priceItem } from "./index";
+import { primeProviders, priceItem, sameSummary } from "./index";
 import { createGate } from "@collectcollect/core/gate";
 import { BusyError } from "@collectcollect/core/gate";
 import type { JobRefreshOptions } from "@collectcollect/core/price-jobs";
@@ -21,23 +21,33 @@ function hasPrice(summary: PriceSummary): boolean {
  * listing one — is returned so the page can explain, but it is not written over
  * an existing snapshot. A market being quiet for an afternoon must not erase an
  * item's last known value from the history.
+ *
+ * A lookup that found exactly the prices the latest snapshot already holds is
+ * not a new fact about the item either: that snapshot is marked as checked now
+ * (`unchanged`) rather than copied, so an item refreshed every hour for a year
+ * does not carry a year of identical rows. Nothing moved, so it raises nothing.
  */
 export async function refreshItem(
   item: ItemRecord,
   fetchImpl?: typeof fetch,
   signal?: AbortSignal,
-): Promise<{ item: ItemRecord; snapshot: PriceSnapshot; stored: boolean; skipped?: boolean }> {
+): Promise<{ item: ItemRecord; snapshot: PriceSnapshot; stored: boolean; skipped?: boolean; unchanged?: boolean }> {
   if (archiveGate.busy) throw new BusyError("A backup or restore is in progress.");
   refreshState.__skinsActivePrices = (refreshState.__skinsActivePrices ?? 0) + 1;
   try {
     const settings = getSettings();
-    const previous = listSnapshots(item.id, 1)[0]?.summary ?? null;
     const summary = await priceItem(item, settings, fetchImpl, signal);
     const current = getItem(item.id);
     if (!current || current.quantity <= 0) return { item, snapshot: { id: 0, itemId: item.id, fetchedAt: summary.fetchedAt, summary }, stored: false, skipped: true };
+    const latest = latestSnapshot(item.id);
+    const previous = latest?.summary ?? null;
     // A lookup abandoned because the pass was told to stop is not an answer
     // about the item, so it is never written down, not even as a first one.
-    const failed = !hasPrice(summary) && (latestSnapshot(item.id) !== null || signal?.aborted === true);
+    const failed = !hasPrice(summary) && (latest !== null || signal?.aborted === true);
+    if (!failed && latest && sameSummary(latest.summary, summary)) {
+      markChecked(latest.id, summary.fetchedAt);
+      return { item: current, snapshot: { ...latest, checkedAt: summary.fetchedAt }, stored: false, unchanged: true };
+    }
     const snapshot: PriceSnapshot = failed
       ? { id: 0, itemId: item.id, fetchedAt: summary.fetchedAt, summary }
       : addSnapshot(item.id, summary);
@@ -53,6 +63,8 @@ export async function refreshItem(
 
 export interface RefreshResult {
   refreshed: number;
+  /** Lookups that found the same prices as last time; the latest snapshot was marked as checked, and nothing stored. */
+  unchanged: number;
   /** Lookups that returned no price at all; nothing was stored for these. */
   unpriced: number;
   skipped: number;
@@ -170,12 +182,15 @@ async function refreshEverything(opts: { staleHours?: number; fetchImpl?: typeof
     if (opts.ids && !opts.ids.includes(item.id)) return false;
     if (cutoff === null) return true;
     const snapshot = latest.get(item.id);
-    const lastStored = snapshot ? new Date(snapshot.fetchedAt).getTime() : 0;
+    // A check that found the same prices counts as a refresh, or a stable item
+    // would be asked about every hour of every day.
+    const lastStored = snapshot ? new Date(snapshot.checkedAt ?? snapshot.fetchedAt).getTime() : 0;
     return Math.max(lastStored, lastAttempt.get(item.id) ?? 0) < cutoff;
   });
 
   const result: RefreshResult = {
     refreshed: 0,
+    unchanged: 0,
     unpriced: 0,
     skipped: all.length - queue.length,
     failed: [],
@@ -194,7 +209,7 @@ async function refreshEverything(opts: { staleHours?: number; fetchImpl?: typeof
       const fresh = getItem(queued.id);
       if (!fresh || fresh.quantity <= 0) { result.skipped++; opts.onProgress?.({ id: queued.id, status: "skipped", message: "Item was removed or sold out." }); continue; }
       const outcome = await refreshItem(fresh, fetchImpl, signal);
-      if (signal?.aborted && !outcome.stored) {
+      if (signal?.aborted && !outcome.stored && !outcome.unchanged) {
         // The request it was waiting on was abandoned; this item was not priced.
         result.cancelled = true;
         result.skipped += queue.length - index;
@@ -203,10 +218,11 @@ async function refreshEverything(opts: { staleHours?: number; fetchImpl?: typeof
       if (outcome.skipped) { result.skipped++; opts.onProgress?.({ id: queued.id, status: "skipped", message: "Item was removed or sold out during refresh." }); continue; }
       const priced = hasPrice(outcome.snapshot.summary);
       if (outcome.stored) result.refreshed++;
+      else if (outcome.unchanged) result.unchanged++;
       else result.unpriced++;
-      const errors = [...result.providerErrors, ...outcome.snapshot.summary.errors];
-      opts.onProgress?.({ id: queued.id, status: priced ? "priced" : errors.length ? "failed" : "unpriced",
-        message: errors.map(e => `${e.source}: ${e.message}`).join("; ") || (priced ? undefined : "No listing found; previous value kept.") });
+      const errors = [...result.providerErrors, ...outcome.snapshot.summary.errors].map(e => `${e.source}: ${e.message}`).join("; ");
+      opts.onProgress?.({ id: queued.id, status: priced ? "priced" : errors ? "failed" : "unpriced",
+        message: outcome.unchanged ? `Unchanged since ${outcome.snapshot.fetchedAt.slice(0, 10)}.${errors ? ` ${errors}` : ""}` : errors || (priced ? undefined : "No listing found; previous value kept.") });
     } catch (e) {
       result.failed.push({ itemId: queued.id, message: e instanceof Error ? e.message : String(e) });
       opts.onProgress?.({ id: queued.id, status: "failed", message: e instanceof Error ? e.message : String(e) });

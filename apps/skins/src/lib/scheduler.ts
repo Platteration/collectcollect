@@ -15,8 +15,8 @@ export const { schedulerStatus, startPriceScheduler, stopPriceScheduler } = crea
   refreshAll: (staleHours) => refreshAll({ staleHours }),
   refreshRunning,
   report: (r) =>
-    r.refreshed || r.unpriced || r.failed.length
-      ? `[prices] auto-refresh: ${r.refreshed} priced, ${r.unpriced} nothing listing, ${r.skipped} still fresh, ${r.failed.length} failed`
+    r.refreshed || r.unchanged || r.unpriced || r.failed.length
+      ? `[prices] auto-refresh: ${r.refreshed} priced, ${r.unchanged} unchanged, ${r.unpriced} nothing listing, ${r.skipped} still fresh, ${r.failed.length} failed`
       : null,
   afterRun: (r) => {
     for (const error of r.providerErrors) console.warn(`[prices] ${error.source}: ${error.message}`);

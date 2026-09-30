@@ -228,6 +228,30 @@ export function summarize(
   };
 }
 
+/**
+ * What a refresh compares to decide whether it learned anything: every figure
+ * the app shows or sums, which markets answered and at what price, and the
+ * errors, but not when anything was asked. Steam's daily sales count is left
+ * out too: it moves on every call and is summed nowhere. Two summaries the
+ * same by this measure are the same price, and the second is a check, not a
+ * snapshot.
+ */
+export function sameSummary(a: PriceSummary, b: PriceSummary): boolean {
+  const project = (s: PriceSummary) =>
+    JSON.stringify({
+      market: s.market,
+      marketSource: s.marketSource,
+      yourCopyValue: s.yourCopyValue,
+      yourCopyBasis: s.yourCopyBasis,
+      valueBasis: s.valueBasis ?? null,
+      quotes: s.quotes.map((q) => ({ source: q.source, currency: q.currency, price: q.price })),
+      // A source that failed last time and answered this time is worth a row,
+      // or the page would go on showing an error that has cleared.
+      errors: s.errors,
+    });
+  return project(a) === project(b);
+}
+
 export function itemToQuery(item: Pick<ItemRecord, "marketHashName" | "externalIds">): ItemQuery {
   return { marketHashName: item.marketHashName, externalIds: item.externalIds };
 }

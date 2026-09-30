@@ -89,7 +89,7 @@ export default async function ItemPage({ params }: PageProps<"/items/[id]">) {
         </div>
       </header>
 
-      <PricePanel item={item} summary={snapshots[0]?.summary ?? null} />
+      <PricePanel item={item} summary={snapshots[0]?.summary ?? null} checkedAt={snapshots[0]?.checkedAt ?? null} />
 
       <EditItem item={item} storageUnits={listStorageUnits().map((u) => u.storageUnit)} purchasePriceReadOnly={lots.length > 1 || lots.some((lot) => lot.remaining !== lot.quantity)} />
 
@@ -161,7 +161,7 @@ export default async function ItemPage({ params }: PageProps<"/items/[id]">) {
           <Table
             headers={["Date", "Your copy", "Market", "Basis"]}
             rows={snapshots.map((s) => [
-              day(s.fetchedAt),
+              s.checkedAt ? `${day(s.fetchedAt)} · unchanged at ${day(s.checkedAt)}` : day(s.fetchedAt),
               s.summary.yourCopyValue === null ? "—" : money(s.summary.yourCopyValue),
               s.summary.market === null ? "—" : money(s.summary.market),
               s.summary.yourCopyBasis || "—",

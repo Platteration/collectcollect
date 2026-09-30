@@ -52,15 +52,19 @@ export default function HomePage() {
   const sales = listSales();
   const realized = realizedReturn(sales);
 
+  // A check that found the same prices is as recent a quote as a stored one.
   let lastRefreshed: string | null = null;
-  for (const s of latest.values()) if (!lastRefreshed || s.fetchedAt > lastRefreshed) lastRefreshed = s.fetchedAt;
+  for (const s of latest.values()) {
+    const at = s.checkedAt ?? s.fetchedAt;
+    if (!lastRefreshed || at > lastRefreshed) lastRefreshed = at;
+  }
 
   return (
     <Portfolio
       points={points}
       pricePoints={pricePoints}
       historyStartedAt={history.startedAt}
-      freshCount={priceCoverage(items.map(c => ({ priced: latest.get(c.id)?.summary.yourCopyValue != null, fetchedAt: latest.get(c.id)?.fetchedAt }))).fresh}
+      freshCount={priceCoverage(items.map(c => ({ priced: latest.get(c.id)?.summary.yourCopyValue != null, fetchedAt: latest.get(c.id)?.checkedAt ?? latest.get(c.id)?.fetchedAt }))).fresh}
       itemCount={items.length}
       copyCount={items.reduce((n, i) => n + i.quantity, 0)}
       pricedCount={items.filter((i) => priceOf(i) !== null).length}

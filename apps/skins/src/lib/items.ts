@@ -299,6 +299,14 @@ function readStickers(itemId: number): AppliedSticker[] {
   ).map((r) => ({ slot: r.slot, name: r.name, marketHashName: r.market_hash_name, wear: r.wear }));
 }
 
+/**
+ * Whether a lock had already ended at this moment. One written that way is
+ * marked as announced from the start: an item added or imported after its
+ * lock ended is not news, and "can be traded again" at the next refresh would
+ * be stale.
+ */
+const lockOver = (at: string | null, now: Date): boolean => at !== null && new Date(at) <= now;
+
 export function createItem(input: ItemInput): ItemRecord {
   const i = normalizeInput(input);
   // One transaction: the row, its stickers and its first purchase lot go in
@@ -311,11 +319,11 @@ export function createItem(input: ItemInput): ItemRecord {
       `INSERT INTO items (market_hash_name, category, stackable, weapon, finish, exterior, rarity, collection,
         stattrak, souvenir, float_value, paint_seed, paint_index, name_tag, quantity, purchase_price,
         asset_id, inspect_link, tradable_after, storage_unit, image_url, notes, external_ids, manual_price,
-        created_at, updated_at)
+        lock_alerted_for, created_at, updated_at)
        VALUES (@marketHashName, @category, @stackable, @weapon, @finish, @exterior, @rarity, @collection,
         @stattrak, @souvenir, @floatValue, @paintSeed, @paintIndex, @nameTag, @quantity, @purchasePrice,
         @assetId, @inspectLink, @tradableAfter, @storageUnit, @imageUrl, @notes, @externalIds, @manualPrice,
-        @now, @now)`,
+        @lockAlertedFor, @now, @now)`,
     )
     .run({
       ...i,
@@ -323,6 +331,7 @@ export function createItem(input: ItemInput): ItemRecord {
       stattrak: i.stattrak ? 1 : 0,
       souvenir: i.souvenir ? 1 : 0,
       externalIds: JSON.stringify(i.externalIds),
+      lockAlertedFor: lockOver(i.tradableAfter, new Date(now)) ? i.tradableAfter : null,
       now,
     });
   const id = Number(result.lastInsertRowid);
@@ -358,7 +367,8 @@ export function updateItem(id: number, patch: Partial<ItemInput>): ItemRecord | 
           souvenir=@souvenir, float_value=@floatValue, paint_seed=@paintSeed, paint_index=@paintIndex,
           name_tag=@nameTag, quantity=@quantity, purchase_price=@purchasePrice, asset_id=@assetId,
           inspect_link=@inspectLink, tradable_after=@tradableAfter, storage_unit=@storageUnit, image_url=@imageUrl,
-          notes=@notes, external_ids=@externalIds, manual_price=@manualPrice, updated_at=@now
+          notes=@notes, external_ids=@externalIds, manual_price=@manualPrice,
+          lock_alerted_for=COALESCE(@lockAlertedFor, lock_alerted_for), updated_at=@now
          WHERE id=@id`,
       )
       .run({
@@ -368,6 +378,9 @@ export function updateItem(id: number, patch: Partial<ItemInput>): ItemRecord | 
         stattrak: merged.stattrak ? 1 : 0,
         souvenir: merged.souvenir ? 1 : 0,
         externalIds: JSON.stringify(merged.externalIds),
+        // Only a lock this edit introduces, and one already over: a re-read
+        // carrying the same lock, or none, leaves an ending still to announce.
+        lockAlertedFor: merged.tradableAfter !== existing.tradableAfter && lockOver(merged.tradableAfter, new Date()) ? merged.tradableAfter : null,
         now: new Date().toISOString(),
       });
     if (patch.stickers !== undefined) writeStickers(id, merged.stickers);
@@ -612,7 +625,14 @@ export function syncFromInventory(input: ItemInput): SyncOutcome {
   const run = getDb().transaction((): SyncOutcome => {
     if (clean.assetId) {
       const same = findByAssetId(clean.assetId);
-      if (same) return { result: "updated", item: updateItem(same.id, knownFields(input))! };
+      if (same) {
+        // A re-read that says nothing new writes nothing: an unchanged import
+        // used to touch every row, which put the inventory into Steam's asset
+        // order and rewrote every file.
+        const patch = knownFields(input);
+        const differs = JSON.stringify(normalizeInput({ ...same, ...patch })) !== JSON.stringify(normalizeInput(same));
+        return { result: "updated", item: differs ? updateItem(same.id, patch)! : same };
+      }
     }
     if (!clean.stackable) return { result: "created", item: createItem(input) };
 
@@ -671,6 +691,12 @@ export function deleteItem(id: number): boolean {
   return gone;
 }
 
+export type ItemSort = "updated" | "name" | "value" | "added";
+export const ITEM_SORTS: readonly ItemSort[] = ["updated", "name", "value", "added"];
+export function isItemSort(value: unknown): value is ItemSort {
+  return typeof value === "string" && (ITEM_SORTS as readonly string[]).includes(value);
+}
+
 export interface ListOptions {
   category?: Category;
   exterior?: Exterior;
@@ -680,9 +706,28 @@ export interface ListOptions {
   storageUnit?: string;
   /** Only items whose trade lock has not lifted yet. */
   lockedOnly?: boolean;
+  /** Only items holding copies whose cost was never recorded. */
+  missingCost?: boolean;
+  /** The order; the default is by when each item was last touched. */
+  sort?: ItemSort;
+  /** One page of the list, for an inventory too large to send whole. */
+  limit?: number;
+  offset?: number;
 }
 
-export function listItems(opts: ListOptions = {}): ItemRecord[] {
+/** The value the latest snapshot gives one copy, read by the database. */
+const LATEST_VALUE = `(SELECT json_extract(p.summary, '$.yourCopyValue') FROM price_snapshots p WHERE p.item_id = items.id ORDER BY p.fetched_at DESC, p.id DESC LIMIT 1)`;
+/** What an item's tile prints: the owner's own price, else the latest value, times the copies held; nothing when neither is known. */
+const HOLDING_VALUE = `(COALESCE(items.manual_price, ${LATEST_VALUE}) * items.quantity)`;
+
+const ORDER: Record<ItemSort, string> = {
+  updated: "updated_at DESC, id DESC",
+  name: "market_hash_name COLLATE NOCASE ASC, id ASC",
+  value: `${HOLDING_VALUE} DESC NULLS LAST, updated_at DESC, id DESC`,
+  added: "created_at DESC, id DESC",
+};
+
+function whereFor(opts: ListOptions): { where: string; params: Record<string, unknown> } {
   const where: string[] = [];
   const params: Record<string, unknown> = {};
   if (opts.category) {
@@ -721,10 +766,50 @@ export function listItems(opts: ListOptions = {}): ItemRecord[] {
     where.push("tradable_after IS NOT NULL AND tradable_after > @now");
     params.now = new Date().toISOString();
   }
-  const sql = `SELECT * FROM items ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY updated_at DESC, id DESC`;
+  // The same reading costBasisByItem gives: a copy still held from a lot with no cost.
+  if (opts.missingCost) where.push("EXISTS (SELECT 1 FROM acquisitions a WHERE a.item_id = items.id AND a.remaining > 0 AND a.unit_cost IS NULL)");
+  return { where: where.length ? "WHERE " + where.join(" AND ") : "", params };
+}
+
+export function listItems(opts: ListOptions = {}): ItemRecord[] {
+  const { where, params } = whereFor(opts);
+  const page = opts.limit === undefined ? "" : " LIMIT @limit OFFSET @offset";
+  if (opts.limit !== undefined) {
+    params.limit = Math.max(0, Math.floor(opts.limit));
+    params.offset = Math.max(0, Math.floor(opts.offset ?? 0));
+  }
+  const sql = `SELECT * FROM items ${where} ORDER BY ${ORDER[opts.sort ?? "updated"]}${page}`;
   const rows = getDb().prepare(sql).all(params) as ItemRow[];
   const stickers = stickersByItem(rows.map((r) => r.id));
   return rows.map((r) => rowToItem(r, stickers.get(r.id) ?? []));
+}
+
+/** How many items a filter matches, whatever page of them is shown. */
+export function countItems(opts: ListOptions = {}): number {
+  const { where, params } = whereFor(opts);
+  return (getDb().prepare(`SELECT count(*) AS n FROM items ${where}`).get(params) as { n: number }).n;
+}
+
+/** The figures at the top of the inventory page, over every item the filter matches. */
+export interface InventoryTotals {
+  items: number;
+  /** What the copies are worth together, at each item's own price or its latest value. */
+  value: number;
+  /** Items with neither an own price nor a value. */
+  unpriced: number;
+}
+
+export function inventoryTotals(opts: ListOptions = {}): InventoryTotals {
+  const { where, params } = whereFor(opts);
+  const row = getDb()
+    .prepare(
+      `SELECT count(*) AS items,
+        coalesce(sum(coalesce(v, 0)), 0) AS value,
+        coalesce(sum(CASE WHEN v IS NULL THEN 1 ELSE 0 END), 0) AS unpriced
+       FROM (SELECT ${HOLDING_VALUE} AS v FROM items ${where})`,
+    )
+    .get(params) as InventoryTotals;
+  return { ...row, value: Math.round(row.value * 100) / 100 };
 }
 
 /**
@@ -777,10 +862,26 @@ interface SnapshotRow {
   item_id: number;
   fetched_at: string;
   summary: string;
+  checked_at: string | null;
 }
 
 function rowToSnapshot(r: SnapshotRow): PriceSnapshot {
-  return { id: r.id, itemId: r.item_id, fetchedAt: r.fetched_at, summary: JSON.parse(r.summary) as PriceSummary };
+  return {
+    id: r.id,
+    itemId: r.item_id,
+    fetchedAt: r.fetched_at,
+    summary: JSON.parse(r.summary) as PriceSummary,
+    ...(r.checked_at ? { checkedAt: r.checked_at } : {}),
+  };
+}
+
+/**
+ * A refresh found the same prices this snapshot already holds: note when,
+ * rather than storing a copy. Only the marker changes, so the holdings history
+ * (which listens to the summary) records nothing, and no file is rewritten.
+ */
+export function markChecked(snapshotId: number, at: string): void {
+  getDb().prepare("UPDATE price_snapshots SET checked_at = ? WHERE id = ?").run(at, snapshotId);
 }
 
 export function listSnapshots(itemId: number, limit = 50): PriceSnapshot[] {

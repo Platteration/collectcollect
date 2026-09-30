@@ -41,6 +41,22 @@ describe("value over time", () => {
     expect(portfolioSeries([], allSnapshots())).toEqual([]);
   });
 
+  it("reaches the last time the prices were confirmed, not only the last change", () => {
+    const rifle = seedRedline();
+    addSnapshot(rifle.id, priced("2026-01-01T00:00:00.000Z", 40));
+    const [only] = allSnapshots();
+    const checked = portfolioSeries(listItems(), [{ ...only!, checkedAt: "2026-01-10T00:00:00.000Z" }]);
+    expect(checked.map((p) => [p.t, p.value])).toEqual([
+      ["2026-01-01T00:00:00.000Z", 40],
+      ["2026-01-10T00:00:00.000Z", 40],
+    ]);
+    // A check older than a later change adds nothing.
+    addSnapshot(rifle.id, priced("2026-01-15T00:00:00.000Z", 55));
+    const [first, second] = allSnapshots();
+    const later = portfolioSeries(listItems(), [{ ...first!, checkedAt: "2026-01-10T00:00:00.000Z" }, second!]);
+    expect(later.map((p) => p.t)).toEqual(["2026-01-01T00:00:00.000Z", "2026-01-15T00:00:00.000Z"]);
+  });
+
   it("collapses a refresh that priced everything in the same instant", () => {
     const a = seedCase({ quantity: 1 });
     const b = seedCase({ marketHashName: "Chroma Case", quantity: 1 });

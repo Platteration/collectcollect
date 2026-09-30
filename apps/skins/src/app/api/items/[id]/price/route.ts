@@ -25,6 +25,9 @@ export async function POST(request: Request, ctx: RouteContext<"/api/items/[id]/
     return NextResponse.json({
       summary: outcome.snapshot.summary,
       stored: outcome.stored,
+      // The same prices as before: nothing stored, the latest row marked as checked now.
+      unchanged: outcome.unchanged ?? false,
+      checkedAt: outcome.snapshot.checkedAt ?? null,
       proceeds: proceedsByMarket(outcome.snapshot.summary.quotes, getSettings()),
     });
   } catch (e) {

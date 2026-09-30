@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { openDatabase, setDb } from "@/lib/db";
+import { getDb, openDatabase, setDb } from "@/lib/db";
 import { getItem, intakeItem, itemsMissingFrom, listItems, syncFromInventory, updateItem } from "@/lib/items";
 import { listLots, verifyLotInvariant } from "@/lib/acquisitions";
 import type { SteamAsset, SteamDescription, SteamInventory } from "@/lib/steam/inventory";
@@ -473,6 +473,41 @@ describe("bringing an inventory in twice", () => {
     const now = getItem(item.id)!;
     expect(now.tradableAfter).toBe(new Date("Oct 1, 2026").toISOString());
     expect(now.stickers.map((s) => s.name)).toEqual(["Titan | Katowice 2014", "Crown (Foil)"]);
+  });
+
+  it("still announces a lock that ended after the object was read, when a later read carries none", async () => {
+    const locked = description({ owner_descriptions: [{ value: "Tradable After Sep 15, 2099 (07:00:00) GMT" }] });
+    const assets = [{ assetid: "1", classid: "310776560", instanceid: "302028390" }];
+    const { item } = syncFromInventory(at(parseInventory(inventory([locked], assets), STEAM_ID).items, 0));
+    // Time passes and the lock the app knows about ends; a public read then
+    // says nothing about it, which is not "it never ended".
+    getDb().prepare("UPDATE items SET tradable_after = ? WHERE id = ?").run(new Date(Date.now() - 864e5).toISOString(), item.id);
+    expect(syncFromInventory(at(parseInventory(inventory([description()], assets), STEAM_ID).items, 0)).result).toBe("updated");
+    const { refreshAll } = await import("@/lib/pricing/refresh");
+    const quiet = (async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      return new Response(url.includes("api.skinport.com") ? "[]" : JSON.stringify({ success: false }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+    await refreshAll({ fetchImpl: quiet });
+    const { listAlerts } = await import("@/lib/alerts");
+    expect(listAlerts().filter((a) => a.kind === "trade_lock_lifted")).toHaveLength(1);
+  });
+
+  it("writes nothing for a re-read that says nothing new, so the inventory keeps its order", () => {
+    const assets = [
+      { assetid: "1", classid: "310776560", instanceid: "302028390" },
+      { assetid: "2", classid: "310776560", instanceid: "302028390" },
+    ];
+    const items = parseInventory(inventory([description()], assets), STEAM_ID).items;
+    for (const item of items) syncFromInventory(item);
+    getDb().prepare("UPDATE items SET updated_at = ? WHERE asset_id = '1'").run("2026-01-01T00:00:00.000Z");
+    getDb().prepare("UPDATE items SET updated_at = ? WHERE asset_id = '2'").run("2026-01-02T00:00:00.000Z");
+    const before = listItems().map((i) => [i.assetId, i.updatedAt]);
+    // The same inventory again, in the other order: nothing to write, so
+    // nothing is touched and the order the owner sees does not change.
+    const outcomes = [...items].reverse().map((item) => syncFromInventory(item));
+    expect(outcomes.map((o) => o.result)).toEqual(["updated", "updated"]);
+    expect(listItems().map((i) => [i.assetId, i.updatedAt])).toEqual(before);
   });
 
   it("brings nothing in with a purchase price, because Steam does not know one", () => {

@@ -49,6 +49,13 @@ export function portfolioSeries(items: ItemRecord[], snapshots: PriceSnapshot[])
     if (last && last.t === point.t) points[points.length - 1] = point;
     else points.push(point);
   }
+  // A refresh that found the same prices adds no snapshot; it marks the
+  // latest one as checked. Without this the line would stop at the last
+  // change rather than reach the last time the prices were confirmed.
+  const end = points[points.length - 1];
+  let checked: string | null = null;
+  for (const s of snapshots) if (s.checkedAt && qty.has(s.itemId) && (!checked || s.checkedAt > checked)) checked = s.checkedAt;
+  if (end && checked && checked > end.t) points.push({ ...end, t: checked });
   return points;
 }
 
