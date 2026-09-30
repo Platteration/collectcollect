@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { openDatabase, setDb } from "@/lib/db";
+import { getDb, openDatabase, setDb } from "@/lib/db";
 import { addSnapshot, createCard, getCard } from "@/lib/cards";
 import { addCard, createSubmission, deleteSubmission, getSubmission, listSubmissions, markSent, recordReturn, removeCard, updateSubmission } from "@/lib/submissions";
 import { submissionOutcome } from "@/lib/analytics";
@@ -217,3 +217,33 @@ describe("editing a batch and moving cards between batches", () => {
   });
 });
 
+describe("what a returned grade is booked at, and what a failed batch leaves", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("values a returned grade by the same chain of keys the card's own value uses", () => {
+    const card = createCard({ game: "pokemon", name: "Charizard" });
+    addSnapshot(card.id, summary({ ungraded: 100, yourCopyValue: 100, graded: { "PSA 10": 500 } }));
+    const sub = addCard(createSubmission({ company: "CGC" }).id, card.id);
+    markSent(sub.id);
+    // There is no "CGC 10" price; the card page falls through to "Grade 10" and then "PSA 10", and so does the batch.
+    expect(recordReturn(sub.id, [{ cardId: card.id, grade: "10" }]).cards[0]?.returnedValue).toBe(500);
+  });
+
+  it("marks nothing sent when any card in the batch cannot be", () => {
+    const a = pricedCard("Charizard", 100, 900);
+    const b = pricedCard("Blastoise", 50, 300);
+    const sub = createSubmission({ company: "PSA" });
+    addCard(sub.id, a.id);
+    addCard(sub.id, b.id);
+    getDb().exec(`CREATE TRIGGER fail BEFORE UPDATE ON cards WHEN NEW.id = ${b.id} AND NEW.grading_status = 'submitted' BEGIN SELECT RAISE(ABORT, 'boom'); END`);
+    expect(() => markSent(sub.id)).toThrow(/boom/);
+    expect(getSubmission(sub.id)?.status).toBe("draft");
+    expect(getCard(a.id)?.gradingStatus).toBe("undecided");
+    getDb().exec("DROP TRIGGER fail");
+    markSent(sub.id);
+    getDb().exec(`CREATE TRIGGER fail BEFORE UPDATE ON cards WHEN NEW.id = ${b.id} AND NEW.grading_status = 'planned' BEGIN SELECT RAISE(ABORT, 'boom'); END`);
+    expect(() => deleteSubmission(sub.id)).toThrow(/boom/);
+    expect(getSubmission(sub.id)?.status).toBe("sent");
+    expect(getCard(a.id)?.gradingStatus).toBe("submitted");
+  });
+});

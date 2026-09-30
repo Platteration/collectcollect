@@ -1,6 +1,6 @@
 import { discardDeferredMirror, flushDeferredMirror, getCard, latestSnapshot, updateCard } from "./cards";
 import { getDb } from "./db";
-import { gradeKey } from "./pricing";
+import { gradeLookupKeys } from "./pricing";
 import type { Game, Submission, SubmissionCard, SubmissionStatus } from "./types";
 import { SUBMISSION_STATUSES } from "./types";
 
@@ -127,19 +127,38 @@ export function listSubmissions(): Submission[] {
 }
 
 export function deleteSubmission(id: number): boolean {
-  const sub = getSubmission(id);
-  if (!sub) return false;
-  // Delete first, so that a card still listed on another batch that has been
-  // sent is seen as away with that one rather than with this one.
-  const gone = getDb().prepare("DELETE FROM submissions WHERE id = ?").run(id).changes > 0;
-  // Cards go back to being planned rather than staying stranded "at the grader".
-  for (const c of sub.cards) {
-    const card = getCard(c.cardId);
-    if (card && card.gradingStatus === "submitted" && !isAwayWithAnotherBatch(card.id)) {
-      updateCard(card.id, { gradingStatus: "planned" });
+  return atomically(() => {
+    const sub = getSubmission(id);
+    if (!sub) return false;
+    // Delete first, so that a card still listed on another batch that has been
+    // sent is seen as away with that one rather than with this one.
+    const gone = getDb().prepare("DELETE FROM submissions WHERE id = ?").run(id).changes > 0;
+    // Cards go back to being planned rather than staying stranded "at the grader".
+    for (const c of sub.cards) {
+      const card = getCard(c.cardId);
+      if (card && card.gradingStatus === "submitted" && !isAwayWithAnotherBatch(card.id)) {
+        updateCard(card.id, { gradingStatus: "planned" });
+      }
     }
+    return gone;
+  });
+}
+
+/**
+ * A batch and its cards change together or not at all: a failure half way
+ * through marking a batch sent would leave some cards at the grader and the
+ * batch still a draft. Card files are mirrored once the transaction commits,
+ * never for a batch that rolled back.
+ */
+function atomically<T>(work: () => T): T {
+  try {
+    const result = getDb().transaction(work)();
+    flushDeferredMirror();
+    return result;
+  } catch (e) {
+    discardDeferredMirror();
+    throw e;
   }
-  return gone;
 }
 
 /** Add a card, capturing what it is worth raw and what gem mint would be worth today. */
@@ -163,15 +182,17 @@ export function addCard(submissionId: number, cardId: number): Submission {
 }
 
 export function removeCard(submissionId: number, cardId: number): Submission {
-  getDb().prepare("DELETE FROM submission_cards WHERE submission_id = ? AND card_id = ?").run(submissionId, cardId);
-  const card = getCard(cardId);
-  if (card && card.gradingStatus === "submitted" && !isAwayWithAnotherBatch(cardId)) {
-    updateCard(card.id, { gradingStatus: "planned" });
-  }
-  touch(submissionId);
-  const sub = getSubmission(submissionId);
-  if (!sub) throw new Error("Submission not found");
-  return sub;
+  return atomically(() => {
+    getDb().prepare("DELETE FROM submission_cards WHERE submission_id = ? AND card_id = ?").run(submissionId, cardId);
+    const card = getCard(cardId);
+    if (card && card.gradingStatus === "submitted" && !isAwayWithAnotherBatch(cardId)) {
+      updateCard(card.id, { gradingStatus: "planned" });
+    }
+    touch(submissionId);
+    const sub = getSubmission(submissionId);
+    if (!sub) throw new Error("Submission not found");
+    return sub;
+  });
 }
 
 /**
@@ -198,11 +219,13 @@ export function markSent(submissionId: number, sentAt?: string): Submission {
   if (sub.status === "returned") throw new Error("This batch has already come back; start a new one to send these cards again");
   const when = sentAt ? new Date(sentAt) : new Date();
   if (Number.isNaN(when.getTime())) throw new Error("Sent date is not a valid date");
-  getDb()
-    .prepare("UPDATE submissions SET status = 'sent', sent_at = ?, updated_at = ? WHERE id = ?")
-    .run(when.toISOString(), new Date().toISOString(), submissionId);
-  for (const c of sub.cards) updateCard(c.cardId, { gradingStatus: "submitted" });
-  return getSubmission(submissionId)!;
+  return atomically(() => {
+    getDb()
+      .prepare("UPDATE submissions SET status = 'sent', sent_at = ?, updated_at = ? WHERE id = ?")
+      .run(when.toISOString(), new Date().toISOString(), submissionId);
+    for (const c of sub.cards) updateCard(c.cardId, { gradingStatus: "submitted" });
+    return getSubmission(submissionId)!;
+  });
 }
 
 export interface GradeResult {
@@ -245,9 +268,15 @@ export function recordReturn(submissionId: number, results: unknown, returnedAt?
   const db = getDb();
   const run = db.transaction(() => {
     for (const r of graded) {
+      // The same chain of keys the card's own value is read with: a real
+      // graded price under any of them first, an estimate second. Booking a
+      // CGC 10 at the estimate while the card page showed the real PSA 10 price
+      // made the batch's outcome disagree with the card it was about.
       const summary = latestSnapshot(r.cardId)?.summary;
-      const key = gradeKey(sub.company, r.grade);
-      const value = summary && key ? (summary.graded[key] ?? summary.estimatedGraded[key] ?? null) : null;
+      const keys = gradeLookupKeys(sub.company, r.grade);
+      const value = summary
+        ? (keys.map((k) => summary.graded[k]).find((v) => v !== undefined) ?? keys.map((k) => summary.estimatedGraded[k]).find((v) => v !== undefined) ?? null)
+        : null;
       db.prepare("UPDATE submission_cards SET returned_grade = ?, returned_value = ? WHERE submission_id = ? AND card_id = ?").run(
         r.grade,
         value,
