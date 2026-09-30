@@ -52,7 +52,7 @@ function fresh(now: number): Catalogue | null {
   return held && now - held.at < CATALOGUE_TTL_MS ? held : null;
 }
 
-async function load(fetchImpl: typeof fetch, now: number): Promise<Catalogue> {
+async function load(fetchImpl: typeof fetch, now: number, signal?: AbortSignal): Promise<Catalogue> {
   const held = fresh(now);
   if (held) return held;
 
@@ -60,7 +60,7 @@ async function load(fetchImpl: typeof fetch, now: number): Promise<Catalogue> {
   try {
     // Skinport ask for a compressed response; Node's fetch negotiates and
     // decodes it without anything else being needed here.
-    response = await fetchImpl(ENDPOINT, { headers: { Accept: "application/json", "Accept-Encoding": "br, gzip" } });
+    response = await fetchImpl(ENDPOINT, { headers: { Accept: "application/json", "Accept-Encoding": "br, gzip" }, signal });
   } catch (e) {
     throw new ProviderError("skinport", `Could not reach Skinport: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -91,12 +91,12 @@ export const skinport: PriceProvider = {
 
   isConfigured: () => true,
 
-  async prime(fetchImpl: typeof fetch = fetch) {
-    await load(fetchImpl, Date.now());
+  async prime(fetchImpl: typeof fetch = fetch, signal?: AbortSignal) {
+    await load(fetchImpl, Date.now(), signal);
   },
 
-  async lookup(query: ItemQuery, fetchImpl: typeof fetch = fetch): Promise<PriceQuote[]> {
-    const catalogue = await load(fetchImpl, Date.now());
+  async lookup(query: ItemQuery, fetchImpl: typeof fetch = fetch, signal?: AbortSignal): Promise<PriceQuote[]> {
+    const catalogue = await load(fetchImpl, Date.now(), signal);
     const entry = catalogue.byName.get(query.marketHashName);
     // Not being listed is an ordinary answer, not a failure: plenty of items
     // have nobody selling them at this moment.

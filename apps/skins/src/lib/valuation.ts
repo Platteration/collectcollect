@@ -22,6 +22,17 @@ export function valueOf(item: ItemRecord, snapshot: PriceSnapshot | undefined | 
   return { value: recorded, basis: snapshot!.summary.yourCopyBasis || "Last recorded price" };
 }
 
+/**
+ * Whether an item's recorded value is from before values were what a cash
+ * market pays: such a snapshot carries no basis, and its number is the highest
+ * listing before fees. The portfolio says how many of those it is still
+ * summing, because the total steps down as each is refreshed.
+ */
+export function valuedTheOldWay(item: ItemRecord, snapshot: PriceSnapshot | undefined | null): boolean {
+  if (item.manualPrice !== null) return false;
+  return snapshot?.summary.yourCopyValue != null && snapshot.summary.valueBasis === undefined;
+}
+
 /** What the copies held of this item are worth together. */
 export function holdingValue(item: ItemRecord, snapshot: PriceSnapshot | undefined | null): number | null {
   const { value } = valueOf(item, snapshot);

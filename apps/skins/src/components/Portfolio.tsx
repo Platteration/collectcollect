@@ -40,6 +40,8 @@ interface Props {
   copyCount: number;
   pricedCount: number;
   lockedCount: number;
+  /** Items still valued at the highest listing before fees, from before this version; the total steps down as they are refreshed. */
+  oldWayCount: number;
   lastRefreshed: string | null;
   holdings: Holding[];
   returns: Returns;
@@ -50,7 +52,7 @@ interface Props {
 }
 
 export function Portfolio(props: Props) {
-  const { points: historyPoints, pricePoints, historyStartedAt, freshCount, itemCount, copyCount, pricedCount, lockedCount, lastRefreshed, holdings, returns, byCategory, byRarity, realized, recentSales } =
+  const { points: historyPoints, pricePoints, historyStartedAt, freshCount, itemCount, copyCount, pricedCount, lockedCount, oldWayCount, lastRefreshed, holdings, returns, byCategory, byRarity, realized, recentSales } =
     props;
   const [historyMode, setHistoryMode] = useState(true);
   const points = historyMode ? historyPoints : pricePoints;
@@ -81,6 +83,12 @@ export function Portfolio(props: Props) {
         </p>
 
         <p className="mt-2 text-xs text-neutral-500">{freshCount} fresh · {Math.max(0, pricedCount - freshCount)} stale · {itemCount - pricedCount} unpriced</p>
+        {oldWayCount > 0 && (
+          <p className="mt-2 text-xs text-neutral-500">
+            {oldWayCount} {oldWayCount === 1 ? "item is" : "items are"} still valued at the highest listing before fees, from before a value was what a market pays out;
+            the next refresh revalues {oldWayCount === 1 ? "it" : "them"}, and the total steps down.
+          </p>
+        )}
         <p className="mt-2 text-xs text-neutral-500">{historyMode ? `Inventory value recorded since ${when(historyStartedAt)}. Changes include purchases, sales and corrections; this is not investment return.` : "Price history of current holdings: earlier points use quantities held today."}</p>
         <button type="button" className="btn-secondary mt-2" onClick={() => { setHistoryMode(!historyMode); setHover(null); }}>{historyMode ? "Show price history of current holdings" : "Show actual inventory history"}</button>
         <div className="mt-4 flex gap-1" role="group" aria-label="Time range">

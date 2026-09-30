@@ -134,7 +134,12 @@ export function alertsForRefresh(
 
   const before = previous?.yourCopyValue ?? null;
   const after = next.yourCopyValue ?? null;
-  if (before !== null && after !== null && before > 0) {
+  // A value that changed what it measures — the highest listing before fees
+  // in a snapshot from an older version against what a cash market pays now,
+  // a cash market against Steam's wallet, the owner's own price against the
+  // market — has not moved; it means something else. Only like against like.
+  const comparable = (previous?.valueBasis ?? null) === (next.valueBasis ?? null);
+  if (before !== null && after !== null && before > 0 && comparable) {
     const change = ((after - before) / before) * 100;
     // A threshold of zero switches move alerts off, as the settings page says;
     // without the guard every refresh that changed a price at all would fire.
@@ -184,19 +189,27 @@ export function alertsForRefresh(
  * actionable spread unactionable, and the moment it ends is invisible: nothing
  * about the item changes, the date simply passes.
  */
-export function alertsForTradeLocks(items: ItemRecord[], now = new Date()): AlertInput[] {
-  const db = getDb();
-  const already = new Set(
-    (db.prepare("SELECT item_id FROM alerts WHERE kind = 'trade_lock_lifted'").all() as Array<{ item_id: number | null }>)
-      .map((r) => r.item_id)
-      .filter((id): id is number => id !== null),
+export function alertsForTradeLocks(items: ItemRecord[], now = new Date()): Array<AlertInput & { itemId: number; tradableAfter: string }> {
+  // Which lock was already announced is kept on the item, not read back from
+  // the alerts table: a dismissed alert used to come back on the next
+  // refresh, and an item locked a second time was never announced again
+  // because its first alert was still there.
+  const announced = new Map(
+    (getDb().prepare("SELECT id, lock_alerted_for FROM items WHERE lock_alerted_for IS NOT NULL").all() as Array<{ id: number; lock_alerted_for: string }>)
+      .map((r) => [r.id, r.lock_alerted_for]),
   );
   return items
-    .filter((item) => item.tradableAfter !== null && new Date(item.tradableAfter) <= now && !already.has(item.id))
+    .filter((item) => item.tradableAfter !== null && new Date(item.tradableAfter) <= now && announced.get(item.id) !== item.tradableAfter)
     .map((item) => ({
       kind: "trade_lock_lifted" as const,
       itemId: item.id,
+      tradableAfter: item.tradableAfter!,
       title: `${item.marketHashName} can be traded again`,
       body: `Its trade lock ended on ${item.tradableAfter!.slice(0, 10)}.`,
     }));
+}
+
+/** Remember that this lock's ending was announced, so it is announced once. */
+export function markLockAlerted(itemId: number, tradableAfter: string): void {
+  getDb().prepare("UPDATE items SET lock_alerted_for = ? WHERE id = ?").run(tradableAfter, itemId);
 }

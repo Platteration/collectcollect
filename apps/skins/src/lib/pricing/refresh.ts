@@ -1,5 +1,5 @@
 import { addSnapshot, getItem, latestSnapshot, latestSnapshotsByItem, listItems, listSnapshots } from "../items";
-import { alertsForRefresh, alertsForTradeLocks, createAlert, deliver } from "../alerts";
+import { alertsForRefresh, alertsForTradeLocks, createAlert, deliver, markLockAlerted } from "../alerts";
 import { getSettings } from "../settings";
 import type { ItemRecord, PriceSnapshot, PriceSummary } from "../types";
 import { primeProviders, priceItem } from "./index";
@@ -25,16 +25,19 @@ function hasPrice(summary: PriceSummary): boolean {
 export async function refreshItem(
   item: ItemRecord,
   fetchImpl?: typeof fetch,
+  signal?: AbortSignal,
 ): Promise<{ item: ItemRecord; snapshot: PriceSnapshot; stored: boolean; skipped?: boolean }> {
   if (archiveGate.busy) throw new BusyError("A backup or restore is in progress.");
   refreshState.__skinsActivePrices = (refreshState.__skinsActivePrices ?? 0) + 1;
   try {
     const settings = getSettings();
     const previous = listSnapshots(item.id, 1)[0]?.summary ?? null;
-    const summary = await priceItem(item, fetchImpl);
+    const summary = await priceItem(item, settings, fetchImpl, signal);
     const current = getItem(item.id);
     if (!current || current.quantity <= 0) return { item, snapshot: { id: 0, itemId: item.id, fetchedAt: summary.fetchedAt, summary }, stored: false, skipped: true };
-    const failed = !hasPrice(summary) && latestSnapshot(item.id) !== null;
+    // A lookup abandoned because the pass was told to stop is not an answer
+    // about the item, so it is never written down, not even as a first one.
+    const failed = !hasPrice(summary) && (latestSnapshot(item.id) !== null || signal?.aborted === true);
     const snapshot: PriceSnapshot = failed
       ? { id: 0, itemId: item.id, fetchedAt: summary.fetchedAt, summary }
       : addSnapshot(item.id, summary);
@@ -56,6 +59,8 @@ export interface RefreshResult {
   failed: Array<{ itemId: number; message: string }>;
   /** Catalogues that would not load, so those sources had nothing to say. */
   providerErrors: Array<{ source: string; message: string }>;
+  /** The pass was told to stop before it reached every item; the rest are counted as skipped. */
+  cancelled?: boolean;
 }
 
 /** When each item was last attempted, so an item nothing prices is retried on the normal cadence rather than every tick. */
@@ -78,8 +83,28 @@ export function resetRefreshThrottle(): void {
  * answer it would produce is the one already under way. Kept on globalThis so
  * a reloaded module in development still sees the pass that is running.
  */
-const globalForRefresh = globalThis as unknown as { __skinsRefreshGate?: ReturnType<typeof createGate> };
+const globalForRefresh = globalThis as unknown as { __skinsRefreshGate?: ReturnType<typeof createGate>; __skinsRefreshAbort?: AbortController };
 const gate = (globalForRefresh.__skinsRefreshGate ??= createGate("A price refresh is already running; wait for it to finish."));
+
+/**
+ * Tell the whole-inventory pass that is running to stop. It abandons the
+ * request it is waiting on and returns with `cancelled` set; nothing it
+ * stored is undone. A restore asks for this rather than being refused for
+ * as long as four hundred items take.
+ */
+export function cancelRefresh(): void {
+  globalForRefresh.__skinsRefreshAbort?.abort();
+}
+
+/** Wait for the whole-inventory pass to end, up to `withinMs`; true when it has. */
+export async function refreshStopped(withinMs: number): Promise<boolean> {
+  const deadline = Date.now() + withinMs;
+  while (gate.busy) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return true;
+}
 
 /**
  * Whether a whole-inventory refresh is running right now. Single-item lookups
@@ -124,13 +149,20 @@ export async function lookupsSettled(withinMs: number): Promise<boolean> {
  * is rate limited across the whole process, so extra concurrency buys nothing
  * and only makes it harder to say what is happening.
  */
-export function refreshAll(opts: { staleHours?: number; fetchImpl?: typeof fetch } & JobRefreshOptions = {}): Promise<RefreshResult> {
+export function refreshAll(opts: { staleHours?: number; fetchImpl?: typeof fetch; signal?: AbortSignal } & JobRefreshOptions = {}): Promise<RefreshResult> {
   if (archiveGate.busy) return Promise.reject(new BusyError("A backup or restore is in progress."));
-  return gate.run(() => refreshEverything(opts));
+  return gate.run(() => {
+    const controller = new AbortController();
+    globalForRefresh.__skinsRefreshAbort = controller;
+    const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;
+    return refreshEverything({ ...opts, signal }).finally(() => {
+      if (globalForRefresh.__skinsRefreshAbort === controller) globalForRefresh.__skinsRefreshAbort = undefined;
+    });
+  });
 }
 
-async function refreshEverything(opts: { staleHours?: number; fetchImpl?: typeof fetch } & JobRefreshOptions): Promise<RefreshResult> {
-  const { staleHours, fetchImpl } = opts;
+async function refreshEverything(opts: { staleHours?: number; fetchImpl?: typeof fetch; signal?: AbortSignal } & JobRefreshOptions): Promise<RefreshResult> {
+  const { staleHours, fetchImpl, signal } = opts;
   const all = listItems();
   const latest = latestSnapshotsByItem();
   const cutoff = staleHours === undefined ? null : Date.now() - staleHours * 3600e3;
@@ -147,15 +179,27 @@ async function refreshEverything(opts: { staleHours?: number; fetchImpl?: typeof
     unpriced: 0,
     skipped: all.length - queue.length,
     failed: [],
-    providerErrors: await primeProviders(fetchImpl),
+    providerErrors: await primeProviders(fetchImpl, signal),
   };
 
-  for (const queued of queue) {
+  for (const [index, queued] of queue.entries()) {
+    if (signal?.aborted) {
+      // Told to stop: what is left is not failed, it was never asked about.
+      result.cancelled = true;
+      result.skipped += queue.length - index;
+      break;
+    }
     lastAttempt.set(queued.id, Date.now());
     try {
       const fresh = getItem(queued.id);
       if (!fresh || fresh.quantity <= 0) { result.skipped++; opts.onProgress?.({ id: queued.id, status: "skipped", message: "Item was removed or sold out." }); continue; }
-      const outcome = await refreshItem(fresh, fetchImpl);
+      const outcome = await refreshItem(fresh, fetchImpl, signal);
+      if (signal?.aborted && !outcome.stored) {
+        // The request it was waiting on was abandoned; this item was not priced.
+        result.cancelled = true;
+        result.skipped += queue.length - index;
+        break;
+      }
       if (outcome.skipped) { result.skipped++; opts.onProgress?.({ id: queued.id, status: "skipped", message: "Item was removed or sold out during refresh." }); continue; }
       const priced = hasPrice(outcome.snapshot.summary);
       if (outcome.stored) result.refreshed++;
@@ -171,7 +215,10 @@ async function refreshEverything(opts: { staleHours?: number; fetchImpl?: typeof
 
   // A lock ending changes nothing about an item, so nothing else would notice.
   const settings = getSettings();
-  for (const alert of alertsForTradeLocks(listItems())) void deliver(createAlert(alert), settings);
+  for (const alert of alertsForTradeLocks(listItems())) {
+    void deliver(createAlert(alert), settings);
+    markLockAlerted(alert.itemId, alert.tradableAfter);
+  }
 
   return result;
 }

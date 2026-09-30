@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDatabase, setDb } from "@/lib/db";
 import { getItem, latestSnapshot, listSnapshots, updateItem } from "@/lib/items";
 import { fetchQuotes, netProceeds, primeProviders, proceedsByMarket, summarize } from "@/lib/pricing/index";
-import { refreshAll, refreshItem, resetRefreshThrottle } from "@/lib/pricing/refresh";
+import { cancelRefresh, refreshAll, refreshItem, refreshRunning, resetRefreshThrottle } from "@/lib/pricing/refresh";
 import { resetCatalogue, skinport } from "@/lib/pricing/providers/skinport";
 import { parseSteamPrice, parseVolume, setRateLimit as setSteamLimit, steam } from "@/lib/pricing/providers/steam";
 import { csfloat, setRateLimit as setCsFloatLimit } from "@/lib/pricing/providers/csfloat";
-import { NO_LIMIT } from "@collectcollect/core/limiter";
-import { listAlerts } from "@/lib/alerts";
+import { NO_LIMIT, rateLimit } from "@collectcollect/core/limiter";
+import { dismissAlert, listAlerts } from "@/lib/alerts";
+import { addSnapshot } from "@/lib/items";
 import { saveSettings } from "@/lib/settings";
 import { DEFAULT_SETTINGS, type PriceQuote } from "@/lib/types";
 import { seedCase, seedRedline } from "./helpers";
@@ -178,28 +179,43 @@ describe("folding the answers together", () => {
     { source: "steam", sourceLabel: "Steam", currency: "USD", url: null, matchedName: REDLINE, price: 12.34, volume: 1, fetchedAt: "x" },
   ];
 
-  it("takes the highest, and says which market it was", () => {
-    const summary = summarize({ manualPrice: null, stattrak: false, souvenir: false }, quotes, []);
+  it("records the highest listing, and values the copy at what the best cash market pays after its cut", () => {
+    const summary = summarize({ manualPrice: null }, quotes, [], DEFAULT_SETTINGS);
+    // Steam's is the highest number and still not the value: it is wallet funds.
     expect(summary.market).toBe(12.34);
     expect(summary.marketSource).toBe("Steam");
-    expect(summary.yourCopyValue).toBe(12.34);
+    // 11.50 on Skinport less its 12%.
+    expect(summary.yourCopyValue).toBe(10.12);
+    expect(summary.yourCopyBasis).toBe("Skinport listing, after its 12% cut");
+    expect(summary.valueBasis).toBe("cash");
+  });
+
+  it("lets Steam's wallet figure stand in only when nothing pays in money, and says so", () => {
+    const steamOnly = quotes.filter((q) => q.source === "steam");
+    const summary = summarize({ manualPrice: null }, steamOnly, [], DEFAULT_SETTINGS);
+    // 12.34 ÷ 1.15, what a seller nets in wallet funds.
+    expect(summary.yourCopyValue).toBe(10.73);
+    expect(summary.yourCopyBasis).toMatch(/wallet funds that cannot be withdrawn/);
+    expect(summary.valueBasis).toBe("wallet");
   });
 
   it("lets a price typed in by hand beat every market", () => {
-    const summary = summarize({ manualPrice: 40, stattrak: false, souvenir: false }, quotes, []);
+    const summary = summarize({ manualPrice: 40 }, quotes, [], DEFAULT_SETTINGS);
     expect(summary.yourCopyValue).toBe(40);
     expect(summary.yourCopyBasis).toBe("Your own price");
+    expect(summary.valueBasis).toBe("manual");
     // The market prices are still recorded; they are just not the answer.
     expect(summary.market).toBe(12.34);
     expect(summary.quotes[0]?.source).toBe("manual");
   });
 
   it("says nothing was found rather than guessing a number", () => {
-    const quiet = summarize({ manualPrice: null, stattrak: false, souvenir: false }, [], []);
+    const quiet = summarize({ manualPrice: null }, [], [], DEFAULT_SETTINGS);
     expect(quiet.yourCopyValue).toBeNull();
     expect(quiet.yourCopyBasis).toMatch(/No source is listing/);
+    expect(quiet.valueBasis).toBeUndefined();
 
-    const broken = summarize({ manualPrice: null, stattrak: false, souvenir: false }, [], [{ source: "Skinport", message: "down" }]);
+    const broken = summarize({ manualPrice: null }, [], [{ source: "Skinport", message: "down" }], DEFAULT_SETTINGS);
     // A market with nobody selling and a market that is down are different
     // things, and the basis has to keep them apart.
     expect(broken.yourCopyBasis).toMatch(/every source failed/);
@@ -256,19 +272,21 @@ describe("refreshing", () => {
     ]);
     const outcome = await refreshItem(item, fetchImpl);
     expect(outcome.stored).toBe(true);
-    expect(latestSnapshot(item.id)!.summary.yourCopyValue).toBe(12.34);
+    // Skinport's 11.50 after its cut, not Steam's higher wallet figure.
+    expect(latestSnapshot(item.id)!.summary.yourCopyValue).toBe(10.12);
+    expect(latestSnapshot(item.id)!.summary.market).toBe(12.34);
   });
 
   it("does not write a failure over an item's last known value", async () => {
     const item = seedRedline();
     await refreshItem(item, routes([["api.skinport.com", SKINPORT_CATALOGUE]]));
-    expect(latestSnapshot(item.id)!.summary.yourCopyValue).toBe(11.5);
+    expect(latestSnapshot(item.id)!.summary.yourCopyValue).toBe(10.12);
 
     resetCatalogue();
     const outcome = await refreshItem(item, routes([["api.skinport.com", {}, 503]]));
     expect(outcome.stored).toBe(false);
     // A market down for an afternoon must not erase the history.
-    expect(latestSnapshot(item.id)!.summary.yourCopyValue).toBe(11.5);
+    expect(latestSnapshot(item.id)!.summary.yourCopyValue).toBe(10.12);
     expect(listSnapshots(item.id)).toHaveLength(1);
   });
 
@@ -332,8 +350,24 @@ describe("alerts", () => {
 
     const [alert] = listAlerts().filter((a) => a.kind === "price_move");
     expect(alert?.title).toMatch(/is up 74%/);
-    expect(alert?.body).toContain("$11.50");
-    expect(alert?.body).toContain("$20.00");
+    // What the owner would be paid, after Skinport's cut, on both sides.
+    expect(alert?.body).toContain("$10.12");
+    expect(alert?.body).toContain("$17.60");
+  });
+
+  it("does not call a change in what the value means a move", async () => {
+    saveSettings({ ...DEFAULT_SETTINGS, alertMovePercent: 15 });
+    const item = seedRedline();
+    // A snapshot from before values were what a cash market pays: the highest
+    // listing before fees, with no basis recorded.
+    addSnapshot(item.id, { currency: "USD", fetchedAt: "2026-01-01T00:00:00.000Z", market: 100, marketSource: "Steam", yourCopyValue: 100, yourCopyBasis: "Steam listing", quotes: [], errors: [] });
+    await refreshItem(getItem(item.id)!, routes([["api.skinport.com", [{ ...SKINPORT_CATALOGUE[0], min_price: 20 }]]]));
+    // 100 to 17.60 is not a fall of 82%; it is a different number about the same item.
+    expect(listAlerts().filter((a) => a.kind === "price_move")).toEqual([]);
+    // From then on, like against like.
+    resetCatalogue();
+    await refreshItem(getItem(item.id)!, routes([["api.skinport.com", [{ ...SKINPORT_CATALOGUE[0], min_price: 40 }]]]));
+    expect(listAlerts().filter((a) => a.kind === "price_move").map((a) => a.title)).toEqual([`${REDLINE} is up 100%`]);
   });
 
   it("stays quiet about a move too small to act on", async () => {
@@ -397,6 +431,95 @@ describe("alerts", () => {
     await refreshAll({ fetchImpl: routes([["api.skinport.com", SKINPORT_CATALOGUE]]) });
     expect(listAlerts().filter((a) => a.kind === "trade_lock_lifted")).toEqual([]);
   });
+
+  it("does not repeat a lock's ending once its alert is dismissed, and does announce a later lock", async () => {
+    const item = seedRedline({ tradableAfter: new Date(Date.now() - 2 * 864e5).toISOString() });
+    const refresh = async () => { resetCatalogue(); resetRefreshThrottle(); await refreshAll({ fetchImpl: routes([["api.skinport.com", SKINPORT_CATALOGUE]]) }); };
+    await refresh();
+    const [first] = listAlerts().filter((a) => a.kind === "trade_lock_lifted");
+    expect(first).toBeDefined();
+    dismissAlert(first!.id);
+    await refresh();
+    expect(listAlerts().filter((a) => a.kind === "trade_lock_lifted")).toEqual([]);
+    // Traded, locked again, and that lock has now ended too: worth saying once more.
+    updateItem(item.id, { tradableAfter: new Date(Date.now() - 864e5).toISOString() });
+    await refresh();
+    expect(listAlerts().filter((a) => a.kind === "trade_lock_lifted")).toHaveLength(1);
+    await refresh();
+    expect(listAlerts().filter((a) => a.kind === "trade_lock_lifted")).toHaveLength(1);
+  });
+});
+
+describe("a market that will not answer", () => {
+  /** A clock the test drives, as in the limiter's own tests. */
+  function fakeClock() {
+    let now = 0;
+    const sleeps: number[] = [];
+    return { now: () => now, sleep: async (ms: number) => { sleeps.push(ms); now += ms; }, sleeps };
+  }
+
+  it("waits out what Steam asks for after a refusal, on every lookup behind it", async () => {
+    const clock = fakeClock();
+    setSteamLimit(rateLimit(18, 60_000, clock));
+    const refused = vi.fn(async () => new Response("{}", { status: 429, headers: { "Retry-After": "30" } })) as unknown as typeof fetch;
+    await expect(steam.lookup({ marketHashName: REDLINE }, refused)).rejects.toThrow(/waits 30 seconds/);
+    await steam.lookup({ marketHashName: REDLINE }, routes([["priceoverview", STEAM_OK]]));
+    expect(clock.sleeps).toEqual([30_000]);
+    // Without any advice, a minute.
+    const silent = vi.fn(async () => new Response("{}", { status: 429 })) as unknown as typeof fetch;
+    await expect(steam.lookup({ marketHashName: REDLINE }, silent)).rejects.toThrow(/waits 60 seconds/);
+  });
+
+  it("gives up on a market that never answers, and says which one", async () => {
+    const never = ((_url: unknown, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)))) as unknown as typeof fetch;
+    const { quotes, errors } = await fetchQuotes({ marketHashName: REDLINE }, never, { timeoutMs: 30 });
+    expect(quotes).toEqual([]);
+    expect(errors.map((e) => e.message).sort()).toEqual(["Skinport did not answer within 0 seconds.", "Steam Community Market did not answer within 0 seconds."]);
+  });
+
+  it("can be told to stop a whole-inventory pass, and says what it left", async () => {
+    seedRedline();
+    seedCase();
+    seedCase({ marketHashName: "Chroma Case" });
+    const hanging = ((_url: unknown, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)))) as unknown as typeof fetch;
+    const pass = refreshAll({ fetchImpl: hanging });
+    expect(refreshRunning()).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    cancelRefresh();
+    const result = await pass;
+    expect(result.cancelled).toBe(true);
+    expect(result.refreshed).toBe(0);
+    expect(result.failed).toEqual([]);
+    expect(result.skipped).toBe(3);
+    expect(refreshRunning()).toBe(false);
+  });
+
+  it("never writes an abandoned lookup down as an item's answer, not even its first", async () => {
+    const first = seedRedline();
+    const second = seedCase();
+    // Skinport answers, with a catalogue listing neither; Steam never does.
+    const fetchImpl = ((url: string, init?: RequestInit) =>
+      url.includes("api.skinport.com")
+        ? Promise.resolve(new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } }))
+        : new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)))) as unknown as typeof fetch;
+    const pass = refreshAll({ fetchImpl });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    cancelRefresh();
+    const result = await pass;
+    expect(result).toMatchObject({ cancelled: true, refreshed: 0, unpriced: 0, skipped: 2, failed: [] });
+    // Nothing was written, so the next pass asks about both as if for the first time.
+    expect(listSnapshots(first.id)).toEqual([]);
+    expect(listSnapshots(second.id)).toEqual([]);
+
+    // The same for a single lookup that its caller gives up on.
+    const controller = new AbortController();
+    const single = refreshItem(first, fetchImpl, controller.signal);
+    setTimeout(() => controller.abort(), 10);
+    expect((await single).stored).toBe(false);
+    expect(listSnapshots(first.id)).toEqual([]);
+  });
 });
 
 describe("a price of your own", () => {
@@ -411,6 +534,6 @@ describe("a price of your own", () => {
     const item = seedRedline({ manualPrice: 40 });
     updateItem(item.id, { manualPrice: null });
     await refreshItem(getItem(item.id)!, routes([["api.skinport.com", SKINPORT_CATALOGUE]]));
-    expect(latestSnapshot(item.id)!.summary.yourCopyValue).toBe(11.5);
+    expect(latestSnapshot(item.id)!.summary.yourCopyValue).toBe(10.12);
   });
 });

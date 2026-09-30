@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS items (
   notes TEXT,
   external_ids TEXT NOT NULL DEFAULT '{}',
   manual_price REAL,
+  lock_alerted_for TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -110,7 +111,10 @@ CREATE TABLE IF NOT EXISTS settings (
 `;
 
 /** Columns added after the first release; applied when missing so older databases keep working. */
-const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [];
+const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
+  // Which trade lock's ending was announced, so the alert fires once per lock.
+  { table: "items", column: "lock_alerted_for", ddl: "ALTER TABLE items ADD COLUMN lock_alerted_for TEXT" },
+];
 
 export const SCHEMA_VERSION = 1;
 

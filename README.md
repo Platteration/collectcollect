@@ -360,6 +360,12 @@ than one copy: nine cents each across thirty-five cases is three dollars, and
 it is one listing either way. The percentage stays per copy, where it means
 something.
 
+An item's value is what the best market that pays out in money would hand you
+after its cut, and the inventory total is the sum of those. When only Steam
+lists an item, its wallet figure stands in, labelled as wallet funds and never
+compared with money. The highest listing anywhere is still recorded beside it,
+and each market's proceeds after fees are on the item's page.
+
 **Prices** come from Skinport and Steam, with CSFloat if you give it a key —
 and from you, if you type one in, which overrides all of them on that item. The
 two shapes are quite different, which the code is built around: Skinport
@@ -400,9 +406,9 @@ nothing.
 
 **Backup and restore** work as in the card app, minus the photos: one zip of
 the database and its plain-text copy, a restore that moves what it replaces
-into a dated folder, and a list of those folders in Settings from which any
-can be put back. An archive from the card app is refused by name rather than
-unpacked into the wrong place. The same waits apply — a restore is refused
-during a whole-inventory refresh and waits up to ten seconds for a single-item
-lookup — and an interrupted restore's rollback records, rather than refuses
-over, two copies of a folder.
+into a dated folder, and a list of those folders in Settings from which any can
+be put back. An archive from the card app is refused by name rather than
+unpacked into the wrong place. The same waits apply — a restore tells a running
+whole-inventory refresh to stop and gives it ten seconds, and waits up to ten
+seconds for a single-item lookup — and an interrupted restore's rollback
+records, rather than refuses over, two copies of a folder.

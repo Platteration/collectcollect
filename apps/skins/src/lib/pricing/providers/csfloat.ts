@@ -40,15 +40,16 @@ export const csfloat: PriceProvider = {
 
   isConfigured: () => Boolean(process.env.CSFLOAT_API_KEY),
 
-  async lookup(query: ItemQuery, fetchImpl: typeof fetch = fetch): Promise<PriceQuote[]> {
+  async lookup(query: ItemQuery, fetchImpl: typeof fetch = fetch, signal?: AbortSignal): Promise<PriceQuote[]> {
     const key = process.env.CSFLOAT_API_KEY;
     if (!key) return [];
-    await limiter.take();
+    await limiter.take(signal);
+    if (signal?.aborted) throw new ProviderError("csfloat", "Gave up waiting for a turn to ask CSFloat.");
 
     const url = `${ENDPOINT}?market_hash_name=${encodeURIComponent(query.marketHashName)}&sort_by=lowest_price&limit=1`;
     let response: Response;
     try {
-      response = await fetchImpl(url, { headers: { Accept: "application/json", Authorization: key } });
+      response = await fetchImpl(url, { headers: { Accept: "application/json", Authorization: key }, signal });
     } catch (e) {
       throw new ProviderError("csfloat", `Could not reach CSFloat: ${e instanceof Error ? e.message : String(e)}`);
     }

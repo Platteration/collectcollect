@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, lockDatabase, openDatabase, setDb, unlockDatabase } from "@/lib/db";
 import { createItem, listItems } from "@/lib/items";
 import { LOOKUP_WAIT_MS, archiveGate, buildBackup, putBack, replacedCollections, restoreBackup, restoreThrottle } from "@/lib/backup";
-import { activeLookups, refreshItem, refreshRunning } from "@/lib/pricing/refresh";
+import { activeLookups, refreshAll, refreshItem, refreshRunning } from "@/lib/pricing/refresh";
 import * as pricing from "@/lib/pricing";
 import type { PriceSummary } from "@/lib/types";
 import Database from "better-sqlite3";
@@ -182,6 +182,20 @@ describe("restore", () => {
     }
     release(summary);
     await stuck;
+    expect(activeLookups()).toBe(0);
+  });
+
+  it("tells a running whole-inventory refresh to stop rather than refusing", async () => {
+    inventory();
+    const archive = await archiveOf();
+    const hanging = ((_url: unknown, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)))) as unknown as typeof fetch;
+    const pass = refreshAll({ fetchImpl: hanging });
+    expect(refreshRunning()).toBe(true);
+    // Four hundred items would take minutes; a restore used to be refused for all of them.
+    expect((await restoreBackup(archive)).items).toBe(1);
+    expect((await pass).cancelled).toBe(true);
+    expect(refreshRunning()).toBe(false);
     expect(activeLookups()).toBe(0);
   });
 

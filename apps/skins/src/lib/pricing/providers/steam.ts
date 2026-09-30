@@ -1,5 +1,5 @@
 import type { PriceQuote } from "../../types";
-import { rateLimit, type RateLimit } from "@collectcollect/core/limiter";
+import { rateLimit, retryAfterMs, type RateLimit } from "@collectcollect/core/limiter";
 import { ProviderError, type ItemQuery, type PriceProvider } from "../types";
 
 /**
@@ -70,17 +70,23 @@ export const steam: PriceProvider = {
 
   isConfigured: () => true,
 
-  async lookup(query: ItemQuery, fetchImpl: typeof fetch = fetch): Promise<PriceQuote[]> {
-    await limiter.take();
+  async lookup(query: ItemQuery, fetchImpl: typeof fetch = fetch, signal?: AbortSignal): Promise<PriceQuote[]> {
+    await limiter.take(signal);
+    if (signal?.aborted) throw new ProviderError("steam", "Gave up waiting for a turn to ask Steam.");
     const url = `${ENDPOINT}?appid=730&currency=${USD}&market_hash_name=${encodeURIComponent(query.marketHashName)}`;
     let response: Response;
     try {
-      response = await fetchImpl(url, { headers: { Accept: "application/json" } });
+      response = await fetchImpl(url, { headers: { Accept: "application/json" }, signal });
     } catch (e) {
       throw new ProviderError("steam", `Could not reach Steam: ${e instanceof Error ? e.message : String(e)}`);
     }
     if (response.status === 429) {
-      throw new ProviderError("steam", "Steam is rate limiting this address. It allows about twenty requests a minute.");
+      // A refusal for one item is a refusal for every item behind it in the
+      // queue, so the whole queue waits what Steam asks (a minute when it
+      // does not say) rather than collecting one refusal per item.
+      const wait = retryAfterMs(response.headers.get("retry-after"));
+      limiter.cooldown(wait);
+      throw new ProviderError("steam", `Steam allows about twenty requests a minute and is refusing this address; every Steam lookup waits ${Math.ceil(wait / 1000)} seconds before asking again.`);
     }
     if (!response.ok) throw new ProviderError("steam", `Steam answered ${response.status}.`);
 

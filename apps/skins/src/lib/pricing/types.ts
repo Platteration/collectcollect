@@ -26,9 +26,10 @@ export interface PriceProvider {
    * Optional, and always safe to skip: a provider whose priming failed falls
    * back to whatever `lookup` can do alone, or reports the failure per item.
    */
-  prime?(fetchImpl?: typeof fetch): Promise<void>;
+  prime?(fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<void>;
 
-  lookup(query: ItemQuery, fetchImpl?: typeof fetch): Promise<PriceQuote[]>;
+  /** The signal is a deadline or a cancellation: a hung connection or a queued wait ends with it. */
+  lookup(query: ItemQuery, fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<PriceQuote[]>;
 }
 
 export class ProviderError extends Error {

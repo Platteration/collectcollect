@@ -7,6 +7,25 @@ import type { ItemQuery, PriceProvider } from "./types";
 
 export const PROVIDERS: PriceProvider[] = [skinport, steam, csfloat];
 
+/** How long one market gets to answer about one item before it is given up on. */
+export const PROVIDER_TIMEOUT_MS = 20_000;
+
+/**
+ * A deadline for one lookup, and the caller's own signal if it has one: a
+ * market that never answers used to hold the whole refresh, and a restore
+ * asking the refresh to stop had no way to reach a request already out.
+ */
+function deadline(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+function describeFailure(e: unknown, label: string, gaveUp: AbortSignal, cancelled: AbortSignal | undefined, timeoutMs: number): string {
+  if (cancelled?.aborted) return "Cancelled before it answered.";
+  if (gaveUp.aborted) return `${label} did not answer within ${Math.round(timeoutMs / 1000)} seconds.`;
+  return e instanceof Error ? e.message : String(e);
+}
+
 /** Money, to the cent. */
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -23,16 +42,19 @@ function round2(n: number): number {
 export async function fetchQuotes(
   query: ItemQuery,
   fetchImpl?: typeof fetch,
+  opts: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<{ quotes: PriceQuote[]; errors: Array<{ source: string; message: string }> }> {
   const quotes: PriceQuote[] = [];
   const errors: Array<{ source: string; message: string }> = [];
+  const timeoutMs = opts.timeoutMs ?? PROVIDER_TIMEOUT_MS;
   const results = await Promise.all(
     PROVIDERS.filter((p) => p.isConfigured()).map(
       async (provider): Promise<{ provider: PriceProvider; quotes: PriceQuote[]; error?: undefined } | { provider: PriceProvider; error: string; quotes?: undefined }> => {
+        const gaveUp = deadline(opts.signal, timeoutMs);
         try {
-          return { provider, quotes: await provider.lookup(query, fetchImpl) };
+          return { provider, quotes: await provider.lookup(query, fetchImpl, gaveUp) };
         } catch (e) {
-          return { provider, error: e instanceof Error ? e.message : String(e) };
+          return { provider, error: describeFailure(e, provider.label, gaveUp, opts.signal, timeoutMs) };
         }
       },
     ),
@@ -51,14 +73,15 @@ export async function fetchQuotes(
  * would not load simply has nothing to say this time round, and the rest of the
  * refresh proceeds.
  */
-export async function primeProviders(fetchImpl?: typeof fetch): Promise<Array<{ source: string; message: string }>> {
+export async function primeProviders(fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<Array<{ source: string; message: string }>> {
   const errors: Array<{ source: string; message: string }> = [];
   await Promise.all(
     PROVIDERS.filter((p) => p.isConfigured() && p.prime).map(async (provider) => {
+      const gaveUp = deadline(signal, PROVIDER_TIMEOUT_MS);
       try {
-        await provider.prime!(fetchImpl);
+        await provider.prime!(fetchImpl, gaveUp);
       } catch (e) {
-        errors.push({ source: provider.label, message: e instanceof Error ? e.message : String(e) });
+        errors.push({ source: provider.label, message: describeFailure(e, provider.label, gaveUp, signal, PROVIDER_TIMEOUT_MS) });
       }
     }),
   );
@@ -137,16 +160,22 @@ function manualQuote(item: Pick<ItemRecord, "manualPrice">, fetchedAt: string): 
 /**
  * Fold what every source said into the one view the app records and shows.
  *
- * The headline is the highest price any market is showing, because that is the
- * one an owner could realise; which market it was is recorded alongside, since
- * the number means nothing without it. A price typed in by hand beats all of
- * them: it is the owner saying they know better, and overriding that quietly
- * would be worse than useless.
+ * The highest price any market is showing is recorded, with which market it
+ * was, since the number means nothing without it. But it is not what the copy
+ * is valued at: Steam usually shows the highest number in CS2 and pays in
+ * wallet funds that cannot be withdrawn, so a portfolio summed from it was a
+ * figure nobody could be paid. The value is what the best market that pays
+ * out in money would hand over after its cut. Only when no cash market lists
+ * the item does Steam's wallet net stand in, and then the basis says so —
+ * a labelled last resort, not a comparison. A price typed in by hand beats
+ * all of them: it is the owner saying they know better, and overriding that
+ * quietly would be worse than useless.
  */
 export function summarize(
-  item: Pick<ItemRecord, "manualPrice" | "stattrak" | "souvenir">,
+  item: Pick<ItemRecord, "manualPrice">,
   quotes: PriceQuote[],
   errors: Array<{ source: string; message: string }>,
+  settings: Settings,
   fetchedAt = new Date().toISOString(),
 ): PriceSummary {
   const manual = manualQuote(item, fetchedAt);
@@ -162,14 +191,23 @@ export function summarize(
     }
   }
 
+  const { cash, wallet } = proceedsByMarket(quotes, settings);
+  const cut = (market: Market["id"]) => `${Math.round((settings.marketFees[market] ?? 0) * 100)}%`;
   let yourCopyValue: number | null = null;
   let yourCopyBasis: string;
+  let valueBasis: PriceSummary["valueBasis"];
   if (manual) {
     yourCopyValue = round2(manual.price!);
     yourCopyBasis = "Your own price";
-  } else if (market !== null) {
-    yourCopyValue = market;
-    yourCopyBasis = `${marketSource} listing`;
+    valueBasis = "manual";
+  } else if (cash[0]) {
+    yourCopyValue = cash[0].net;
+    yourCopyBasis = `${cash[0].label} listing, after its ${cut(cash[0].market)} cut`;
+    valueBasis = "cash";
+  } else if (wallet[0]) {
+    yourCopyValue = wallet[0].net;
+    yourCopyBasis = `${wallet[0].label} only, after its cut: wallet funds that cannot be withdrawn`;
+    valueBasis = "wallet";
   } else {
     // Nothing found is a real answer and says so. Estimating from a
     // neighbouring wear tier or from the plain variant of a StatTrak skin would
@@ -184,6 +222,7 @@ export function summarize(
     marketSource,
     yourCopyValue,
     yourCopyBasis,
+    ...(valueBasis ? { valueBasis } : {}),
     quotes: all,
     errors,
   };
@@ -194,7 +233,7 @@ export function itemToQuery(item: Pick<ItemRecord, "marketHashName" | "externalI
 }
 
 /** Price one item: ask the sources, then fold the answers together. */
-export async function priceItem(item: ItemRecord, fetchImpl?: typeof fetch): Promise<PriceSummary> {
-  const { quotes, errors } = await fetchQuotes(itemToQuery(item), fetchImpl);
-  return summarize(item, quotes, errors);
+export async function priceItem(item: ItemRecord, settings: Settings, fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<PriceSummary> {
+  const { quotes, errors } = await fetchQuotes(itemToQuery(item), fetchImpl, { signal });
+  return summarize(item, quotes, errors, settings);
 }

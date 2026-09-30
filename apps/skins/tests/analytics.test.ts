@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { openDatabase, setDb } from "@/lib/db";
 import { addSnapshot, allSnapshots, costBasisByItem, latestSnapshotsByItem, listItems } from "@/lib/items";
 import { allocationBy, change, portfolioSeries, realizedReturn, sliceRange, totalReturn } from "@/lib/analytics";
-import { valueOf } from "@/lib/valuation";
+import { valuedTheOldWay, valueOf } from "@/lib/valuation";
 import type { ItemRecord, PriceSummary } from "@/lib/types";
 import { seedCase, seedRedline } from "./helpers";
 import { extent, thinPoints } from "@collectcollect/core/series";
@@ -205,5 +205,21 @@ describe("a long history", () => {
     expect(thin[0]).toEqual({ t: 0 });
     expect(thin[thin.length - 1]).toEqual({ t: 10_000 });
     expect(thinPoints(points.slice(0, 5), 2000)).toHaveLength(5);
+  });
+});
+
+describe("values from before a value was what a market pays", () => {
+  it("are counted while they last, so the total's step down is explained", () => {
+    const rifle = seedRedline();
+    const cases = seedCase();
+    // No basis recorded: the highest listing before fees, as older versions stored it.
+    addSnapshot(rifle.id, priced("2026-01-01T00:00:00.000Z", 40));
+    addSnapshot(cases.id, { ...priced("2026-01-01T00:00:00.000Z", 2), valueBasis: "cash" });
+    const latest = latestSnapshotsByItem();
+    expect(valuedTheOldWay(rifle, latest.get(rifle.id))).toBe(true);
+    expect(valuedTheOldWay(cases, latest.get(cases.id))).toBe(false);
+    // Neither an owner's own price nor an unpriced item is a stale valuation.
+    expect(valuedTheOldWay({ ...rifle, manualPrice: 50 }, latest.get(rifle.id))).toBe(false);
+    expect(valuedTheOldWay(seedCase({ marketHashName: "Chroma Case" }), undefined)).toBe(false);
   });
 });

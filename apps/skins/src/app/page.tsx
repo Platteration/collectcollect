@@ -5,7 +5,7 @@ import { thinPoints } from "@collectcollect/core/series";
 import { allSnapshots, costBasisByItem, isTradeLocked, latestSnapshotsByItem, listItems } from "@/lib/items";
 import { allocationBy, portfolioSeries, realizedReturn, totalReturn } from "@/lib/analytics";
 import { listSales } from "@/lib/sales";
-import { valueOf } from "@/lib/valuation";
+import { valuedTheOldWay, valueOf } from "@/lib/valuation";
 import { CATEGORIES, EXTERIORS } from "@/lib/types";
 import { Portfolio, type Holding } from "@/components/Portfolio";
 
@@ -65,6 +65,7 @@ export default function HomePage() {
       copyCount={items.reduce((n, i) => n + i.quantity, 0)}
       pricedCount={items.filter((i) => priceOf(i) !== null).length}
       lockedCount={items.filter((i) => isTradeLocked(i)).length}
+      oldWayCount={items.filter((i) => valuedTheOldWay(i, latest.get(i.id))).length}
       lastRefreshed={lastRefreshed}
       holdings={holdings}
       returns={returns}

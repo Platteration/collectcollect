@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NO_LIMIT, rateLimit } from "@collectcollect/core/limiter";
+import { NO_LIMIT, rateLimit, retryAfterMs } from "@collectcollect/core/limiter";
 
 /**
  * A clock the test drives, so a limit measured in minutes can be checked in
@@ -85,5 +85,42 @@ describe("a rate limit", () => {
   it("has a version that never waits", async () => {
     for (let i = 0; i < 100; i++) await NO_LIMIT.take();
     expect(NO_LIMIT.waiting).toBe(0);
+  });
+});
+
+describe("what a market asked for", () => {
+  it("holds every caller back for as long as the market said", async () => {
+    const clock = fakeClock();
+    const limit = rateLimit(3, 1000, clock);
+    limit.cooldown(5000);
+    await limit.take();
+    expect(clock.sleeps).toEqual([5000]);
+    // A shorter ask never brings the pause forward.
+    limit.cooldown(2000);
+    limit.cooldown(500);
+    await limit.take();
+    expect(clock.sleeps).toEqual([5000, 2000]);
+  });
+
+  it("lets a waiting caller give up when its signal is aborted, at once", async () => {
+    const limit = rateLimit(1, 60_000);
+    await limit.take();
+    const controller = new AbortController();
+    const started = Date.now();
+    const waiting = limit.take(controller.signal);
+    setTimeout(() => controller.abort(), 10);
+    await waiting;
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(limit.waiting).toBe(0);
+  });
+
+  it("reads a Retry-After in seconds or as a date, and falls back when it says neither", () => {
+    expect(retryAfterMs("30")).toBe(30_000);
+    expect(retryAfterMs(" 0 ")).toBe(0);
+    const now = Date.parse("2026-06-01T12:00:00Z");
+    expect(retryAfterMs("Mon, 01 Jun 2026 12:00:45 GMT", now)).toBe(45_000);
+    expect(retryAfterMs("Mon, 01 Jun 2026 11:00:00 GMT", now)).toBe(0);
+    expect(retryAfterMs(null)).toBe(60_000);
+    expect(retryAfterMs("soon", now, 1234)).toBe(1234);
   });
 });

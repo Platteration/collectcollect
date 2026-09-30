@@ -18,7 +18,7 @@ import { stagedArchive } from "@collectcollect/core/staged-archive";
 import { prepareDatabase } from "@collectcollect/core/restore-validation";
 import { archiveGate, storageLock } from "./storage";
 import { writeSnapshotMarkdown } from "./markdown/snapshot";
-import { lookupsSettled, refreshRunning } from "./pricing/refresh";
+import { cancelRefresh, lookupsSettled, refreshRunning, refreshStopped } from "./pricing/refresh";
 export { archiveGate } from "./storage";
 import { BusyError } from "@collectcollect/core/gate";
 import { createThrottle } from "@collectcollect/core/throttle";
@@ -118,13 +118,19 @@ export function restoreBackup(archive: Uint8Array): Promise<RestoreResult> {
  * A restore must not run while anything is writing prices: a lookup that
  * finished after the swap would store its snapshot against whatever item has
  * that id in the restored inventory. A whole-inventory refresh takes minutes,
- * so it is refused; the single-item lookup a save fires takes seconds, so it
- * is waited for. Called with the archive gate held, which is what keeps this
- * free of races: a lookup checks that gate before it counts itself in, so
- * once the gate is held nothing new can start and the count only falls.
+ * so it is told to stop and given the same wait a lookup gets; the single-item
+ * lookup a save fires takes seconds, so it is waited for. Called with the
+ * archive gate held, which is what keeps this free of races: a lookup checks
+ * that gate before it counts itself in, so once the gate is held nothing new
+ * can start and the count only falls.
  */
 async function excludePricing(): Promise<void> {
-  if (refreshRunning()) throw new BusyError("Wait for the current price refresh before restoring a collection");
+  if (refreshRunning()) {
+    cancelRefresh();
+    if (!(await refreshStopped(LOOKUP_WAIT_MS))) {
+      throw new BusyError(`The current price refresh did not stop within ${LOOKUP_WAIT_MS / 1000} seconds; wait for it before restoring a collection`);
+    }
+  }
   if (!(await lookupsSettled(LOOKUP_WAIT_MS))) {
     throw new BusyError(`A price lookup has been running for more than ${LOOKUP_WAIT_MS / 1000} seconds; wait for it before restoring a collection`);
   }
