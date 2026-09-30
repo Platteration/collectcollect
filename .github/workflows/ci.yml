@@ -133,18 +133,18 @@ jobs:
       - if: always()
         run: docker rm -f app
 
-  # Advisory: a known vulnerability in a dependency is worth seeing on every
-  # run, but not worth blocking a fix for something else.
+  # A known vulnerability in something the server runs is a reason to stop and
+  # look, so this job can fail the run. Development-only dependencies are left
+  # out: a lint tool's transitive advisory should not block a data-loss fix,
+  # and Dependabot brings those along weekly. The lockfile is all an audit
+  # reads, so nothing is installed.
   audit:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
-      - run: npm audit --audit-level=high
+      - run: npm audit --omit=dev --audit-level=high
