@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { listLots, listSaleLots } from "../acquisitions";
 import { dataDir, getDb } from "../db";
-import type { CardRecord, Condition, Game, PriceSnapshot, Sale } from "../types";
+import type { CardRecord, Condition, Game, Sale } from "../types";
 import { CONDITIONS, GAMES } from "../types";
-import { INDEX_HEADERS, cardFileName, cardMarkdown, idFromFileName } from "./card";
+import { INDEX_HEADERS, cardFileName, cardMarkdown, idFromFileName, MAX_VALUE_ROWS, type ValueRow } from "./card";
 import { money, parseDocument, readMoney, readTable, table } from "@collectcollect/core/markdown/format";
 import { writeFileAtomic } from "@collectcollect/core/atomic-write";
 import { goalFiles, mirrorGoals } from "../goals/markdown";
@@ -113,20 +113,47 @@ function saleLotsFor(cardId: number, sales: Sale[]): Map<number, Array<{ quantit
   return out;
 }
 
-function snapshotsFor(cardId: number): PriceSnapshot[] {
+/**
+ * The rows the file's value table shows, newest first and at most
+ * MAX_VALUE_ROWS of them, with the count of older ones. The database reads the
+ * six shown fields out of each summary; nothing parses the quotes, and a
+ * snapshot that is not valid JSON is passed over rather than failing the mirror.
+ */
+function snapshotsFor(cardId: number): { snapshots: ValueRow[]; omitted: number } {
   const rows = readRows(
-    "SELECT * FROM price_snapshots WHERE card_id = ? ORDER BY fetched_at DESC, id DESC",
+    `SELECT fetched_at,
+       json_extract(summary, '$.yourCopyValue') AS your_copy_value,
+       json_extract(summary, '$.ungraded') AS ungraded,
+       json_extract(summary, '$.ungradedSource') AS ungraded_source,
+       json_extract(summary, '$.graded') AS graded,
+       json_extract(summary, '$.gradedSource') AS graded_source,
+       json_extract(summary, '$.yourCopyBasis') AS your_copy_basis
+     FROM price_snapshots WHERE card_id = ? AND json_valid(summary)
+     ORDER BY fetched_at DESC, id DESC LIMIT ?`,
     cardId,
-  ) as Array<Record<string, unknown>>;
-  const out: PriceSnapshot[] = [];
-  for (const r of rows) {
+    MAX_VALUE_ROWS,
+  ) as Array<{ fetched_at: string; your_copy_value: unknown; ungraded: unknown; ungraded_source: unknown; graded: unknown; graded_source: unknown; your_copy_basis: unknown }>;
+  const total = (readRows("SELECT count(*) AS n FROM price_snapshots WHERE card_id = ? AND json_valid(summary)", cardId)[0] as { n: number }).n;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const str = (v: unknown) => (typeof v === "string" ? v : null);
+  const graded = (v: unknown): Record<string, number> => {
+    if (typeof v !== "string") return {};
     try {
-      out.push({ id: Number(r.id), cardId: Number(r.card_id), fetchedAt: String(r.fetched_at), summary: JSON.parse(String(r.summary)) });
+      const parsed = JSON.parse(v) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter((e): e is [string, number] => typeof e[1] === "number"))
+        : {};
     } catch {
-      /* a snapshot that will not parse is not worth failing the mirror over */
+      return {};
     }
-  }
-  return out;
+  };
+  return {
+    snapshots: rows.map((r) => ({
+      fetchedAt: String(r.fetched_at),
+      summary: { yourCopyValue: num(r.your_copy_value), ungraded: num(r.ungraded), ungradedSource: str(r.ungraded_source), graded: graded(r.graded), gradedSource: str(r.graded_source), yourCopyBasis: str(r.your_copy_basis) ?? "" },
+    })),
+    omitted: Math.max(0, total - rows.length),
+  };
 }
 
 /**
@@ -141,7 +168,8 @@ function readRows(sql: string, ...params: unknown[]): unknown[] {
 /** Everything a card's file says, gathered in one place. */
 function bundleFor(card: CardRecord) {
   const sales = salesFor(card.id);
-  return { card, sales, snapshots: snapshotsFor(card.id), acquisitions: listLots(card.id), saleLots: saleLotsFor(card.id, sales) };
+  const { snapshots, omitted } = snapshotsFor(card.id);
+  return { card, sales, snapshots, snapshotsOmitted: omitted, acquisitions: listLots(card.id), saleLots: saleLotsFor(card.id, sales) };
 }
 
 /**
@@ -344,8 +372,8 @@ number, grade, how many copies, what you paid, where it is kept. It is written
 as YAML with JSON values, which means both people and programs can read it.
 
 Underneath is the same card written for a person: what it is, its photo, your
-notes, every price the app ever recorded for it, what each copy cost, and any
-sales.
+notes, its prices as the app recorded them (the newest thousand; the database
+holds the rest), what each copy cost, and any sales.
 
 ## Purchases
 

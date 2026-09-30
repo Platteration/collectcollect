@@ -100,18 +100,35 @@ export function buildBackup(): Promise<{ filename: string; stream: ReadableStrea
   });
 }
 
-/** A quick description of what a backup would contain, for the Settings page. */
-export function backupSummary(): { photos: number; databaseBytes: number; photoBytes: number; missingPhotos: MissingPhoto[] } {
-  const uploads = uploadsDir();
+/**
+ * The photo count and bytes, remembered against the uploads folder's own
+ * modification time and entry count. Uploads are written once and never
+ * changed, so a folder with the same entries holds the same photos; without
+ * this, every render of the Settings page was one stat per photo.
+ */
+let photoTally: { dir: string; mtimeMs: number; entries: number; photos: number; photoBytes: number; present: Set<string> } | null = null;
+
+function tallyPhotos(uploads: string): { photos: number; photoBytes: number; present: Set<string> } {
+  if (!fs.existsSync(/* turbopackIgnore: true */ uploads)) return { photos: 0, photoBytes: 0, present: new Set() };
+  const { mtimeMs } = fs.statSync(/* turbopackIgnore: true */ uploads);
+  const names = fs.readdirSync(/* turbopackIgnore: true */ uploads);
+  if (photoTally && photoTally.dir === uploads && photoTally.mtimeMs === mtimeMs && photoTally.entries === names.length) return photoTally;
   let photos = 0;
   let photoBytes = 0;
   const present = new Set<string>();
-  for (const name of fs.existsSync(/* turbopackIgnore: true */ uploads) ? fs.readdirSync(/* turbopackIgnore: true */ uploads) : []) {
+  for (const name of names) {
     if (!isValidUploadName(name)) continue;
     photos++;
     present.add(name);
     photoBytes += fs.statSync(/* turbopackIgnore: true */ path.join(uploads, name)).size;
   }
+  photoTally = { dir: uploads, mtimeMs, entries: names.length, photos, photoBytes, present };
+  return photoTally;
+}
+
+/** A quick description of what a backup would contain, for the Settings page. */
+export function backupSummary(): { photos: number; databaseBytes: number; photoBytes: number; missingPhotos: MissingPhoto[] } {
+  const { photos, photoBytes, present } = tallyPhotos(uploadsDir());
   const dbFile = (getDb().pragma("database_list") as Array<{ file: string }>)[0]?.file;
   const databaseBytes = dbFile && fs.existsSync(/* turbopackIgnore: true */ dbFile) ? fs.statSync(/* turbopackIgnore: true */ dbFile).size : 0;
   return { photos, databaseBytes, photoBytes, missingPhotos: findMissingPhotos(getDb(), present) };

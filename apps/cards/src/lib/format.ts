@@ -11,8 +11,9 @@ export function localDateInput(now = new Date(), offsetMinutes = now.getTimezone
   return new Date(now.getTime() - offsetMinutes * 60_000).toISOString().slice(0, 10);
 }
 
-export function imageSrc(card: { imagePath: string | null; referenceImageUrl: string | null }): string | null {
-  if (card.imagePath) return `/api/uploads/${card.imagePath}`;
+/** Where a card's picture is served from: its own photo (full, or the small copy for a grid), else the source's reference image. */
+export function imageSrc(card: { imagePath: string | null; referenceImageUrl: string | null }, size: "full" | "thumb" = "full"): string | null {
+  if (card.imagePath) return `/api/uploads/${card.imagePath}${size === "thumb" ? "?size=thumb" : ""}`;
   return card.referenceImageUrl;
 }
 

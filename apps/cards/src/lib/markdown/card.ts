@@ -14,11 +14,22 @@ import { CONDITIONS, GAMES, GAME_IDS, GRADING_STATUSES } from "../types";
 import { IdentificationSchema } from "../identify/schema";
 import { money, parseDocument, readFenced, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "@collectcollect/core/markdown/format";
 
+/** How many prices a card's file lists, newest first; the database holds the rest. */
+export const MAX_VALUE_ROWS = 1000;
+
+/** The part of a price snapshot the file shows. */
+export type ValueRow = Pick<PriceSnapshot, "fetchedAt"> & {
+  summary: Pick<PriceSummary, "yourCopyValue" | "ungraded" | "ungradedSource" | "graded" | "gradedSource" | "yourCopyBasis">;
+};
+
 /** Everything about one card that the plain-text copy preserves. */
 export interface CardBundle {
   card: CardRecord;
   sales: Sale[];
-  snapshots: PriceSnapshot[];
+  /** Newest first. Beyond MAX_VALUE_ROWS the file says how many older ones there are rather than listing them. */
+  snapshots: ValueRow[];
+  /** Older prices the caller already left out, counted on the file's closing line. */
+  snapshotsOmitted?: number;
   acquisitions: Acquisition[];
   /** Which lots each sale took, keyed by sale id, when that is recorded. */
   saleLots?: Map<number, Array<{ quantity: number; unitCost: number | null; acquiredAt: string | null }>>;
@@ -281,11 +292,15 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
   }
 
   if (snapshots.length) {
+    // A card checked daily for years would otherwise be a file of thousands
+    // of lines that is rewritten on every change to the card.
+    const rows = snapshots.slice(0, MAX_VALUE_ROWS);
+    const omitted = (bundle.snapshotsOmitted ?? 0) + (snapshots.length - rows.length);
     blocks.push(
       "## Value history",
       table(
         VALUE_HEADERS,
-        snapshots.map((s) => [
+        rows.map((s) => [
           s.fetchedAt,
           s.summary.yourCopyValue === null ? "" : money(s.summary.yourCopyValue),
           moneyCell(s.summary.ungraded, s.summary.ungradedSource),
@@ -294,6 +309,7 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
         ]),
       ),
     );
+    if (omitted > 0) blocks.push(`${omitted} earlier price${omitted === 1 ? "" : "s"} not shown; the database holds them.`);
   }
 
   if (acquisitions.length) {
