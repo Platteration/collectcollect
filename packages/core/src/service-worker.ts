@@ -12,7 +12,7 @@ const SOURCE = `/*
  * must be served from different origins (which two ports are), or each would
  * evict the other's.
  */
-const VERSION = "v1";
+const VERSION = "__VERSION__";
 const SHELL = \`__PREFIX__-shell-\${VERSION}\`;
 const ASSETS = \`__PREFIX__-assets-\${VERSION}\`;
 const OFFLINE_URL = "/offline";
@@ -75,15 +75,22 @@ self.addEventListener("fetch", (event) => {
  * The worker's script text for an app. Served from a route rather than a file
  * in `public`, so there is one copy of it and each app only names itself;
  * the cache prefix is the only thing that differs between them.
+ *
+ * The version goes into the cache names, and a browser only installs a worker
+ * whose bytes changed: with the version fixed, the precached offline page and
+ * icons stayed at whatever the first install held, deploy after deploy. Each
+ * build's id (see build-id.ts) makes every deploy a new worker, which drops
+ * the old caches on activation.
  */
-export function serviceWorkerSource(cachePrefix: string): string {
+export function serviceWorkerSource(cachePrefix: string, version: string): string {
   if (!/^[a-z0-9-]+$/.test(cachePrefix)) throw new Error("A cache prefix is lowercase letters, digits and hyphens");
-  return SOURCE.replaceAll("__PREFIX__", cachePrefix);
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(version)) throw new Error("A cache version is letters, digits, hyphens and underscores");
+  return SOURCE.replaceAll("__PREFIX__", cachePrefix).replace("__VERSION__", version);
 }
 
 /** The response a `/sw.js` route hands back: script, never cached long, allowed to control the whole origin. */
-export function serviceWorkerResponse(cachePrefix: string): Response {
-  return new Response(serviceWorkerSource(cachePrefix), {
+export function serviceWorkerResponse(cachePrefix: string, version: string): Response {
+  return new Response(serviceWorkerSource(cachePrefix, version), {
     headers: {
       "Content-Type": "text/javascript; charset=utf-8",
       "Cache-Control": "no-cache",
