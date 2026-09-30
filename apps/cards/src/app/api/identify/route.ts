@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { identifyCard, IdentifyError } from "@/lib/identify/claude";
 import { isValidUploadName, readUpload } from "@/lib/images";
 import { errorMessage, jsonError } from "@/lib/http";
-import { logError } from "@collectcollect/core/http";
+import { BodyLimitError, logError, readJsonLimited } from "@collectcollect/core/http";
 import { identificationThrottle } from "@/lib/identify/throttle";
 
 /**
@@ -16,9 +16,11 @@ export async function POST(request: Request) {
   const refused = throttle.check(request);
   if (refused) return refused;
   let body: { uploads?: unknown; hint?: unknown };
+  // Four upload names and a hint are well under 16 KB; a runaway client cannot buffer more.
   try {
-    body = await request.json();
-  } catch {
+    body = (await readJsonLimited(request, 16 * 1024)) as typeof body;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   const names = Array.isArray(body.uploads) ? body.uploads.filter((n): n is string => typeof n === "string") : [];

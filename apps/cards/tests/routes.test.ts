@@ -4,6 +4,8 @@ import { closeDatabase, databaseFile, openDatabase, setDb } from "@/lib/db";
 import { createCard, getCard } from "@/lib/cards";
 import { createAlert } from "@/lib/alerts";
 import { recordSale } from "@/lib/sales";
+import { saveGoal, saveGoalItem } from "@/lib/goals";
+import { createSubmission } from "@/lib/submissions";
 
 /** Routes take their path parameters as a promise. */
 const ctx = <T extends Record<string, string>>(params: T) => ({ params: Promise.resolve(params) });
@@ -383,5 +385,56 @@ describe("a card's photo, after the card exists", () => {
     await patch({ notes: "still pictured" });
     expect(getCard(card.id)?.imagePath).toBe(first);
     expect(fs.existsSync(path.join(uploadsDir(), first))).toBe(true);
+  });
+});
+
+describe("bodies a runaway client could grow without limit", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  /** One byte over is enough: the limit is on bytes read, not on what the JSON means. */
+  const oversized = (limit: number) => JSON.stringify({ pad: "x".repeat(limit) });
+  const send = (url: string, body: string, method = "POST") => new Request(url, { method, headers: { "content-type": "application/json" }, body });
+
+  it("refuses a body over the route's limit with a 413 that names the limit, on every JSON route", async () => {
+    const card = createCard({ game: "pokemon", name: "Limited" });
+    const goal = saveGoal({ name: "Limit" });
+    const wanted = saveGoalItem(goal.id, { game: "pokemon", name: "Pikachu" });
+    const sub = createSubmission({ company: "PSA" });
+    const cardCtx = { params: Promise.resolve({ id: String(card.id) }) } as never;
+    // The runaway-client tests above spend these; this test is about bytes, not turns.
+    (await import("@/app/api/identify/route")).throttle.reset();
+    (await import("@/app/api/providers/test/route")).throttle.reset();
+    (await import("@/lib/backup")).restoreThrottle.reset();
+    const routes: Array<{ name: string; limit: number; run: (body: string) => Promise<Response> }> = [
+      { name: "backup/replaced", limit: 4 * 1024, run: async (b) => (await import("@/app/api/backup/replaced/route")).POST(send("http://localhost/api/backup/replaced", b)) },
+      { name: "setup", limit: 4 * 1024, run: async (b) => (await import("@/app/api/setup/route")).PUT(send("http://localhost/api/setup", b, "PUT")) },
+      { name: "sets/refresh", limit: 4 * 1024, run: async (b) => (await import("@/app/api/sets/refresh/route")).POST(send("http://localhost/api/sets/refresh", b)) },
+      { name: "providers/test", limit: 4 * 1024, run: async (b) => (await import("@/app/api/providers/test/route")).POST(send("http://localhost/api/providers/test", b)) },
+      { name: "identify", limit: 16 * 1024, run: async (b) => (await import("@/app/api/identify/route")).POST(send("http://localhost/api/identify", b)) },
+      { name: "prices/lookup", limit: 16 * 1024, run: async (b) => (await import("@/app/api/prices/lookup/route")).POST(send("http://localhost/api/prices/lookup", b)) },
+      { name: "goals", limit: 16 * 1024, run: async (b) => (await import("@/app/api/goals/route")).POST(send("http://localhost/api/goals", b)) },
+      { name: "goals/[id]", limit: 16 * 1024, run: async (b) => (await import("@/app/api/goals/[id]/route")).PUT(send(`http://localhost/api/goals/${goal.id}`, b, "PUT"), ctx({ id: goal.id })) },
+      { name: "goals/[id]/items", limit: 16 * 1024, run: async (b) => (await import("@/app/api/goals/[id]/items/route")).POST(send(`http://localhost/api/goals/${goal.id}/items`, b), ctx({ id: goal.id })) },
+      { name: "goals/[id]/items/[itemId]", limit: 16 * 1024, run: async (b) => (await import("@/app/api/goals/[id]/items/[itemId]/route")).PUT(send(`http://localhost/api/goals/${goal.id}/items/${wanted.id}`, b, "PUT"), ctx({ id: goal.id, itemId: wanted.id })) },
+      { name: "submissions", limit: 16 * 1024, run: async (b) => (await import("@/app/api/submissions/route")).POST(send("http://localhost/api/submissions", b)) },
+      { name: "submissions/[id]", limit: 256 * 1024, run: async (b) => (await import("@/app/api/submissions/[id]/route")).PATCH(send(`http://localhost/api/submissions/${sub.id}`, b, "PATCH"), ctx({ id: String(sub.id) }) as never) },
+      { name: "settings", limit: 64 * 1024, run: async (b) => (await import("@/app/api/settings/route")).PUT(send("http://localhost/api/settings", b, "PUT")) },
+      { name: "cards", limit: 64 * 1024, run: async (b) => (await import("@/app/api/cards/route")).POST(send("http://localhost/api/cards", b)) },
+      { name: "cards/intake", limit: 64 * 1024, run: async (b) => (await import("@/app/api/cards/intake/route")).POST(send("http://localhost/api/cards/intake", b)) },
+      { name: "cards/[id]", limit: 64 * 1024, run: async (b) => (await import("@/app/api/cards/[id]/route")).PATCH(send(`http://localhost/api/cards/${card.id}`, b, "PATCH"), cardCtx) },
+      { name: "cards/[id]/sales", limit: 16 * 1024, run: async (b) => (await import("@/app/api/cards/[id]/sales/route")).POST(send(`http://localhost/api/cards/${card.id}/sales`, b), cardCtx) },
+      { name: "cards/[id]/acquisitions", limit: 16 * 1024, run: async (b) => (await import("@/app/api/cards/[id]/acquisitions/route")).POST(send(`http://localhost/api/cards/${card.id}/acquisitions`, b), cardCtx) },
+    ];
+    expect(routes).toHaveLength(18);
+    for (const route of routes) {
+      const res = await route.run(oversized(route.limit));
+      expect(res.status, route.name).toBe(413);
+      expect((await read<{ error: string }>(res)).error, route.name).toBe(`Request body exceeds the ${route.limit} byte limit`);
+    }
+    // Under the limit, the body is read as before, on both shapes of handler.
+    const intake = await (await import("@/app/api/cards/intake/route")).POST(send("http://localhost/api/cards/intake", JSON.stringify({ game: "pokemon", name: "Still fine" })));
+    expect(intake.status).toBe(201);
+    const renamed = await (await import("@/app/api/goals/[id]/route")).PUT(send(`http://localhost/api/goals/${goal.id}`, JSON.stringify({ name: "Still fine" }), "PUT"), ctx({ id: goal.id }));
+    expect(renamed.status).toBe(200);
   });
 });

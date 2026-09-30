@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
+import { BodyLimitError, readJsonLimited } from "@collectcollect/core/http";
 import { fetchQuotes, summarize } from "@/lib/pricing";
 import type { CardQuery } from "@/lib/pricing/types";
 import { getSettings } from "@/lib/settings";
@@ -11,9 +12,11 @@ import { isCondition, isGame } from "@/lib/types";
  */
 export async function POST(request: Request) {
   let body: Partial<CardQuery> & { condition?: string; gradingCompany?: string | null; grade?: string | null };
+  // A card's identity is well under 16 KB; a runaway client cannot buffer more.
   try {
-    body = await request.json();
-  } catch {
+    body = (await readJsonLimited(request, 16 * 1024)) as typeof body;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   if (!isGame(body.game)) return jsonError("Unknown game");

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { errorMessage, jsonError, parseId } from "@/lib/http";
+import { BodyLimitError, readJsonLimited } from "@collectcollect/core/http";
 import {
   addCard,
   deleteSubmission,
@@ -33,9 +34,12 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/submission
   const id = parseId((await ctx.params).id);
   if (!id || !getSubmission(id)) return jsonError("Submission not found", 404);
   let body: PatchBody;
+  // The grades that came back are one line per card, so a batch of hundreds
+  // is still far under 256 KB; a runaway client cannot buffer more.
   try {
-    body = (await request.json()) as PatchBody;
-  } catch {
+    body = (await readJsonLimited(request, 256 * 1024)) as PatchBody;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   try {

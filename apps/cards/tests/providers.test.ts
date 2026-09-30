@@ -137,6 +137,16 @@ describe("Scryfall provider", () => {
     const quotes = await scryfallProvider.lookup({ game: "mtg", name: "Black Lotus", setCode: "zzz" }, fetchImpl);
     expect(quotes[0]?.ungraded).toBe(100000);
   });
+  it("lets the lookup by name decide when the set and number answer with another card", async () => {
+    // A mistyped collector number is answered with whatever sits at that slot.
+    const fetchImpl = fakeFetch([
+      ["api.scryfall.com/cards/mh2/151", { id: "r", name: "Ragavan, Nimble Pilferer", set: "mh2", set_name: "Modern Horizons 2", collector_number: "151", prices: { usd: "40.00" } }],
+      [/cards\/named/, { id: "b", name: "Lightning Bolt", set: "mh2", set_name: "Modern Horizons 2", collector_number: "429", prices: { usd: "3.00" } }],
+    ]);
+    const quotes = await scryfallProvider.lookup({ game: "mtg", name: "Lightning Bolt", setCode: "MH2", cardNumber: "151" }, fetchImpl);
+    expect(quotes[0]).toMatchObject({ ungraded: 3, matchedName: "Lightning Bolt" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("PriceCharting provider", () => {
@@ -239,6 +249,15 @@ describe("what a provider refuses to call a match", () => {
       ["cardinfo.php?fname=", { data: [{ id: 23995346, name: "Blue-Eyes Ultimate Dragon", card_prices: [{ tcgplayer_price: "50.00" }] }] }],
     ]);
     expect(await ygoprodeckProvider.lookup({ game: "yugioh", name: "Blue-Eyes White Dragon" }, fetchImpl)).toEqual([]);
+  });
+  it("does not let Scryfall's fuzzy lookup answer with the closest card it knows", async () => {
+    const fetchImpl = fakeFetch([
+      [/cards\/named/, { id: "h", name: "Lightning Helix", set: "rav", set_name: "Ravnica: City of Guilds", collector_number: "213", prices: { usd: "1.00" } }],
+    ]);
+    expect(await scryfallProvider.lookup({ game: "mtg", name: "Lightning Bolt" }, fetchImpl)).toEqual([]);
+    // Every word, in any order, with the card's own punctuation: still the card.
+    const faces = fakeFetch([[/cards\/named/, { id: "f", name: "Fire // Ice", set: "apc", set_name: "Apocalypse", collector_number: "128", prices: { usd: "2.00" } }]]);
+    expect((await scryfallProvider.lookup({ game: "mtg", name: "Fire" }, faces))[0]).toMatchObject({ ungraded: 2 });
   });
   it("does not let PriceCharting match on one shared word and the category alone", async () => {
     process.env.PRICECHARTING_TOKEN = "t";

@@ -1,7 +1,7 @@
 import type { PriceQuote } from "../../types";
 import type { PriceProvider } from "../types";
 import { ProviderError } from "../types";
-import { numberPart, round2, toNumber } from "../match";
+import { numberPart, round2, toNumber, tokenOverlap } from "../match";
 
 /** Scryfall (https://scryfall.com/docs/api). Free, no key. Daily USD/EUR prices for Magic cards. */
 
@@ -20,6 +20,16 @@ interface ScryCard {
 
 const HEADERS = { Accept: "application/json", "User-Agent": "collectcollect/0.1 (personal card catalog)" };
 
+/**
+ * Whether every word of the name asked about is in the answer's name. The
+ * fuzzy endpoint answers the closest card it knows and a mistyped collector
+ * number is answered with whatever sits at that slot, and "Lightning Helix"
+ * is not a price for "Lightning Bolt". The other sources require the same.
+ */
+function named(q: { name: string }, card: ScryCard): boolean {
+  return tokenOverlap(q.name, card.name) >= 1;
+}
+
 export const scryfallProvider: PriceProvider = {
   id: "scryfall",
   label: "Scryfall",
@@ -32,7 +42,11 @@ export const scryfallProvider: PriceProvider = {
     const num = numberPart(q.cardNumber);
     if (q.setCode && num) {
       const res = await fetchImpl(`https://api.scryfall.com/cards/${encodeURIComponent(q.setCode.toLowerCase())}/${encodeURIComponent(num)}`, { headers: HEADERS, signal });
-      if (res.ok) card = (await res.json()) as ScryCard;
+      if (res.ok) {
+        // Another card at that number falls through to the lookup by name, as a 404 does.
+        const found = (await res.json()) as ScryCard;
+        if (named(q, found)) card = found;
+      }
     }
     if (!card) {
       const params = new URLSearchParams({ fuzzy: q.name });
@@ -44,6 +58,7 @@ export const scryfallProvider: PriceProvider = {
       if (res.status === 404) return [];
       if (!res.ok) throw new ProviderError("scryfall", `Scryfall returned HTTP ${res.status}`);
       card = (await res.json()) as ScryCard;
+      if (!named(q, card)) return [];
     }
 
     const foil = /foil|etched/i.test(q.variant ?? "");

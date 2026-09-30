@@ -3,6 +3,7 @@ import { HasSalesError, deleteCard, getCard, latestSnapshot, updateCard } from "
 import fs from "node:fs";
 import { deleteUpload, isValidUploadName, uploadPath } from "@/lib/images";
 import { errorMessage, jsonError, parseId } from "@/lib/http";
+import { BodyLimitError, readJsonLimited } from "@collectcollect/core/http";
 import type { CardInput } from "@/lib/types";
 
 export async function GET(_request: Request, ctx: RouteContext<"/api/cards/[id]">) {
@@ -16,9 +17,11 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/cards/[id]
   const id = parseId((await ctx.params).id);
   if (!id) return jsonError("Card not found", 404);
   let body: Partial<CardInput>;
+  // A card record with its identification is well under 64 KB; a runaway client cannot buffer more.
   try {
-    body = (await request.json()) as Partial<CardInput>;
-  } catch {
+    body = (await readJsonLimited(request, 64 * 1024)) as Partial<CardInput>;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   // A photo has to be one this app stored: a name of the wrong shape, or one

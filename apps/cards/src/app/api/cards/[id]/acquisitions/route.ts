@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { addAcquisition, getCard } from "@/lib/cards";
 import { listLots } from "@/lib/acquisitions";
 import { errorMessage, jsonError, parseId } from "@/lib/http";
+import { BodyLimitError, readJsonLimited } from "@collectcollect/core/http";
 import type { AcquisitionInput } from "@/lib/acquisitions";
 
 /** GET — what every copy of this card cost, oldest purchase first. */
@@ -20,9 +21,11 @@ export async function POST(request: Request, ctx: RouteContext<"/api/cards/[id]/
   const id = parseId((await ctx.params).id);
   if (!id || !getCard(id)) return jsonError("Card not found", 404);
   let body: AcquisitionInput;
+  // A purchase is a handful of numbers and a note; a runaway client cannot buffer more than 16 KB here.
   try {
-    body = (await request.json()) as AcquisitionInput;
-  } catch {
+    body = (await readJsonLimited(request, 16 * 1024)) as AcquisitionInput;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   try {

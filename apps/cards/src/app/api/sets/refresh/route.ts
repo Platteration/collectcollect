@@ -2,14 +2,16 @@ import { NextResponse } from "next/server";
 import { errorMessage, jsonError } from "@/lib/http";
 import { refreshChecklist } from "@/lib/sets";
 import { isGame } from "@/lib/types";
-import { logError } from "@collectcollect/core/http";
+import { BodyLimitError, logError, readJsonLimited } from "@collectcollect/core/http";
 
 /** POST { game, setName } — fetch the published checklist for one of your sets. */
 export async function POST(request: Request) {
   let body: { game?: unknown; setName?: unknown; setCode?: unknown };
+  // A game and a set name; a runaway client cannot buffer more than a few kilobytes here.
   try {
-    body = (await request.json()) as typeof body;
-  } catch {
+    body = (await readJsonLimited(request, 4 * 1024)) as typeof body;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   if (!isGame(body.game)) return jsonError("Unknown game");

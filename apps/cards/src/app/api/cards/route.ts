@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createCard, findSimilar, latestSnapshotsByCard, listCards } from "@/lib/cards";
 import { errorMessage, jsonError } from "@/lib/http";
+import { BodyLimitError, readJsonLimited } from "@collectcollect/core/http";
 import type { CardInput } from "@/lib/types";
 import { isGame } from "@/lib/types";
 
@@ -28,9 +29,11 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   let body: CardInput;
+  // A card record with its identification is well under 64 KB; a runaway client cannot buffer more.
   try {
-    body = (await request.json()) as CardInput;
-  } catch {
+    body = (await readJsonLimited(request, 64 * 1024)) as CardInput;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   try {

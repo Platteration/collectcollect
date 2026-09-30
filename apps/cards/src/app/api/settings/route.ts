@@ -4,7 +4,7 @@ import { recomputeAllLatest } from "@/lib/cards";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { providerStatuses } from "@/lib/status";
 import type { Settings } from "@/lib/types";
-import { isWebhookUrl } from "@collectcollect/core/http";
+import { BodyLimitError, isWebhookUrl, readJsonLimited } from "@collectcollect/core/http";
 
 export async function GET() {
   return NextResponse.json({ settings: getSettings(), providers: providerStatuses() });
@@ -12,9 +12,11 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   let body: Partial<Settings>;
+  // The settings form is a few dozen numbers and two strings; a runaway client cannot buffer more than 64 KB here.
   try {
-    body = (await request.json()) as Partial<Settings>;
-  } catch {
+    body = (await readJsonLimited(request, 64 * 1024)) as Partial<Settings>;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
     return jsonError("Expected a JSON body");
   }
   const current = getSettings();

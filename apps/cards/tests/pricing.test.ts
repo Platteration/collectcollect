@@ -472,4 +472,23 @@ describe("what a refresh leaves alone", () => {
       globalThis.fetch = original;
     }
   });
+
+  it("stores nothing over a Magic card's last price when Scryfall's closest card is not the one asked about", async () => {
+    setDb(openDatabase(":memory:"));
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    const card = createCard({ game: "mtg", name: "Lightning Bolt" });
+    addSnapshot(card.id, { ...summarizeFixture(3), fetchedAt: new Date(Date.now() - 72 * 3600e3).toISOString() });
+    const original = globalThis.fetch;
+    globalThis.fetch = fakeFetch([
+      [/cards\/named/, { id: "h", name: "Lightning Helix", set: "rav", set_name: "Ravnica: City of Guilds", collector_number: "213", prices: { usd: "1.00" } }],
+    ]);
+    try {
+      const r = await refreshCard(card);
+      expect(r.stored).toBe(false);
+      expect(listSnapshots(card.id)).toHaveLength(1);
+      expect(listSnapshots(card.id)[0]?.summary.ungraded).toBe(3);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });
