@@ -19,6 +19,12 @@ export interface AuthConfig {
   secretEnv: string;
   /** Namespace for the secret derived from the password, when there is no explicit one. */
   secretPrefix: string;
+  /**
+   * A random signing key kept beside the data (see session-seed.ts), or null
+   * when there is nowhere to keep one. Without it the key is derived from the
+   * password alone, and a stolen cookie is an offline oracle for guessing it.
+   */
+  seed?: () => string | null;
   /** How long a login lasts before it has to be repeated. */
   days?: number;
 }
@@ -85,10 +91,22 @@ export function createAuth(config: AuthConfig): Auth {
   // and so a test can turn the gate on and off between cases.
   const password = () => process.env[config.passwordEnv] ?? "";
 
+  let warned = false;
   async function secret(): Promise<string> {
     // Bind every token to this app AND its password, including installations
     // with a separate signing secret. v2 cookies deliberately expire on upgrade.
-    return hmac(JSON.stringify(["session-v3", config.secretPrefix, password()]), process.env[config.secretEnv] || `${config.secretPrefix}${password()}`);
+    const message = JSON.stringify(["session-v3", config.secretPrefix, password()]);
+    const explicit = process.env[config.secretEnv];
+    if (explicit) return hmac(message, explicit);
+    const seed = config.seed?.() ?? null;
+    if (seed) return hmac(message, seed);
+    // No seed and no explicit secret: the old derivation, which is weaker but
+    // still better than refusing to sign anyone in. Said once, not per request.
+    if (!warned) {
+      warned = true;
+      console.warn(`[auth] Sessions are being signed with a key derived from the password, so a stolen cookie could be used to guess it offline. Make the data directory writable so a random key can be kept there, or set ${config.secretEnv}.`);
+    }
+    return hmac(message, `${config.secretPrefix}${password()}`);
   }
 
   return {

@@ -1,4 +1,7 @@
+import path from "node:path";
 import { createAuth } from "@collectcollect/core/auth";
+import { createSessionSeed } from "@collectcollect/core/session-seed";
+import { dataDir } from "./paths";
 
 /**
  * This app's password gate. Set SKINS_APP_PASSWORD to require a login; leave it
@@ -13,6 +16,10 @@ export const auth = createAuth({
   passwordEnv: "SKINS_APP_PASSWORD",
   secretEnv: "SKINS_APP_SECRET",
   secretPrefix: "collectcollect-skins:",
+  // A random signing key in `session-secret` beside the inventory, so a stolen
+  // cookie is no help in guessing the password. Resolved on first use, like
+  // the session file, so loading the proxy at build time creates nothing.
+  seed: createSessionSeed(() => path.join(dataDir(), "session-secret")),
 });
 
 export const { SESSION_COOKIE, SESSION_DAYS } = auth;
