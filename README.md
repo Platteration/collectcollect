@@ -116,7 +116,7 @@ Collections from before this existed get one lot per card from what was already 
 
 This exists so the collection outlives the app. If CollectCollect is never updated again, or you would rather keep your catalogue somewhere else, the folder is already a complete, readable record that any text editor, spreadsheet, git repository or notes tool can open — no database, no export step, nothing to run. Settings has *Download the Markdown* for a zip of it, *Rewrite the files* to bring them up to date from the database, and *Rebuild from these files* to read a collection back in. Reading files back matches each file to the card it describes — by the id in the file, or, when that id belongs to something else, by the card itself — so importing the same folder twice changes nothing the second time, and a folder from somewhere else can only add to a collection, never overwrite a card it has nothing to do with. Rewriting never deletes: a file describing a card the database does not have is counted and left alone, since the likeliest reason for one is that the folder is the copy that survived. Writing is best-effort by design: a full or read-only disk degrades the plain-text copy and is reported in Settings, but never stops a card being saved. Set `MARKDOWN_MIRROR=off` to switch it off.
 
-The files hold every purchase and every recorded price — including which purchase each sale drew from, and for skins the best quote from each market — but not the listing URLs or volumes behind each quote. Photos stay in `data/uploads/`, which the card files link to, so keep the two together — the Markdown download is text only, while the full backup carries both.
+The files hold every purchase and the newest thousand recorded prices per card or item — including which purchase each sale drew from, and for skins the best quote from each market — but not the listing URLs or volumes behind each quote, nor the note of when an unchanged price was last checked. Photos stay in `data/uploads/`, which the card files link to, so keep the two together — the Markdown download is text only, while the full backup carries both.
 
 The archive is written and read by a small built-in zip writer and reader rather than a dependency. Tests check the writer against the system `unzip` and Python's `zipfile`, read back archives made by the system `zip` in both stored and deflated form, and confirm that a corrupted payload, a doctored entry name, a path that escapes, an oversized expansion and a database that will not open are each refused with the collection left untouched.
 
@@ -375,7 +375,13 @@ times a minute, behind a rate limit shared across the process. Nothing
 estimates a price from a similar item or a neighbouring wear tier, so an item
 nobody is listing reads as "not priced" rather than as a number that looks
 measured and is not — and a refresh that found nothing is never written over an
-item's last known value.
+item's last known value. A refresh that finds the same prices as last time only
+notes when it checked, which the item page shows beside the price, so an item
+refreshed every hour for a year does not carry a year of identical rows.
+
+**The inventory page** sorts by name, value or date and shows 120 tiles a
+page; the count and total at the top are over everything the filters match,
+whichever page is showing.
 
 **Password.** Set `SKINS_APP_PASSWORD` — its own variable, and its own cookie.
 Cookies are scoped to a host and not to a port, so two of these apps served from

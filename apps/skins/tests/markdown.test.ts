@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { openDatabase, setDb } from "@/lib/db";
+import { getDb, openDatabase, setDb } from "@/lib/db";
 import { addAcquisition, addSnapshot, createItem, getItem, latestSnapshot, listItems, updateItem } from "@/lib/items";
 import { spreadView } from "@/lib/spread";
 import type { PriceQuote, PriceSummary } from "@/lib/types";
@@ -19,6 +19,37 @@ function fileFor(id: number): string {
   const name = fs.readdirSync(itemsDir()).find((f) => f.startsWith(String(id).padStart(4, "0")))!;
   return fs.readFileSync(path.join(itemsDir(), name), "utf8");
 }
+
+describe("an item with a very long price history", () => {
+  it("lists its newest thousand prices and says how many older ones the database holds", () => {
+    const item = seedRedline();
+    const at = (i: number) => new Date(Date.UTC(2020, 0, 1) + i * 864e5).toISOString();
+    const insert = getDb().prepare("INSERT INTO price_snapshots (item_id, fetched_at, summary) VALUES (?, ?, ?)");
+    getDb().transaction(() => {
+      for (let i = 1; i <= 1200; i++) {
+        insert.run(item.id, at(i), JSON.stringify({
+          currency: "USD", fetchedAt: at(i), market: i, marketSource: "Skinport", yourCopyValue: i, yourCopyBasis: "Skinport listing, after its 12% cut",
+          quotes: [{ source: "skinport", sourceLabel: "Skinport", currency: "USD", url: null, matchedName: "", price: i, volume: null, fetchedAt: at(i) }],
+          errors: [],
+        }));
+      }
+      // One row nothing can read is passed over, as it always was.
+      insert.run(item.id, "2019-01-01T00:00:00.000Z", "{not json");
+    })();
+    updateItem(item.id, { notes: "rewrite the file" });
+    const text = fileFor(item.id);
+    const parsed = parseItemMarkdown(text);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.snapshots).toHaveLength(1000);
+    expect(parsed!.snapshots[0]?.summary).toMatchObject({ yourCopyValue: 1200, market: 1200, marketSource: "Skinport", yourCopyBasis: "Skinport listing, after its 12% cut" });
+    // The Markets column still carries each market's price, read from the row rather than a parsed summary.
+    expect(parsed!.snapshots[0]?.summary.quotes[0]).toMatchObject({ source: "skinport", price: 1200 });
+    expect(parsed!.snapshots.at(-1)?.summary.yourCopyValue).toBe(201);
+    expect(text).toContain("200 earlier prices not shown; the database holds them.");
+    // The price rows are dated 2020 to 2023; the one purchase row is dated today.
+    expect(text.split("\n").filter((line) => /^\| 202[0-3]-/.test(line)).length).toBe(1000);
+  });
+});
 
 describe("an item as a document", () => {
   it("writes the facts a person needs and the facts a program needs", () => {

@@ -4,11 +4,14 @@ import {
   HasSalesError,
   addAcquisition,
   addSnapshot,
+  costBasisByItem,
+  countItems,
   createItem,
   deleteItem,
   findByAssetId,
   getItem,
   intakeItem,
+  inventoryTotals,
   isTradeLocked,
   listItems,
   latestSnapshot,
@@ -17,6 +20,7 @@ import {
   normalizeInput,
   updateItem,
 } from "@/lib/items";
+import { holdingValue } from "@/lib/valuation";
 import { listLots, verifyLotInvariant } from "@/lib/acquisitions";
 import { deleteSale, recordSale } from "@/lib/sales";
 import { clutchCase, redline, seedCase, seedRedline } from "./helpers";
@@ -274,6 +278,87 @@ describe("listing", () => {
     const locked = listItems({ lockedOnly: true });
     expect(locked).toHaveLength(1);
     expect(isTradeLocked(at(locked, 0))).toBe(true);
+  });
+});
+
+describe("sorting and paging the inventory", () => {
+  const value = (fetchedAt: string, yourCopyValue: number, market: number) =>
+    ({ currency: "USD" as const, fetchedAt, market, marketSource: "Skinport", yourCopyValue, yourCopyBasis: "x", quotes: [], errors: [] });
+
+  function seed() {
+    const own = seedRedline({ marketHashName: "AK-47 | Redline (Minimal Wear)", floatValue: 0.1, manualPrice: 50, purchasePrice: 40 });
+    const priced = seedRedline({ purchasePrice: 20 });
+    const unpriced = seedRedline({ marketHashName: "AWP | Asiimov (Field-Tested)", floatValue: 0.3, purchasePrice: 10 });
+    const cases = seedCase({ quantity: 20, purchasePrice: 0.5 });
+    addSnapshot(priced.id, value("2026-01-01T00:00:00.000Z", 34, 40));
+    addSnapshot(cases.id, value("2026-01-01T00:00:00.000Z", 1.4, 1.6));
+    return { own, priced, unpriced, cases };
+  }
+
+  it("orders by what the tile prints, by name, and by when an item was added", () => {
+    const { own, priced, unpriced, cases } = seed();
+    getDb().prepare("UPDATE items SET created_at = ? WHERE id = ?").run("2026-01-01T00:00:00.000Z", cases.id);
+    // The holding: an own price of 50, one copy worth 34, twenty cases at 1.40, and nothing known last.
+    expect(listItems({ sort: "value" }).map((i) => i.id)).toEqual([own.id, priced.id, cases.id, unpriced.id]);
+    expect(listItems({ sort: "name" }).map((i) => i.marketHashName)).toEqual([
+      "AK-47 | Redline (Field-Tested)",
+      "AK-47 | Redline (Minimal Wear)",
+      "AWP | Asiimov (Field-Tested)",
+      "Clutch Case",
+    ]);
+    expect(listItems({ sort: "added" }).map((i) => i.id)).toEqual([unpriced.id, priced.id, own.id, cases.id]);
+    // The default is untouched: last touched first.
+    expect(listItems().map((i) => i.id)).toEqual(listItems({ sort: "updated" }).map((i) => i.id));
+  });
+
+  it("hands back one page at a time, and says how many there are in all", () => {
+    seed();
+    expect(listItems({ sort: "name", limit: 2 }).map((i) => i.marketHashName)).toEqual(["AK-47 | Redline (Field-Tested)", "AK-47 | Redline (Minimal Wear)"]);
+    expect(listItems({ sort: "name", limit: 2, offset: 2 }).map((i) => i.marketHashName)).toEqual(["AWP | Asiimov (Field-Tested)", "Clutch Case"]);
+    expect(listItems({ sort: "name", limit: 2, offset: 4 })).toEqual([]);
+    expect(countItems()).toBe(4);
+    expect(countItems({ category: "case" })).toBe(1);
+    expect(countItems({ search: "Asiimov" })).toBe(1);
+  });
+
+  it("totals the whole filtered inventory, whatever page is shown, as the page used to add it up", () => {
+    seed();
+    const latest = latestSnapshotsByItem();
+    const all = listItems();
+    expect(inventoryTotals()).toEqual({
+      items: 4,
+      value: Math.round(all.reduce((n, i) => n + (holdingValue(i, latest.get(i.id)) ?? 0), 0) * 100) / 100,
+      unpriced: all.filter((i) => holdingValue(i, latest.get(i.id)) === null).length,
+    });
+    expect(inventoryTotals()).toMatchObject({ value: 112, unpriced: 1 });
+    expect(inventoryTotals({ category: "case" })).toEqual({ items: 1, value: 28, unpriced: 0 });
+  });
+
+  it("finds the items whose copies have no recorded cost, in the database rather than after the fact", () => {
+    const { cases } = seed();
+    // A stack takes another purchase; a unique object cannot, so the cases are
+    // the ones that gain copies nobody priced.
+    addAcquisition(cases.id, { quantity: 5, unitCost: null, acquiredAt: "2026-01-02" });
+    const expected = [...costBasisByItem()].filter(([, b]) => b.copiesWithoutCost > 0).map(([id]) => id);
+    expect(expected).toEqual([cases.id]);
+    expect(listItems({ missingCost: true }).map((i) => i.id)).toEqual(expected);
+    expect(countItems({ missingCost: true })).toBe(1);
+    expect(listItems({ missingCost: true, search: "Clutch" }).map((i) => i.id)).toEqual([cases.id]);
+    expect(listItems({ missingCost: true, search: "Redline" })).toEqual([]);
+  });
+});
+
+describe("indexes", () => {
+  it("back the inventory's order, the storage-unit filter, the lot a sale drew from and an item's alerts", () => {
+    const names = (table: string) => (getDb().prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string }>).map((i) => i.name);
+    expect(names("items")).toEqual(expect.arrayContaining(["idx_items_updated", "idx_items_storage_unit"]));
+    expect(names("sale_lots")).toContain("idx_sale_lots_acquisition");
+    expect(names("alerts")).toContain("idx_alerts_item");
+    // The inventory's default order and its pages read the index, not a sort.
+    const plan = (getDb().prepare("EXPLAIN QUERY PLAN SELECT * FROM items ORDER BY updated_at DESC, id DESC LIMIT 120").all() as Array<{ detail: string }>)
+      .map((r) => r.detail)
+      .join(" ");
+    expect(plan).not.toContain("TEMP B-TREE");
   });
 });
 

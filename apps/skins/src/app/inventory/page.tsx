@@ -1,11 +1,16 @@
 import Link from "next/link";
 import { money } from "@collectcollect/core/format";
-import { costBasisByItem, latestSnapshotsByItem, listItems, listStorageUnits, type ListOptions } from "@/lib/items";
+import { ITEM_SORTS, countItems, inventoryTotals, isItemSort, latestSnapshotsByItem, listItems, listStorageUnits, type ItemSort, type ListOptions } from "@/lib/items";
 import { holdingValue } from "@/lib/valuation";
 import { CATEGORIES, CATEGORY_IDS, EXTERIORS, EXTERIOR_IDS, RARITIES, RARITY_IDS, type Category, type Exterior, type Rarity } from "@/lib/types";
 import { ItemTile } from "@/components/ItemTile";
 
 export const dynamic = "force-dynamic";
+
+/** Tiles per page: a thousand-item inventory is not one page of tiles. */
+export const PAGE_SIZE = 120;
+
+const SORT_LABELS: Record<ItemSort, string> = { updated: "Recently updated", name: "Name", value: "Value", added: "Recently added" };
 
 /** Only a value the app knows survives into a query; anything else is dropped. */
 function pick<T extends string>(value: string | undefined, allowed: readonly T[]): T | undefined {
@@ -27,25 +32,30 @@ export default async function InventoryPage({ searchParams }: PageProps<"/invent
     lockedOnly: one("locked") === "1" ? true : undefined,
     search: one("q") ?? undefined,
     storageUnit: one("unit"),
+    missingCost: one("cost") === "missing" ? true : undefined,
   };
-  const missingCost = one("cost") === "missing";
-  const basis = costBasisByItem();
-  const items = listItems(opts).filter((item) => !missingCost || (basis.get(item.id)?.copiesWithoutCost ?? 0) > 0);
+  const missingCost = opts.missingCost === true;
+  const sort: ItemSort = isItemSort(one("sort")) ? (one("sort") as ItemSort) : "updated";
+  // The figures at the top are over everything the filter matches; the tiles
+  // are one page of it.
+  const total = countItems(opts);
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const requested = Number.parseInt(one("page") ?? "", 10);
+  const page = Math.min(pages, Math.max(1, Number.isFinite(requested) ? requested : 1));
+  const items = listItems({ ...opts, sort, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
+  const totals = inventoryTotals(opts);
   const latest = latestSnapshotsByItem();
   const units = listStorageUnits();
   // An empty grid means two different things: nothing matched what was asked
   // for, or there is nothing at all yet. "Clear the filters" is useless advice
   // for the second, so it is only given for the first.
-  const filtered = missingCost || Object.values(opts).some((value) => value !== undefined && value !== "");
-
-  const total = items.reduce((n, i) => n + (holdingValue(i, latest.get(i.id)) ?? 0), 0);
-  const unpriced = items.filter((i) => holdingValue(i, latest.get(i.id)) === null).length;
+  const filtered = Object.values(opts).some((value) => value !== undefined && value !== "");
 
   // Links keep whatever else is already narrowed down, so filters stack instead
-  // of replacing one another.
+  // of replacing one another; a change of filter starts again at the first page.
   const href = (patch: Record<string, string | undefined>) => {
     const next = new URLSearchParams();
-    for (const [key, value] of Object.entries({ ...flatten(params), ...patch })) {
+    for (const [key, value] of Object.entries({ ...flatten(params), page: undefined, ...patch })) {
       if (value) next.set(key, value);
     }
     const query = next.toString();
@@ -57,9 +67,9 @@ export default async function InventoryPage({ searchParams }: PageProps<"/invent
       <header>
         <h1 className="font-display text-2xl font-semibold uppercase tracking-wide">Inventory</h1>
         <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
-          {items.length} item{items.length === 1 ? "" : "s"}
-          {total > 0 && ` worth ${money(total)}`}
-          {unpriced > 0 && `, ${unpriced} not priced`}
+          {totals.items} item{totals.items === 1 ? "" : "s"}
+          {totals.value > 0 && ` worth ${money(totals.value)}`}
+          {totals.unpriced > 0 && `, ${totals.unpriced} not priced`}
         </p>
       </header>
 
@@ -76,6 +86,13 @@ export default async function InventoryPage({ searchParams }: PageProps<"/invent
         {(["category", "exterior", "rarity", "stattrak", "locked", "unit", "cost"] as const).map((key) =>
           one(key) ? <input key={key} type="hidden" name={key} value={one(key)} /> : null,
         )}
+        <select name="sort" defaultValue={sort} className="input max-w-[12rem]" aria-label="Sort by">
+          {ITEM_SORTS.map((s) => (
+            <option key={s} value={s}>
+              {SORT_LABELS[s]}
+            </option>
+          ))}
+        </select>
         <button type="submit" className="btn-secondary">
           Search
         </button>
@@ -155,6 +172,16 @@ export default async function InventoryPage({ searchParams }: PageProps<"/invent
             </li>
           ))}
         </ul>
+      )}
+
+      {pages > 1 && (
+        <nav className="flex flex-wrap items-center justify-between gap-2 text-sm" aria-label="Pages">
+          {page > 1 ? <Link href={href({ sort: sort === "updated" ? undefined : sort, page: page === 2 ? undefined : String(page - 1) })} className="btn-secondary">Previous</Link> : <span />}
+          <span style={{ color: "var(--muted)" }}>
+            Page {page} of {pages} · {total} items
+          </span>
+          {page < pages ? <Link href={href({ sort: sort === "updated" ? undefined : sort, page: String(page + 1) })} className="btn-secondary">Next</Link> : <span />}
+        </nav>
       )}
     </div>
   );

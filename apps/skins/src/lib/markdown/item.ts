@@ -16,11 +16,22 @@ import type {
 import { CATEGORIES, EXTERIORS, RARITIES } from "../types";
 import { money, parseDocument, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "@collectcollect/core/markdown/format";
 
+/** How many prices an item's file lists, newest first; the database holds the rest. */
+export const MAX_VALUE_ROWS = 1000;
+
+/** The part of a price snapshot the file shows. */
+export type ValueRow = Pick<PriceSnapshot, "fetchedAt"> & {
+  summary: Pick<PriceSummary, "yourCopyValue" | "market" | "marketSource" | "yourCopyBasis"> & { quotes: Array<Pick<PriceQuote, "source" | "price">> };
+};
+
 /** Everything about one item that the plain-text copy preserves. */
 export interface ItemBundle {
   item: ItemRecord;
   sales: Sale[];
-  snapshots: PriceSnapshot[];
+  /** Newest first. Beyond MAX_VALUE_ROWS the file says how many older ones there are rather than listing them. */
+  snapshots: ValueRow[];
+  /** Older prices the caller already left out, counted on the file's closing line. */
+  snapshotsOmitted?: number;
   acquisitions: Acquisition[];
   /** Which lots each sale took, keyed by sale id, when that is recorded. */
   saleLots?: Map<number, Array<{ quantity: number; unitCost: number | null; acquiredAt: string | null }>>;
@@ -65,7 +76,7 @@ const MARKET_SHORT: Record<Exclude<PriceSource, "manual">, string> = { steam: "S
 const MARKET_BY_SHORT = new Map(Object.entries(MARKET_SHORT).map(([id, short]) => [short, id as Exclude<PriceSource, "manual">]));
 
 /** `Skinport $1.20 · CSFloat $1.15 · Steam $1.40` — the best price each market quoted. */
-function quotesCell(quotes: PriceQuote[]): string {
+function quotesCell(quotes: Array<Pick<PriceQuote, "source" | "price">>): string {
   const best = new Map<Exclude<PriceSource, "manual">, number>();
   for (const q of quotes) {
     if (q.source === "manual" || q.price === null) continue;
@@ -288,11 +299,15 @@ export function itemMarkdown(bundle: ItemBundle): string {
   }
 
   if (snapshots.length) {
+    // An item checked hourly for years would otherwise be a file of thousands
+    // of lines that is rewritten on every change to the item.
+    const rows = snapshots.slice(0, MAX_VALUE_ROWS);
+    const omitted = (bundle.snapshotsOmitted ?? 0) + (snapshots.length - rows.length);
     blocks.push(
       "## Value history",
       table(
         VALUE_HEADERS,
-        snapshots.map((s) => [
+        rows.map((s) => [
           s.fetchedAt,
           s.summary.yourCopyValue === null ? "" : money(s.summary.yourCopyValue),
           moneyCell(s.summary.market, s.summary.marketSource),
@@ -301,6 +316,7 @@ export function itemMarkdown(bundle: ItemBundle): string {
         ]),
       ),
     );
+    if (omitted > 0) blocks.push(`${omitted} earlier price${omitted === 1 ? "" : "s"} not shown; the database holds them.`);
   }
 
   if (acquisitions.length) {

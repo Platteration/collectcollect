@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { listLots, listSaleLots } from "../acquisitions";
 import { dataDir, getDb } from "../db";
-import type { Category, Exterior, ItemRecord, PriceSnapshot, Sale } from "../types";
+import type { Category, Exterior, ItemRecord, PriceSource, Sale } from "../types";
 import { CATEGORIES, EXTERIORS } from "../types";
-import { INDEX_HEADERS, idFromFileName, itemFileName, itemMarkdown } from "./item";
+import { INDEX_HEADERS, MAX_VALUE_ROWS, idFromFileName, itemFileName, itemMarkdown, type ValueRow } from "./item";
 import { money, parseDocument, readMoney, readTable, table } from "@collectcollect/core/markdown/format";
 import { writeFileAtomic } from "@collectcollect/core/atomic-write";
 
@@ -137,31 +137,56 @@ function saleLotsFor(
   return out;
 }
 
-function snapshotsFor(itemId: number): PriceSnapshot[] {
+/**
+ * The rows the file's value table shows, newest first and at most
+ * MAX_VALUE_ROWS of them, with the count of older ones. The database reads the
+ * shown fields out of each summary; nothing parses a whole summary, and a
+ * snapshot that is not valid JSON is passed over rather than failing the mirror.
+ */
+function snapshotsFor(itemId: number): { snapshots: ValueRow[]; omitted: number } {
   const rows = readRows(
-    "SELECT * FROM price_snapshots WHERE item_id = ? ORDER BY fetched_at DESC, id DESC",
+    `SELECT fetched_at,
+       json_extract(summary, '$.yourCopyValue') AS your_copy_value,
+       json_extract(summary, '$.market') AS market,
+       json_extract(summary, '$.marketSource') AS market_source,
+       json_extract(summary, '$.yourCopyBasis') AS your_copy_basis,
+       json_extract(summary, '$.quotes') AS quotes
+     FROM price_snapshots WHERE item_id = ? AND json_valid(summary)
+     ORDER BY fetched_at DESC, id DESC LIMIT ?`,
     itemId,
-  ) as Array<Record<string, unknown>>;
-  const out: PriceSnapshot[] = [];
-  for (const r of rows) {
+    MAX_VALUE_ROWS,
+  ) as Array<{ fetched_at: string; your_copy_value: unknown; market: unknown; market_source: unknown; your_copy_basis: unknown; quotes: unknown }>;
+  const total = (readRows("SELECT count(*) AS n FROM price_snapshots WHERE item_id = ? AND json_valid(summary)", itemId)[0] as { n: number }).n;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const str = (v: unknown) => (typeof v === "string" ? v : null);
+  const quotes = (v: unknown): Array<{ source: PriceSource; price: number | null }> => {
+    if (typeof v !== "string") return [];
     try {
-      out.push({
-        id: Number(r.id),
-        itemId: Number(r.item_id),
-        fetchedAt: String(r.fetched_at),
-        summary: JSON.parse(String(r.summary)),
-      });
+      const parsed = JSON.parse(v) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      return parsed.flatMap((q) =>
+        q && typeof q === "object" && typeof (q as { source?: unknown }).source === "string"
+          ? [{ source: (q as { source: PriceSource }).source, price: num((q as { price?: unknown }).price) }]
+          : [],
+      );
     } catch {
-      /* a snapshot that will not parse is not worth failing the mirror over */
+      return [];
     }
-  }
-  return out;
+  };
+  return {
+    snapshots: rows.map((r) => ({
+      fetchedAt: String(r.fetched_at),
+      summary: { yourCopyValue: num(r.your_copy_value), market: num(r.market), marketSource: str(r.market_source), yourCopyBasis: str(r.your_copy_basis) ?? "", quotes: quotes(r.quotes) },
+    })),
+    omitted: Math.max(0, total - rows.length),
+  };
 }
 
 /** Everything an item's file says, gathered in one place. */
 function bundleFor(item: ItemRecord) {
   const sales = salesFor(item.id);
-  return { item, sales, snapshots: snapshotsFor(item.id), acquisitions: listLots(item.id), saleLots: saleLotsFor(item.id, sales) };
+  const { snapshots, omitted } = snapshotsFor(item.id);
+  return { item, sales, snapshots, snapshotsOmitted: omitted, acquisitions: listLots(item.id), saleLots: saleLotsFor(item.id, sales) };
 }
 
 /**
@@ -356,8 +381,8 @@ pattern seed, how many you have, what you paid, where it is kept. It is written
 as YAML with JSON values, which means both people and programs can read it.
 
 Underneath is the same item written for a person: what it is, its stickers,
-your notes, every price the app ever recorded for it, what each copy cost, and
-any sales.
+your notes, its prices as the app recorded them (the newest thousand; the
+database holds the rest), what each copy cost, and any sales.
 
 ## Float and pattern
 
