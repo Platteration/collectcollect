@@ -36,11 +36,13 @@ docker build -t collectcollect .                            # the card app
 docker build -t collectcollect-skins --build-arg APP=skins .
 ```
 
-**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach. Failed attempts are rate limited, and changing the password invalidates existing sessions. Each session carries an id: signing out ends that one, wherever a copy of its cookie went, and *Sign out everywhere* on the Settings page ends every session issued so far — for the phone that was lost or the browser left signed in. The record lives in `sessions.json` in the data directory. Sessions from before this record existed are not recognised, so upgrading asks for the password once more.
+**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach. Failed attempts are rate limited, and changing the password invalidates existing sessions. Each session carries an id: signing out ends that one, wherever a copy of its cookie went, and *Sign out everywhere* on the Settings page ends every session issued so far — for the phone that was lost or the browser left signed in. The record lives in `sessions.json` in the data directory. The cookie is signed with a random key kept beside it in `session-secret`, so a stolen cookie is no help to anyone guessing the password; `APP_SECRET` replaces that key if you would rather set one. Neither file is in a backup: a restore onto a new machine asks for the password once more. So does upgrading past the point either was introduced, since older sessions are not recognised.
 
 > Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
 
 **Behind a proxy.** The login limiter and the per-route limits count attempts per client. Without a proxy every client is one client, and the `X-Forwarded-For` header is ignored — anyone can send one. Set `TRUST_PROXY=1` only when a reverse proxy in front of the app sets that header, and it will be read — as will `X-Forwarded-Proto`, which is what lets the session cookie be marked `Secure` and the response carry HSTS when the proxy terminates TLS. Compose binds both apps to `127.0.0.1`; put the proxy in front and change the bind address there, since neither app speaks TLS.
+
+**Host names and other sites.** Whether or not a password is set, each app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` / `.home.arpa` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`, and the proxy has to pass the original `Host` header through. Requests that a browser sends from another site are refused for anything but a read, so a page you happen to visit cannot restore a backup over your collection or spend your API budget; `curl` and scripts, which send no browser origin headers, are unaffected. The health route ignores the host list, since a container checks itself by address.
 
 **Webhooks.** The alert webhook is posted to by the server itself, so it has to be an address on the public internet: `localhost`, `*.local`, and any private, loopback or link-local address are refused when saved, a name that resolves to one is refused at delivery, and the request does not follow redirects.
 
@@ -273,9 +275,11 @@ valuation and grading-outlook maths, the repository and its migrations, sales,
 submissions, alert rules, and the password gate.
 
 The end-to-end suite drives a real production build in Chromium against a
-throwaway data directory. Identification and price lookups are intercepted, so
-the tests never call Anthropic or a price API, but everything else, including
-the database, runs for real. It covers adding a card by hand, duplicate
+throwaway data directory. Identification is intercepted in the browser, and the
+servers under test are started with no network at all (`scripts/e2e-offline.mjs`),
+so a price lookup made on the server fails at once and says so; the tests never
+call Anthropic or a price API, but everything else, including the database,
+runs for real. It covers adding a card by hand, duplicate
 merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
 grading submission from draft to booked outcome, and the password gate. Both
 suites plus lint, typecheck and build run in CI on every push.

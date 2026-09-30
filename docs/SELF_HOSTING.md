@@ -21,7 +21,7 @@ The named `collectcollect-data` volume holds `/data`. Container replacement pres
 
 ## Remote access
 
-Keep the default localhost bindings. Set a strong `APP_PASSWORD` (and `SKINS_APP_PASSWORD` for skins), and place an HTTPS reverse proxy in front. Set `TRUST_PROXY=1` only when the proxy replaces forwarded headers. The apps do not serve TLS. Serve cards and skins on distinct origins because their service workers each own their origin. This remains one shared collection with no separate user accounts.
+Keep the default localhost bindings. Set a strong `APP_PASSWORD` (and `SKINS_APP_PASSWORD` for skins), and place an HTTPS reverse proxy in front. Set `TRUST_PROXY=1` only when the proxy replaces forwarded headers. Set `ALLOWED_HOSTS` to the domain name the proxy serves and have the proxy pass the original `Host` header through: the apps refuse other names, and refuse writes a browser sends from another site. The apps do not serve TLS. Serve cards and skins on distinct origins because their service workers each own their origin. This remains one shared collection with no separate user accounts.
 
 ## Backup, update and recovery
 
