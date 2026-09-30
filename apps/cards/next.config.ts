@@ -13,6 +13,26 @@ const nextConfig: NextConfig = {
   // self-contained server.js, but `next start` does not support it, so a
   // normal local build keeps the default output.
   ...(process.env.BUILD_STANDALONE ? { output: "standalone" as const } : {}),
+  // The proxy's matcher leaves /_next/ alone, so its headers stop at the page.
+  // These five are the ones that apply to a static file; the content security
+  // policy needs the request's nonce and HSTS the request's scheme, and a
+  // browser already holds both from the page that asked for the file. Kept
+  // equal to securityHeaders() in packages/core/src/proxy.ts by
+  // tests/next-config.test.ts, since this file cannot import it.
+  async headers() {
+    return [
+      {
+        source: "/_next/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=(), payment=()" },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

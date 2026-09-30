@@ -36,6 +36,14 @@ test.describe("what every response carries", () => {
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).not.toContain("unsafe-eval");
 
+    // The proxy's matcher leaves /_next/ alone; next.config.ts carries the
+    // static files' headers, so a chunk is as unsniffable as the page.
+    const src = await page.locator('script[src^="/_next/static/"]').first().getAttribute("src");
+    const asset = await page.request.get(src!);
+    expect(asset.ok()).toBe(true);
+    expect(asset.headers()["x-content-type-options"]).toBe("nosniff");
+    expect(asset.headers()["x-frame-options"]).toBe("DENY");
+
     // The inline theme script carries the nonce and ran, and the app's own
     // bundles loaded, so the page is interactive.
     await expect(page.locator("html")).toHaveAttribute("data-theme", /light|dark/);
