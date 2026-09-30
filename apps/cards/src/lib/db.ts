@@ -141,6 +141,21 @@ const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "cards", column: "location", ddl: "ALTER TABLE cards ADD COLUMN location TEXT" },
 ];
 
+/**
+ * The lookups that read whole tables without these. The cards index is the
+ * expression findSimilar filters on, exactly, so every intake and every import
+ * row stops scanning the collection; the rest back the foreign keys that
+ * cascade from a card and the order and filter the collection page uses.
+ */
+const INDEXES = `
+CREATE INDEX IF NOT EXISTS idx_cards_game_name ON cards(game, lower(trim(name)));
+CREATE INDEX IF NOT EXISTS idx_cards_updated ON cards(updated_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_cards_location ON cards(location);
+CREATE INDEX IF NOT EXISTS idx_sale_lots_acquisition ON sale_lots(acquisition_id);
+CREATE INDEX IF NOT EXISTS idx_submission_cards_card ON submission_cards(card_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_card ON alerts(card_id);
+`;
+
 export const SCHEMA_VERSION = 1;
 
 export function initializeDatabase(db: Database.Database): void {
@@ -151,6 +166,9 @@ export function initializeDatabase(db: Database.Database): void {
     const cols = db.prepare(`PRAGMA table_info(${m.table})`).all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === m.column)) db.exec(m.ddl);
   }
+  // After the migrations: an index on a column an older database gains above
+  // cannot exist before the column does.
+  db.exec(INDEXES);
   backfillAcquisitions(db);
   initializeScanDrafts(db);
   initializeGoalSchema(db);
