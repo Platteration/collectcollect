@@ -1,4 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { E2E_PASSWORD, LOCKED_DATA_DIR, READ_DATA_DIR, WRITE_DATA_DIR } from "./e2e/data-dir";
 
 // Fixture timestamps render identically in the server and the browser on every host.
@@ -15,9 +17,12 @@ process.env.TZ = "UTC";
 const READ_PORT = 3220;
 const WRITE_PORT = 3221;
 const LOCKED_PORT = 3222;
+// Every server reaches no host but its own (scripts/e2e-offline.mjs), so a
+// price lookup made on the server fails at once rather than calling a market.
+const offline = [process.env.NODE_OPTIONS, `--import=${pathToFileURL(path.join(import.meta.dirname, "../../scripts/e2e-offline.mjs")).href}`].filter(Boolean).join(" ");
 
 /** Specs that write. Everything else reads the seeded inventory. */
-const WRITES = /(add|backup|edit|import|money)\.spec\.ts/;
+const WRITES = /(add|backup|edit|import|money|offline)\.spec\.ts/;
 const AUTH = /auth\.spec\.ts/;
 
 export default defineConfig({
@@ -53,25 +58,25 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `node ../../scripts/e2e-server.mjs ${READ_PORT}`,
+      command: `node ../../scripts/e2e-server.mjs ${READ_PORT} SKINS_DATA_DIR`,
       port: READ_PORT,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { SKINS_DATA_DIR: READ_DATA_DIR, SKINS_AUTO_REFRESH_HOURS: "0" },
+      env: { SKINS_DATA_DIR: READ_DATA_DIR, SKINS_AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: offline },
     },
     {
-      command: `node ../../scripts/e2e-server.mjs ${WRITE_PORT}`,
+      command: `node ../../scripts/e2e-server.mjs ${WRITE_PORT} SKINS_DATA_DIR`,
       port: WRITE_PORT,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { SKINS_DATA_DIR: WRITE_DATA_DIR, SKINS_AUTO_REFRESH_HOURS: "0" },
+      env: { SKINS_DATA_DIR: WRITE_DATA_DIR, SKINS_AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: offline },
     },
     {
-      command: `node ../../scripts/e2e-server.mjs ${LOCKED_PORT}`,
+      command: `node ../../scripts/e2e-server.mjs ${LOCKED_PORT} SKINS_DATA_DIR`,
       port: LOCKED_PORT,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { SKINS_DATA_DIR: LOCKED_DATA_DIR, SKINS_APP_PASSWORD: E2E_PASSWORD, SKINS_AUTO_REFRESH_HOURS: "0" },
+      env: { SKINS_DATA_DIR: LOCKED_DATA_DIR, SKINS_APP_PASSWORD: E2E_PASSWORD, SKINS_AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: offline },
     },
   ],
 });

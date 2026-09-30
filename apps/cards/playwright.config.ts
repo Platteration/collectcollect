@@ -1,4 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { E2E_PASSWORD, LOCKED_DATA_DIR, OPEN_DATA_DIR } from "./e2e/data-dir";
 
 // Fixture timestamps render identically in the server and the browser on every host.
@@ -11,6 +13,9 @@ process.env.TZ = "UTC";
  */
 const OPEN_PORT = 3210;
 const LOCKED_PORT = 3211;
+// Both servers reach no host but their own (scripts/e2e-offline.mjs), so a
+// price lookup made on the server fails at once rather than calling a real API.
+const offline = [process.env.NODE_OPTIONS, `--import=${pathToFileURL(path.join(import.meta.dirname, "../../scripts/e2e-offline.mjs")).href}`].filter(Boolean).join(" ");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -39,20 +44,20 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `node ../../scripts/e2e-server.mjs ${OPEN_PORT}`,
+      command: `node ../../scripts/e2e-server.mjs ${OPEN_PORT} DATA_DIR`,
       port: OPEN_PORT,
       reuseExistingServer: false,
       timeout: 120_000,
       // A placeholder key makes the client take the identify path, which the
       // tests intercept; no request ever reaches Anthropic.
-      env: { DATA_DIR: OPEN_DATA_DIR, ANTHROPIC_API_KEY: "sk-ant-e2e-placeholder", AUTO_REFRESH_HOURS: "0" },
+      env: { DATA_DIR: OPEN_DATA_DIR, ANTHROPIC_API_KEY: "sk-ant-e2e-placeholder", AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: offline },
     },
     {
-      command: `node ../../scripts/e2e-server.mjs ${LOCKED_PORT}`,
+      command: `node ../../scripts/e2e-server.mjs ${LOCKED_PORT} DATA_DIR`,
       port: LOCKED_PORT,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { DATA_DIR: LOCKED_DATA_DIR, APP_PASSWORD: E2E_PASSWORD, AUTO_REFRESH_HOURS: "0" },
+      env: { DATA_DIR: LOCKED_DATA_DIR, APP_PASSWORD: E2E_PASSWORD, AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: offline },
     },
   ],
 });
