@@ -106,6 +106,43 @@ describe("what Steam answers", () => {
     const payload = inventory([description()], [{ assetid: "1", classid: "310776560", instanceid: "302028390", amount: "1" }]);
     expect((await fetchInventory(STEAM_ID, answering(payload))).assets).toHaveLength(1);
   });
+
+  it("does not fall over a bare null", async () => {
+    await expect(fetchInventory(STEAM_ID, answering("null"))).rejects.toThrow(/returned nothing/);
+  });
+
+  it("reads every page of a large inventory, continuing from where Steam said", async () => {
+    const asset = (id: string) => ({ assetid: id, classid: "310776560", instanceid: "302028390", amount: "1" });
+    const pages = [
+      { success: 1, descriptions: [description()], assets: [asset("1"), asset("2")], total_inventory_count: 3, more_items: 1, last_assetid: "2" },
+      { success: 1, descriptions: [description()], assets: [asset("3")], total_inventory_count: 3 },
+    ];
+    const urls: string[] = [];
+    const fetchImpl = vi.fn(async (url: string) => {
+      urls.push(url);
+      return new Response(JSON.stringify(pages.shift()), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const read = await fetchInventory(STEAM_ID, fetchImpl);
+    expect(read.assets?.map((a) => a.assetid)).toEqual(["1", "2", "3"]);
+    // The same description on both pages is one description.
+    expect(read.descriptions).toHaveLength(1);
+    expect(urls).toHaveLength(2);
+    expect(urls[0]).not.toContain("start_assetid");
+    expect(urls[1]).toContain("start_assetid=2");
+  });
+
+  it("refuses an inventory that arrives short of what Steam says it holds, rather than calling the rest missing", async () => {
+    const payload = { success: 1, descriptions: [description()], assets: [{ assetid: "1", classid: "310776560", instanceid: "302028390", amount: "1" }], total_inventory_count: 40 };
+    await expect(fetchInventory(STEAM_ID, answering(payload))).rejects.toThrow(/holds 40 items but sent 1/);
+  });
+
+  it("stops asking for more pages at a limit, and says so", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ success: 1, descriptions: [], assets: [{ assetid: "1", classid: "x", instanceid: "y", amount: "1" }], more_items: 1, last_assetid: "1" }), { status: 200 }),
+    ) as unknown as typeof fetch;
+    await expect(fetchInventory(STEAM_ID, fetchImpl)).rejects.toThrow(/after 10 pages/);
+    expect(fetchImpl).toHaveBeenCalledTimes(10);
+  });
 });
 
 describe("parsing an inventory", () => {

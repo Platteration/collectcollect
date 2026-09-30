@@ -18,11 +18,11 @@ describe("saving settings", () => {
   });
 
   it("refuses a value that is not a number, and changes nothing", async () => {
-    saveSettings({ ...DEFAULT_SETTINGS, stattrakMultiplier: 1.3 });
-    const res = await put({ stattrakMultiplier: null });
+    saveSettings({ ...DEFAULT_SETTINGS, alertMovePercent: 30 });
+    const res = await put({ alertMovePercent: null });
     expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toMatch(/StatTrak/);
-    expect(getSettings().stattrakMultiplier).toBe(1.3);
+    expect(((await res.json()) as { error: string }).error).toMatch(/price-move alert percentage/);
+    expect(getSettings().alertMovePercent).toBe(30);
   });
 
   it("refuses a fee that would mean a sale pays nothing", async () => {
@@ -32,7 +32,7 @@ describe("saving settings", () => {
     expect(getSettings().marketFees.steam).toBe(DEFAULT_SETTINGS.marketFees.steam);
   });
 
-  it("leaves markets and wear tiers it was not told about alone", async () => {
+  it("leaves markets it was not told about alone", async () => {
     saveSettings({ ...DEFAULT_SETTINGS, marketFees: { ...DEFAULT_SETTINGS.marketFees, csfloat: 0.01 } });
     expect((await put({ marketFees: { skinport: 0.1 } })).status).toBe(200);
     expect(getSettings().marketFees).toMatchObject({ skinport: 0.1, csfloat: 0.01 });
@@ -71,11 +71,20 @@ describe("reading settings back", () => {
     // A copy written by hand, or by a version before the rule existed.
     getDb()
       .prepare("INSERT INTO settings (key, value) VALUES ('settings', ?)")
-      .run(JSON.stringify({ marketFees: { steam: 1.5, skinport: -0.1 }, stattrakMultiplier: -2, ownerName: "  Ada  " }));
+      .run(JSON.stringify({ marketFees: { steam: 1.5, skinport: -0.1 }, alertMovePercent: -2, ownerName: "  Ada  " }));
     const read = getSettings();
     expect(read.marketFees.steam).toBe(DEFAULT_SETTINGS.marketFees.steam);
     expect(read.marketFees.skinport).toBe(DEFAULT_SETTINGS.marketFees.skinport);
-    expect(read.stattrakMultiplier).toBe(DEFAULT_SETTINGS.stattrakMultiplier);
+    expect(read.alertMovePercent).toBe(DEFAULT_SETTINGS.alertMovePercent);
     expect(read.ownerName).toBe("Ada");
+  });
+
+  it("drops the wear, StatTrak and Souvenir multipliers a stored copy still carries, which nothing ever read", () => {
+    getDb()
+      .prepare("INSERT INTO settings (key, value) VALUES ('settings', ?)")
+      .run(JSON.stringify({ ...DEFAULT_SETTINGS, exteriorMultipliers: { factory_new: 1.2 }, stattrakMultiplier: 1.5, souvenirMultiplier: 2, spreadMinAmount: 7 }));
+    const read = getSettings() as unknown as Record<string, unknown>;
+    expect(Object.keys(read).sort()).toEqual(Object.keys(DEFAULT_SETTINGS).sort());
+    expect(read.spreadMinAmount).toBe(7);
   });
 });

@@ -1,7 +1,7 @@
 import { latestSnapshotsByItem, listItems } from "./items";
-import { proceedsByMarket, type MarketProceeds } from "./pricing/index";
+import { PROVIDERS, proceedsByMarket, type MarketProceeds } from "./pricing/index";
 import { getSettings } from "./settings";
-import type { ItemRecord, Settings } from "./types";
+import { MARKETS, MARKET_IDS, type ItemRecord, type Settings } from "./types";
 
 /**
  * Where each item in the inventory is worth most, and by how much.
@@ -39,6 +39,12 @@ export interface SpreadView {
   unpriced: number;
   /** Of the rows worth doing, those that cannot be acted on yet. */
   lockedCount: number;
+  /**
+   * The markets that pay out in money and are set up to be asked. With fewer
+   * than two, no item can gain a comparison at the next refresh, and the page
+   * says which key would change that rather than only counting the items.
+   */
+  cashMarketsAsked: string[];
   settings: Settings;
 }
 
@@ -104,6 +110,7 @@ export function spreadView(settings = getSettings()): SpreadView {
     noComparison,
     unpriced,
     lockedCount: worthDoing.filter((r) => r.locked).length,
+    cashMarketsAsked: MARKET_IDS.filter((id) => MARKETS[id].cashOut && PROVIDERS.some((p) => p.id === id && p.isConfigured())).map((id) => MARKETS[id].label),
     settings,
   };
 }

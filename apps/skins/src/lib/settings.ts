@@ -27,24 +27,20 @@ export function saveSettings(settings: Settings): Settings {
  * are saved and when they are read back. A stored copy can predate a rule, or
  * have been edited by hand; reading it as strictly as it would be saved means
  * a fee at or above 1 never reaches the spread table from either direction.
+ * Keys a copy carries that are no longer settings (the wear, StatTrak and
+ * Souvenir multipliers nothing ever read) are dropped on the way in.
  */
 export function sanitize(input: Partial<Settings>): Settings {
   return {
-    // Every wear tier and every market must always have a number, or an
-    // arithmetic gap would show up as a missing value halfway down the spread
-    // table. Defaults fill anything the copy is missing or that fails a rule.
-    exteriorMultipliers: {
-      ...DEFAULT_SETTINGS.exteriorMultipliers,
-      ...sanitizeNumbers(input.exteriorMultipliers),
-    } as Settings["exteriorMultipliers"],
+    // Every market must always have a number, or an arithmetic gap would show
+    // up as a missing value halfway down the spread table. Defaults fill
+    // anything the copy is missing or that fails a rule.
     marketFees: {
       ...DEFAULT_SETTINGS.marketFees,
       // A fee is a fraction of the price, so anything at or above 1 would mean
       // a sale that pays nothing or costs money; that is a typo, not a market.
       ...sanitizeNumbers(input.marketFees, 1),
     } as Settings["marketFees"],
-    stattrakMultiplier: nonNegative(input.stattrakMultiplier, DEFAULT_SETTINGS.stattrakMultiplier),
-    souvenirMultiplier: nonNegative(input.souvenirMultiplier, DEFAULT_SETTINGS.souvenirMultiplier),
     ownerName: (typeof input.ownerName === "string" ? input.ownerName : "").trim().slice(0, 120),
     alertMovePercent: nonNegative(input.alertMovePercent, DEFAULT_SETTINGS.alertMovePercent),
     spreadMinAmount: nonNegative(input.spreadMinAmount, DEFAULT_SETTINGS.spreadMinAmount),

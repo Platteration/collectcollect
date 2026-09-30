@@ -122,6 +122,16 @@ describe("creating an item", () => {
     expect(item.purchasePrice).toBeNull();
   });
 
+  it("brings nothing in when the purchase lot cannot be written", () => {
+    // A failure between the row and its lot used to leave an item whose copies
+    // belonged to no purchase, which the ledger's invariant refuses.
+    getDb().exec("CREATE TRIGGER fail BEFORE INSERT ON acquisitions BEGIN SELECT RAISE(ABORT, 'boom'); END");
+    expect(() => seedRedline({ stickers: [{ slot: 0, name: "Crown (Foil)", marketHashName: "Sticker | Crown (Foil)", wear: 0.12 }] })).toThrow(/boom/);
+    expect(listItems()).toEqual([]);
+    expect(getDb().prepare("SELECT count(*) AS n FROM item_stickers").get()).toEqual({ n: 0 });
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
   it("keeps the stickers it was given", () => {
     const item = seedRedline({
       stickers: [{ slot: 0, name: "Crown (Foil)", marketHashName: "Sticker | Crown (Foil)", wear: 0.12 }],

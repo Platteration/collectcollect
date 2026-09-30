@@ -56,12 +56,9 @@ export async function PUT(request: Request) {
     return value;
   };
 
-  const exteriorMultipliers = numbers("wear multipliers", body.exteriorMultipliers, current.exteriorMultipliers);
   // A fee is a fraction of the price, so 1 or more would mean a sale that pays
   // nothing or costs money. That is a typo, not a market.
   const marketFees = numbers("market fees", body.marketFees, current.marketFees, 1);
-  const stattrakMultiplier = number("StatTrak premium", body.stattrakMultiplier, current.stattrakMultiplier);
-  const souvenirMultiplier = number("Souvenir premium", body.souvenirMultiplier, current.souvenirMultiplier);
   const alertMovePercent = number("price-move alert percentage", body.alertMovePercent, current.alertMovePercent);
   const spreadMinAmount = number("spread amount", body.spreadMinAmount, current.spreadMinAmount);
   const spreadMinPercent = number("spread percentage", body.spreadMinPercent, current.spreadMinPercent);
@@ -76,10 +73,7 @@ export async function PUT(request: Request) {
   const settings = saveSettings({
     // A partial set leaves the rest as they are, rather than taking the ones it
     // did not mention back to the app's defaults.
-    exteriorMultipliers: { ...current.exteriorMultipliers, ...exteriorMultipliers } as Settings["exteriorMultipliers"],
     marketFees: { ...current.marketFees, ...marketFees } as Settings["marketFees"],
-    stattrakMultiplier,
-    souvenirMultiplier,
     ownerName,
     alertMovePercent,
     spreadMinAmount,

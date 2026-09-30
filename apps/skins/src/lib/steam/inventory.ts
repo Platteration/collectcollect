@@ -57,6 +57,9 @@ export interface SteamInventory {
   assets?: SteamAsset[];
   descriptions?: SteamDescription[];
   total_inventory_count?: number;
+  /** Set when there is another page; `last_assetid` is where it starts. */
+  more_items?: number;
+  last_assetid?: string;
 }
 
 /** Steam's own item-type tag, mapped onto what this app calls things. */
@@ -311,15 +314,24 @@ export function isSteamId64(value: string): boolean {
   return /^7656119\d{10}$/.test(value.trim());
 }
 
-export const INVENTORY_URL = (steamId: string, count: number) =>
-  `https://steamcommunity.com/inventory/${steamId}/730/2?l=english&count=${count}`;
+export const INVENTORY_URL = (steamId: string, count: number, startAssetId?: string) =>
+  `https://steamcommunity.com/inventory/${steamId}/730/2?l=english&count=${count}${startAssetId ? `&start_assetid=${encodeURIComponent(startAssetId)}` : ""}`;
+
+/** Pages of `count` assets before an inventory is refused as bigger than this app will read. */
+export const MAX_INVENTORY_PAGES = 10;
 
 /**
- * Read a public inventory.
+ * Read a public inventory, every page of it.
  *
  * Steam answers 403 for a private one and 429 when asked too often, and both
  * are ordinary states rather than faults, so each gets a sentence a person can
  * act on instead of a status code.
+ *
+ * An inventory larger than one page arrives with `more_items` set and the
+ * asset to continue from. Reading only the first page, as this used to, made
+ * everything past it look like it had left the inventory: the import's own
+ * "missing" list would then have named it all. When Steam's own count
+ * disagrees with what arrived, the read is refused rather than applied.
  */
 export async function fetchInventory(
   steamId: string,
@@ -329,29 +341,51 @@ export async function fetchInventory(
   if (!isSteamId64(steamId)) {
     throw new SteamInventoryError("That is not a SteamID64. It is seventeen digits and starts 7656119.");
   }
-  const response = await fetchImpl(INVENTORY_URL(steamId.trim(), count), {
-    headers: { Accept: "application/json" },
-  });
-  if (response.status === 403) {
-    // Steam answers 403 for a private inventory — but so does anything between
-    // here and Steam that refuses the request, and the two are identical from
-    // this side. Naming only the first would send someone to change a privacy
-    // setting that was never the problem.
-    throw new SteamInventoryError(
-      "That request was refused. Usually the inventory is not set to Public; it can also be a proxy or firewall blocking steamcommunity.com.",
-    );
+  const assets: SteamAsset[] = [];
+  const descriptions = new Map<string, SteamDescription>();
+  let total: number | undefined;
+  let start: string | undefined;
+  for (let page = 1; ; page++) {
+    const response = await fetchImpl(INVENTORY_URL(steamId.trim(), count, start), {
+      headers: { Accept: "application/json" },
+    });
+    if (response.status === 403) {
+      // Steam answers 403 for a private inventory — but so does anything between
+      // here and Steam that refuses the request, and the two are identical from
+      // this side. Naming only the first would send someone to change a privacy
+      // setting that was never the problem.
+      throw new SteamInventoryError(
+        "That request was refused. Usually the inventory is not set to Public; it can also be a proxy or firewall blocking steamcommunity.com.",
+      );
+    }
+    if (response.status === 429) {
+      throw new SteamInventoryError("Steam is rate limiting this address. Wait a few minutes and try again.");
+    }
+    if (!response.ok) {
+      throw new SteamInventoryError(`Steam answered ${response.status}.`);
+    }
+    const payload = (await response.json()) as SteamInventory | null;
+    // Steam answers 200 with success: 0 for an empty or hidden inventory, and
+    // has been known to answer with a bare null, so the status alone is not
+    // enough to know it worked.
+    if (!payload || typeof payload !== "object") throw new SteamInventoryError("Steam returned nothing for that inventory.");
+    if (payload.success === 0 || (!payload.assets && !payload.descriptions)) {
+      throw new SteamInventoryError(payload.error || "Steam returned nothing for that inventory.");
+    }
+    for (const asset of payload.assets ?? []) assets.push(asset);
+    for (const description of payload.descriptions ?? []) descriptions.set(`${description.classid}:${description.instanceid}`, description);
+    if (typeof payload.total_inventory_count === "number") total = payload.total_inventory_count;
+    if (payload.more_items === 1 && payload.last_assetid) {
+      if (page >= MAX_INVENTORY_PAGES) {
+        throw new SteamInventoryError(`Steam was still sending more after ${MAX_INVENTORY_PAGES} pages (${assets.length} items); nothing was imported.`);
+      }
+      start = payload.last_assetid;
+      continue;
+    }
+    break;
   }
-  if (response.status === 429) {
-    throw new SteamInventoryError("Steam is rate limiting this address. Wait a few minutes and try again.");
+  if (total !== undefined && total !== assets.length) {
+    throw new SteamInventoryError(`Steam says this inventory holds ${total} items but sent ${assets.length}; nothing was imported, so nothing goes missing.`);
   }
-  if (!response.ok) {
-    throw new SteamInventoryError(`Steam answered ${response.status}.`);
-  }
-  const payload = (await response.json()) as SteamInventory;
-  // Steam answers 200 with success: 0 for an empty or hidden inventory, so the
-  // status alone is not enough to know it worked.
-  if (payload.success === 0 || (!payload.assets && !payload.descriptions)) {
-    throw new SteamInventoryError(payload.error || "Steam returned nothing for that inventory.");
-  }
-  return payload;
+  return { success: 1, assets, descriptions: [...descriptions.values()], total_inventory_count: total ?? assets.length };
 }

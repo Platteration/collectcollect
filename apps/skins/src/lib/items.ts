@@ -301,6 +301,10 @@ function readStickers(itemId: number): AppliedSticker[] {
 
 export function createItem(input: ItemInput): ItemRecord {
   const i = normalizeInput(input);
+  // One transaction: the row, its stickers and its first purchase lot go in
+  // together or not at all. A failure between the row and the lot left an
+  // item whose copies belonged to no purchase, which the ledger refuses.
+  const item = getDb().transaction((): ItemRecord => {
   const now = new Date().toISOString();
   const result = getDb()
     .prepare(
@@ -329,7 +333,8 @@ export function createItem(input: ItemInput): ItemRecord {
   if (created.quantity > 0) {
     addLot(created.id, { quantity: created.quantity, unitCost: created.purchasePrice, acquiredAt: created.createdAt });
   }
-  const item = getItem(created.id)!;
+  return getItem(created.id)!;
+  })();
   touch(item, { mayHaveOldName: false });
   return item;
 }

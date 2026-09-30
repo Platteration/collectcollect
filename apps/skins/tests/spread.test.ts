@@ -118,3 +118,16 @@ describe("the spread view", () => {
     expect(second?.item.id).toBe(knife.id);
   });
 });
+
+describe("what the spread page can say about the markets it asks", () => {
+  it("names the cash markets that are set up to be asked, so a missing key can be named", () => {
+    delete process.env.CSFLOAT_API_KEY;
+    expect(spreadView().cashMarketsAsked).toEqual(["Skinport"]);
+    process.env.CSFLOAT_API_KEY = "key";
+    try {
+      expect(spreadView().cashMarketsAsked).toEqual(["Skinport", "CSFloat"]);
+    } finally {
+      delete process.env.CSFLOAT_API_KEY;
+    }
+  });
+});

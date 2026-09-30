@@ -28,11 +28,14 @@ test.describe("where to sell", () => {
     await expect(page.getByText(/not actionable yet/)).toBeVisible();
   });
 
-  test("says how many it had nothing to compare", async ({ page }) => {
+  test("says how many it had nothing to compare, and why that may be", async ({ page }) => {
     await page.goto("/spread");
-    // Two items only one market is listing. Comparing those against nothing
-    // would invent a spread.
-    await expect(page.getByText(/2 items have only one market listing them/)).toBeVisible();
+    // Two items only one market that pays money is listing. Comparing those
+    // against nothing would invent a spread.
+    await expect(page.getByText(/2 items have only one market that pays money listing them/)).toBeVisible();
+    // The suite runs without a CSFloat key, which is the likeliest reason.
+    await expect(page.getByText(/Skinport is the only one that pays money being asked/)).toBeVisible();
+    await expect(page.getByText(/CSFLOAT_API_KEY/)).toBeVisible();
   });
 
   test("shows the same arithmetic on the item itself", async ({ page }) => {

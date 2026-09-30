@@ -94,8 +94,14 @@ export default function SpreadPage() {
         <p className="text-xs" style={{ color: "var(--muted)" }}>
           {view.noComparison > 0 && (
             <>
-              {view.noComparison} item{view.noComparison === 1 ? " has" : "s have"} only one market listing{" "}
+              {view.noComparison} item{view.noComparison === 1 ? " has" : "s have"} only one market that pays money listing{" "}
               {view.noComparison === 1 ? "it" : "them"}, so there is nothing to compare.{" "}
+              {view.cashMarketsAsked.length < 2 && (
+                <>
+                  {view.cashMarketsAsked[0] ?? "No market"} is the only one that pays money being asked; add <code>CSFLOAT_API_KEY</code> for a
+                  second to compare against.{" "}
+                </>
+              )}
             </>
           )}
           {view.unpriced > 0 && (

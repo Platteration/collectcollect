@@ -264,9 +264,19 @@ export interface PriceSummary {
   /** The headline market price, and which source it came from. */
   market: number | null;
   marketSource: string | null;
-  /** What this copy is worth, allowing for its wear and its StatTrak premium. */
+  /**
+   * What this copy is worth: what the best market that pays out in money would
+   * hand over after its cut, or the owner's own price. Only when nothing pays
+   * in money does Steam's wallet figure stand in, and then it says so.
+   */
   yourCopyValue: number | null;
   yourCopyBasis: string;
+  /**
+   * Which of those it is. A snapshot from before this was recorded has none,
+   * and its value is the highest listing before fees; a move measured across
+   * that boundary is not a move, and the alerts know to leave it alone.
+   */
+  valueBasis?: "cash" | "wallet" | "manual";
   quotes: PriceQuote[];
   errors: Array<{ source: string; message: string }>;
 }
@@ -314,16 +324,6 @@ export interface Alert {
 }
 
 export interface Settings {
-  /** Multiplier applied to the tier's price for a copy at this wear. */
-  exteriorMultipliers: Record<Exterior, number>;
-  /**
-   * Stand-in premiums for when only the plain variant of a skin has a quote.
-   * Every market prices StatTrak and Souvenir copies under their own names, so
-   * these apply to an estimate, never to a quote that was already for the right
-   * variant.
-   */
-  stattrakMultiplier: number;
-  souvenirMultiplier: number;
   /** What each market keeps, as a fraction of the buyer's price. */
   marketFees: Record<Market["id"], number>;
   /** Shown on the printable valuation report. */
@@ -338,20 +338,6 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  // A tier's own market price already reflects its wear, so these start at 1:
-  // they exist to price a copy against a neighbouring tier's quote, not to
-  // discount a quote that was already for the right tier.
-  exteriorMultipliers: {
-    factory_new: 1.0,
-    minimal_wear: 1.0,
-    field_tested: 1.0,
-    well_worn: 1.0,
-    battle_scarred: 1.0,
-  },
-  // Left at 1 rather than at a plausible-looking guess: an invented premium
-  // would read as a measurement. Set it once you know your own market.
-  stattrakMultiplier: 1.0,
-  souvenirMultiplier: 1.0,
   marketFees: {
     // Steam's 15% is charged to the buyer, so a seller nets price / 1.15.
     // Stored as the fraction of the listing price the seller loses, which is

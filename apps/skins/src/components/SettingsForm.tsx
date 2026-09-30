@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api } from "@collectcollect/core/api-client";
-import { EXTERIORS, EXTERIOR_IDS, MARKETS, MARKET_IDS, type ProviderStatus, type Settings } from "@/lib/types";
+import { MARKETS, MARKET_IDS, type ProviderStatus, type Settings } from "@/lib/types";
 
 /**
  * The numbers the app does arithmetic with, and who is allowed to set them.
@@ -63,63 +63,6 @@ export function SettingsForm({ initial, providers }: { initial: Settings; provid
             </div>
           ))}
         </div>
-      </section>
-
-      <section>
-        <h2 className="font-display mb-1 text-lg font-semibold uppercase tracking-wide">Wear multipliers</h2>
-        <p className="mb-3 text-sm" style={{ color: "var(--muted)" }}>
-          A tier&rsquo;s own market price already reflects its wear, so these
-          start at 1. They only apply when a copy has to be priced against a
-          neighbouring tier&rsquo;s quote.
-        </p>
-        <div className="grid gap-3 sm:grid-cols-5">
-          {EXTERIOR_IDS.map((id) => (
-            <div key={id}>
-              <label className="label" htmlFor={`wear-${id}`}>
-                {EXTERIORS[id]}
-              </label>
-              <input
-                id={`wear-${id}`}
-                className="input"
-                inputMode="decimal"
-                value={settings.exteriorMultipliers[id] ?? ""}
-                onChange={(e) =>
-                  patch({ exteriorMultipliers: { ...settings.exteriorMultipliers, [id]: numberOrNaN(e.target.value) } })
-                }
-              />
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="label" htmlFor="stattrak">
-              StatTrak™ premium
-            </label>
-            <input
-              id="stattrak"
-              className="input"
-              inputMode="decimal"
-              value={settings.stattrakMultiplier}
-              onChange={(e) => patch({ stattrakMultiplier: numberOrNaN(e.target.value) })}
-            />
-          </div>
-          <div>
-            <label className="label" htmlFor="souvenir">
-              Souvenir premium
-            </label>
-            <input
-              id="souvenir"
-              className="input"
-              inputMode="decimal"
-              value={settings.souvenirMultiplier}
-              onChange={(e) => patch({ souvenirMultiplier: numberOrNaN(e.target.value) })}
-            />
-          </div>
-        </div>
-        <p className="mt-2 text-xs" style={{ color: "var(--muted)" }}>
-          Both start at 1 rather than at a plausible-looking guess: an invented
-          premium would read as a measurement.
-        </p>
       </section>
 
       <section>
