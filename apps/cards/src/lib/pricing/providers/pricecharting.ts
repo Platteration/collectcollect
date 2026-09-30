@@ -144,7 +144,10 @@ export const priceChartingProvider: PriceProvider = {
     const products = body.products ?? [];
     if (products.length === 0) return [];
     const top = products.map((p) => ({ p, s: scoreProduct(q, p) })).sort((a, b) => b.s - a.s)[0];
-    if (!top || top.s < 1.5) return []; // nothing that plausibly matches
+    // Half the name's words alone score 2, and a category word 1: a product
+    // sharing one word of a two-word name used to pass. Four is the whole
+    // name, or half of it plus the number or the set agreeing.
+    if (!top || top.s < 4 || tokenOverlap(q.name, top.p["product-name"]) < 0.5) return []; // nothing that plausibly matches
     return [productToQuote(top.p)];
   },
 };

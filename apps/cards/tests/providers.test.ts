@@ -216,3 +216,39 @@ describe("which printing a Magic price is for", () => {
   });
 });
 
+describe("what a provider refuses to call a match", () => {
+  it("does not take a Pokémon card that merely contains the name, from a set the query never mentioned", async () => {
+    const fetchImpl = fakeFetch([
+      ["api.pokemontcg.io/v2/cards?q=", { data: [{ id: "xy1-99", name: "Charizard's Charmander", number: "99", set: { id: "xy1", name: "XY" }, tcgplayer: { prices: { normal: { market: 2 } } } }] }],
+    ]);
+    expect(await pokemonTcgProvider.lookup({ game: "pokemon", name: "Charizard", cardNumber: "4/102", setName: "Base Set" }, fetchImpl)).toEqual([]);
+  });
+  it("still takes the best name match for a query that has nothing but a name, and a number that agrees over a set that does not", async () => {
+    const vmax = fakeFetch([
+      ["api.pokemontcg.io/v2/cards?q=", { data: [{ id: "swsh4-44", name: "Pikachu VMAX", number: "44", set: { id: "swsh4", name: "Vivid Voltage" }, tcgplayer: { prices: { holofoil: { market: 30 } } } }] }],
+    ]);
+    expect((await pokemonTcgProvider.lookup({ game: "pokemon", name: "Pikachu" }, vmax))[0]).toMatchObject({ ungraded: 30 });
+    const base2 = fakeFetch([
+      ["api.pokemontcg.io/v2/cards?q=", { data: [{ id: "base4-4", name: "Charizard", number: "4", set: { id: "base4", name: "Base Set 2" }, tcgplayer: { prices: { holofoil: { market: 250 } } } }] }],
+    ]);
+    expect((await pokemonTcgProvider.lookup({ game: "pokemon", name: "Charizard", cardNumber: "4/102", setName: "Base Set" }, base2))[0]).toMatchObject({ ungraded: 250 });
+  });
+  it("does not let a fuzzy Yu-Gi-Oh! search answer with a card missing a word of the name", async () => {
+    const fetchImpl = fakeFetch([
+      ["cardinfo.php?name=", { error: "No card matching your query was found" }, 400],
+      ["cardinfo.php?fname=", { data: [{ id: 23995346, name: "Blue-Eyes Ultimate Dragon", card_prices: [{ tcgplayer_price: "50.00" }] }] }],
+    ]);
+    expect(await ygoprodeckProvider.lookup({ game: "yugioh", name: "Blue-Eyes White Dragon" }, fetchImpl)).toEqual([]);
+  });
+  it("does not let PriceCharting match on one shared word and the category alone", async () => {
+    process.env.PRICECHARTING_TOKEN = "t";
+    try {
+      const fetchImpl = fakeFetch([
+        ["pricecharting.com", { status: "success", products: [{ id: "9", "product-name": "Holo Rare Wall Poster", "console-name": "Pokemon Promo", "loose-price": 500 }] }],
+      ]);
+      expect(await priceChartingProvider.lookup({ game: "pokemon", name: "Charizard Holo", setName: "Base Set" }, fetchImpl)).toEqual([]);
+    } finally {
+      delete process.env.PRICECHARTING_TOKEN;
+    }
+  });
+});

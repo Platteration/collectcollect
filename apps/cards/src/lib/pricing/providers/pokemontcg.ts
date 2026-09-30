@@ -70,6 +70,28 @@ export function scoreCandidate(q: CardQuery, c: PtcgCard): number {
   return score;
 }
 
+/**
+ * Whether the best-scoring candidate is the card at all.
+ *
+ * The API's own name filter means every candidate shares the name phrase, so
+ * the score separates printings of the right card well but says nothing about
+ * a card that merely contains the name — "Charizard's Charmander" for
+ * "Charizard" — from a set the query never mentioned: it scores on the name
+ * alone and used to be taken. A query that carries a number or a set has to
+ * be agreed with on at least one of them. A name-only query takes the best
+ * name match, which is all it can ask for.
+ */
+export function plausible(q: CardQuery, c: PtcgCard): boolean {
+  if (c.name.toLowerCase() !== q.name.toLowerCase() && tokenOverlap(q.name, c.name) < 1) return false;
+  const hasNumber = Boolean(numberPart(q.cardNumber));
+  const hasSet = Boolean(q.setName || q.setCode);
+  if (!hasNumber && !hasSet) return true;
+  if (hasNumber && sameNumber(q.cardNumber, c.number)) return true;
+  if (q.setName && Math.max(setSimilarity(q.setName, c.set.name), setSimilarity(q.setName, c.set.series)) >= 0.5) return true;
+  if (q.setCode && (c.set.ptcgoCode?.toLowerCase() === q.setCode.toLowerCase() || c.set.id.toLowerCase() === q.setCode.toLowerCase())) return true;
+  return false;
+}
+
 export const pokemonTcgProvider: PriceProvider = {
   id: "pokemontcg",
   label: "Pokémon TCG API (TCGplayer / Cardmarket)",
@@ -82,6 +104,9 @@ export const pokemonTcgProvider: PriceProvider = {
     if (process.env.POKEMONTCG_API_KEY) headers["X-Api-Key"] = process.env.POKEMONTCG_API_KEY;
 
     let cards: PtcgCard[] = [];
+    // The query the candidates were found with: a retry without the number
+    // cannot then be held to the number it dropped.
+    let asked: CardQuery = q;
     const knownId = q.externalIds?.pokemontcg;
     if (knownId) {
       const res = await fetchImpl(`https://api.pokemontcg.io/v2/cards/${encodeURIComponent(knownId)}`, { headers });
@@ -102,12 +127,13 @@ export const pokemonTcgProvider: PriceProvider = {
           { headers },
         );
         if (res2.ok) cards = ((await res2.json()) as { data?: PtcgCard[] }).data ?? [];
+        asked = { ...q, cardNumber: null };
       }
     }
     if (cards.length === 0) return [];
 
     const top = cards.map((c) => ({ c, s: scoreCandidate(q, c) })).sort((a, b) => b.s - a.s)[0];
-    if (!top) return [];
+    if (!top || !plausible(asked, top.c)) return []; // nothing that is plausibly this card
     const best = top.c;
     const fetchedAt = new Date().toISOString();
     const quotes: PriceQuote[] = [];

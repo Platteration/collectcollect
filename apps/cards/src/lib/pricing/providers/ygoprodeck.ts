@@ -68,7 +68,11 @@ export const ygoprodeckProvider: PriceProvider = {
     const top = cards
       .map((c) => ({ c, s: (c.name.toLowerCase() === q.name.toLowerCase() ? 3 : 0) + tokenOverlap(q.name, c.name) }))
       .sort((a, b) => b.s - a.s)[0];
-    if (!top) return [];
+    // The exact-name lookup answers with the card or nothing; the fuzzy one
+    // answers with anything containing the text, so the best of those has to
+    // carry every word of the name ("Blue-Eyes Ultimate Dragon" is not a
+    // price for "Blue-Eyes White Dragon"), which is a score of at least 1.
+    if (!top || top.s < 1) return [];
     const best = top.c;
     const set = findSet(best, q);
     const prices = best.card_prices?.[0] ?? {};
