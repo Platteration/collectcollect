@@ -1,4 +1,4 @@
-import { addSnapshot, getCard, latestSnapshot, latestSnapshotsByCard, listCards, listSnapshots, updateCard } from "../cards";
+import { addSnapshot, getCard, latestSnapshot, latestSnapshotsByCard, listCards, listSnapshots, refreshMirror, rememberLearned } from "../cards";
 import { alertsForRefresh, createAlert, deliver } from "../alerts";
 import { getSettings } from "../settings";
 import type { CardRecord, PriceSnapshot, PriceSummary } from "../types";
@@ -31,15 +31,17 @@ export async function refreshCard(card: CardRecord): Promise<{ card: CardRecord;
     const summary = await priceCard(card, settings);
     const current = getCard(card.id);
     if (!current || current.quantity <= 0) return { card, snapshot: { id: 0, cardId: card.id, fetchedAt: summary.fetchedAt, summary }, stored: false, skipped: true };
+    // What the lookup learned is kept before the snapshot is stored, so the
+    // one Markdown write the snapshot causes already carries it — and it is
+    // not an edit: the collection's order is by when the owner last touched a
+    // card, not by which one a refresh finished last.
+    const remembered = rememberLearned(card.id, learnFromQuotes(summary.quotes));
     const failed = !hasPrice(summary) && latestSnapshot(card.id) !== null;
     const snapshot: PriceSnapshot = failed
       ? { id: 0, cardId: card.id, fetchedAt: summary.fetchedAt, summary }
       : addSnapshot(card.id, summary);
-    const learned = learnFromQuotes(summary.quotes);
-    const patch: Record<string, unknown> = {};
-    if (Object.keys(learned.externalIds).length) patch.externalIds = { ...learned.externalIds, ...current.externalIds };
-    if (!current.referenceImageUrl && learned.referenceImageUrl) patch.referenceImageUrl = learned.referenceImageUrl;
-    const updated = Object.keys(patch).length ? (updateCard(card.id, patch) ?? current) : current;
+    if (failed && remembered) refreshMirror(card.id);
+    const updated = getCard(card.id) ?? current;
 
     if (!failed) {
       // History is newest-first from listSnapshots; alertsForRefresh wants it oldest-first.

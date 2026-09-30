@@ -7,10 +7,12 @@ interface Props {
   summary: PriceSummary | null;
   loading: boolean;
   onRefresh: () => void;
+  /** Forget the product the sources matched and search again; offered only when a source remembered one. */
+  onReject?: () => void;
   title?: string;
 }
 
-export function PricePanel({ summary, loading, onRefresh, title = "Market prices" }: Props) {
+export function PricePanel({ summary, loading, onRefresh, onReject, title = "Market prices" }: Props) {
   const gradedEntries = summary ? Object.entries(summary.graded) : [];
   const estimatedEntries = summary ? Object.entries(summary.estimatedGraded) : [];
   return (
@@ -116,7 +118,23 @@ export function PricePanel({ summary, loading, onRefresh, title = "Market prices
               ))}
             </ul>
           )}
-          <div className="text-xs text-neutral-500">Fetched {when(summary.fetchedAt)}</div>
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-neutral-500">
+            <span>
+              Fetched {when(summary.fetchedAt)}
+              {summary.recomputedAt ? ` · revalued ${when(summary.recomputedAt)}` : ""}
+            </span>
+            {onReject && summary.quotes.some((q) => q.externalId) && (
+              <button
+                type="button"
+                className="underline decoration-dotted"
+                onClick={onReject}
+                disabled={loading}
+                title="Forget this match and search again by name, set and number. If it finds the same card, correct those first."
+              >
+                Not this card
+              </button>
+            )}
+          </div>
         </div>
       )}
     </section>

@@ -75,6 +75,8 @@ export function alertsForRefresh(
   next: PriceSummary,
   history: PriceSnapshot[],
   settings: Settings,
+  /** What the move is measured across: a refresh, or the owner changing their own price. */
+  since = "since the last refresh",
 ): NewAlert[] {
   const out: NewAlert[] = [];
   // Nothing to say about a card the owner no longer holds.
@@ -90,7 +92,7 @@ export function alertsForRefresh(
         kind: "price_move",
         cardId: card.id,
         title: `${card.name} ${pct > 0 ? "up" : "down"} ${Math.abs(pct).toFixed(1)}%`,
-        body: `Your copy moved from ${money(before)} to ${money(after)} since the last refresh.`,
+        body: `Your copy moved from ${money(before)} to ${money(after)} ${since}.`,
       });
     }
   }

@@ -59,7 +59,7 @@ export function AlertList({ alerts: initial, unreadIds }: { alerts: Alert[]; unr
       <div>
         <h1 className="font-display text-2xl font-semibold uppercase tracking-wide">Alerts</h1>
         <p className="text-sm text-neutral-500">
-          Raised when prices refresh: a card crossing your ready-to-grade thresholds, a move bigger than the percentage
+          Raised when prices refresh, or when a price you set moves the value: a card crossing your ready-to-grade thresholds, a move bigger than the percentage
           in Settings, or real graded sales appearing where the app had only an estimate.
         </p>
       </div>

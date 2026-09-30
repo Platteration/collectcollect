@@ -9,6 +9,9 @@ const identifier = (s: string) => {
 /** An append-only record of what the app knew, starting at an explicit opening balance.
  * SQL triggers make imports, corrections and ordinary writes participate in the
  * same transaction. There are deliberately no cascading foreign keys here.
+ * A latest snapshot revalued in place (a grade or a multiplier changed, the
+ * quotes did not) is a price point too; only its summary column counts, so a
+ * bookkeeping column changing on the same row records nothing.
  */
 export function initializeHoldingsHistory(db: Database.Database, spec: HistorySpec): void {
   const table = identifier(spec.table), fk = identifier(spec.foreignKey), name = identifier(spec.name);
@@ -44,6 +47,12 @@ export function initializeHoldingsHistory(db: Database.Database, spec: HistorySp
       BEGIN ${record("holding_changed", "NEW")} END;
     CREATE TRIGGER IF NOT EXISTS history_entity_delete BEFORE DELETE ON ${table} BEGIN ${record("removed", "OLD", "0")} END;
     CREATE TRIGGER IF NOT EXISTS history_snapshot_insert AFTER INSERT ON price_snapshots BEGIN
+      INSERT INTO holdings_events(entity_id,name,kind,recorded_at,quantity,unit_value,raw_unit_value)
+      SELECT c.id,c.${name},'price',${now},c.quantity,${value("c")},${raw("c")} FROM ${table} c WHERE c.id=NEW.${fk};
+    END;
+    CREATE TRIGGER IF NOT EXISTS history_snapshot_update AFTER UPDATE OF summary ON price_snapshots
+      WHEN NEW.id = (SELECT id FROM price_snapshots WHERE ${fk}=NEW.${fk} ORDER BY fetched_at DESC,id DESC LIMIT 1)
+      BEGIN
       INSERT INTO holdings_events(entity_id,name,kind,recorded_at,quantity,unit_value,raw_unit_value)
       SELECT c.id,c.${name},'price',${now},c.quantity,${value("c")},${raw("c")} FROM ${table} c WHERE c.id=NEW.${fk};
     END;

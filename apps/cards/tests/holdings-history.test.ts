@@ -51,3 +51,23 @@ describe("recorded holdings history", () => {
     expect(getDb().prepare("SELECT COUNT(*) AS n FROM holdings_events").get()).toEqual(before);
   });
 });
+
+describe("a latest snapshot revalued in place", () => {
+  it("is a price point, while a bookkeeping change on the row and an older snapshot revalued are nothing", () => {
+    const card = createCard({ name: "Revalued", game: "other", quantity: 1 });
+    addSnapshot(card.id, { ...price(10), fetchedAt: "2026-01-01T00:00:00Z" });
+    const latest = latestSnapshot(card.id)!;
+    const events = () => getDb().prepare("SELECT kind, unit_value FROM holdings_events WHERE entity_id = ? ORDER BY id").all(card.id) as Array<{ kind: string; unit_value: number | null }>;
+    const before = events().length;
+    getDb().prepare("UPDATE price_snapshots SET summary = ? WHERE id = ?").run(JSON.stringify({ ...latest.summary, yourCopyValue: 25 }), latest.id);
+    expect(events().at(-1)).toMatchObject({ kind: "price", unit_value: 25 });
+    expect(holdingsHistory(getDb()).points.at(-1)?.value).toBe(25);
+    getDb().prepare("UPDATE price_snapshots SET fetched_at = fetched_at WHERE id = ?").run(latest.id);
+    expect(events()).toHaveLength(before + 1);
+    addSnapshot(card.id, { ...price(30), fetchedAt: "2026-02-01T00:00:00Z" });
+    const n = events().length;
+    getDb().prepare("UPDATE price_snapshots SET summary = ? WHERE id = ?").run(JSON.stringify({ ...latest.summary, yourCopyValue: 99 }), latest.id);
+    expect(events()).toHaveLength(n);
+    expect(holdingsHistory(getDb()).points.at(-1)?.value).toBe(30);
+  });
+});

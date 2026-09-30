@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { imageSrc, money, when } from "@/lib/format";
+import { imageSrc, localDateInput, money, when } from "@/lib/format";
 import { GAMES, GRADING_STATUSES, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Sale, type Settings } from "@/lib/types";
 import { gradingVerdict, isReadyToGrade, outlookSeries } from "@/lib/analytics";
 import { OutlookChart } from "./charts/OutlookChart";
@@ -61,9 +61,9 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
   const [sales, setSales] = useState(initialSales);
   const [acquisitions, setAcquisitions] = useState(initialAcquisitions);
   const [buying, setBuying] = useState(false);
-  const [buyForm, setBuyForm] = useState({ quantity: "1", unitCost: "", acquiredAt: new Date().toISOString().slice(0, 10), source: "" });
+  const [buyForm, setBuyForm] = useState({ quantity: "1", unitCost: "", acquiredAt: localDateInput(), source: "" });
   const [selling, setSelling] = useState(false);
-  const [saleForm, setSaleForm] = useState({ quantity: "1", unitPrice: "", fees: "", soldAt: new Date().toISOString().slice(0, 10), venue: "", notes: "" });
+  const [saleForm, setSaleForm] = useState({ quantity: "1", unitPrice: "", fees: "", soldAt: localDateInput(), venue: "", notes: "" });
   const [busy, setBusy] = useState<"" | "price" | "save" | "delete" | "sell" | "buy">("");
   const [error, setError] = useState<string | null>(null);
   // An error can arrive while the page is scrolled to a form far below the
@@ -104,6 +104,22 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
     }
   };
 
+  // Forget the product the sources matched this card to and look again by
+  // name, set and number. A wrong first match used to be permanent.
+  const rejectMatch = async () => {
+    setBusy("price");
+    setError(null);
+    try {
+      const res = await api<{ card: CardRecord }>(`/api/cards/${card.id}`, { method: "PATCH", body: JSON.stringify({ externalIds: {}, referenceImageUrl: null }) });
+      setCard(res.card);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy("");
+      return;
+    }
+    await refreshPrice();
+  };
+
   const save = async () => {
     setBusy("save");
     setError(null);
@@ -123,6 +139,11 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
         }),
       });
       setCard(res.card);
+      // A grade, a condition or a manual price changes the value at once; the
+      // page shows the figure the server now holds rather than the old one.
+      const fresh = await api<{ card: CardRecord; latestPrice: PriceSummary | null }>(`/api/cards/${card.id}`);
+      setLatest(fresh.latestPrice);
+      setHistory((h) => (fresh.latestPrice && h[0] ? [{ ...h[0], summary: fresh.latestPrice }, ...h.slice(1)] : h));
       setEditing(false);
       router.refresh();
     } catch (e) {
@@ -377,7 +398,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
                   <input className="input" value={manualGraded} onChange={(e) => setManualGraded(e.target.value)} placeholder="PSA 10=450, PSA 9=120" />
                 </label>
               </div>
-              <p className="mt-1 text-xs text-neutral-500">Manual entries take priority over provider data the next time prices are refreshed.</p>
+              <p className="mt-1 text-xs text-neutral-500">Manual entries take priority over provider data, and the value updates as soon as you save.</p>
             </div>
             {/* Last, behind Edit, and never the first thing a thumb lands on: a
                 deleted card takes its photo, prices and purchases with it. */}
@@ -406,7 +427,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
           </dl>
         )}
 
-        <PricePanel summary={latest} loading={busy === "price"} onRefresh={refreshPrice} />
+        <PricePanel summary={latest} loading={busy === "price"} onRefresh={refreshPrice} onReject={rejectMatch} />
 
         {valuePoints.length > 1 && firstPoint && (
           <section className="card-surface p-4">

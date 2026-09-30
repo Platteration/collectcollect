@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { getDb } from "./db";
-import { addAcquisition, createCard, discardDeferredMirror, findSimilar, flushDeferredMirror, getCard, intakeCardWithin, normalizeInput } from "./cards";
+import { addAcquisition, createCard, discardDeferredMirror, findSimilar, flushDeferredMirror, getCard, intakeCardWithin, interchangeable, normalizeInput } from "./cards";
 import { isValidUploadName } from "./images";
 import { isGame, type CardInput, type Identification } from "./types";
 import { inputFromIdentification, type ScanDraft } from "./scan-types";
@@ -136,7 +136,7 @@ export function commitScanDraft(id: string, revision: unknown, mode: "auto" | "s
       else if (mode === "merge") {
         const target = targetId ? getCard(targetId) : null;
         if (!target) throw new DraftError("The destination card no longer exists", 404);
-        if ((target.grade ?? null) !== (input.grade ?? null) || (target.gradingCompany ?? null) !== (input.gradingCompany ?? null)) throw new DraftError("Copies with different grades must stay separate", 409);
+        if (!interchangeable(target, normalizeInput(input))) throw new DraftError("Copies with different grades, variants, languages or conditions must stay separate", 409);
         if (!findSimilar(input).some((candidate) => candidate.id === target.id)) throw new DraftError("This card is not a matching duplicate", 409);
         card = addAcquisition(target.id, { quantity: input.quantity ?? 1, unitCost: input.purchasePrice });
         result = "merged";

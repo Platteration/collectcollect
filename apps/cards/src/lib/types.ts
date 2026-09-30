@@ -180,6 +180,8 @@ export interface PriceSummary {
   yourCopyBasis: string;
   quotes: PriceQuote[];
   errors: Array<{ source: string; message: string }>;
+  /** When the derived figures were last re-read from these quotes after an edit, if ever. */
+  recomputedAt?: string;
 }
 
 export interface Sale {

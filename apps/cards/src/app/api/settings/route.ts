@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
+import { recomputeAllLatest } from "@/lib/cards";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { providerStatuses } from "@/lib/status";
 import type { Settings } from "@/lib/types";
@@ -81,5 +82,9 @@ export async function PUT(request: Request) {
     alertMovePercent,
     alertWebhookUrl,
   });
-  return NextResponse.json({ settings, providers: providerStatuses() });
+  // The multipliers decide every estimate and every raw copy's value, and the
+  // quotes those are worked out from are already stored: revalue now, not at
+  // each card's next refresh.
+  const recomputed = recomputeAllLatest(settings);
+  return NextResponse.json({ settings, providers: providerStatuses(), recomputed });
 }

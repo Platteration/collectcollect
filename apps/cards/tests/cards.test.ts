@@ -5,7 +5,10 @@ import { verifyLotInvariant } from "@/lib/acquisitions";
 import { deleteSale, recordSale } from "@/lib/sales";
 import { createAlert } from "@/lib/alerts";
 import { getSettings, saveSettings } from "@/lib/settings";
-import { DEFAULT_SETTINGS, type PriceSummary } from "@/lib/types";
+import { DEFAULT_SETTINGS, type PriceQuote, type PriceSummary } from "@/lib/types";
+import { listAlerts } from "@/lib/alerts";
+import { summarize } from "@/lib/pricing";
+import { latestSnapshot } from "@/lib/cards";
 
 const summary = (v: number): PriceSummary => ({
   currency: "USD",
@@ -278,3 +281,131 @@ describe("the order a collection comes back in", () => {
   });
 });
 
+describe("what an edit does to the match a source made", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+  const matched = () => {
+    const c = createCard({ game: "pokemon", name: "Charizard", cardNumber: "4/102", setName: "Base Set" });
+    return updateCard(c.id, { externalIds: { pokemontcg: "base1-4" }, referenceImageUrl: "https://img.example/base1-4.png" })!;
+  };
+
+  it("forgets the ids and the reference image when the card's identity changes", () => {
+    const c = matched();
+    const edited = updateCard(c.id, { cardNumber: "5/102" })!;
+    expect(edited.externalIds).toEqual({});
+    expect(edited.referenceImageUrl).toBeNull();
+    const again = updateCard(matched().id, { language: "Japanese" })!;
+    expect(again.externalIds).toEqual({});
+  });
+
+  it("keeps them for an edit that does not change what the card is", () => {
+    const c = matched();
+    expect(updateCard(c.id, { notes: "binder 2" })?.externalIds).toEqual({ pokemontcg: "base1-4" });
+    expect(updateCard(c.id, { grade: "9", gradingCompany: "PSA" })?.externalIds).toEqual({ pokemontcg: "base1-4" });
+    expect(updateCard(c.id, { name: "charizard ", setName: "base set" })?.referenceImageUrl).toBe("https://img.example/base1-4.png");
+  });
+
+  it("keeps what the edit set itself", () => {
+    const c = matched();
+    expect(updateCard(c.id, { cardNumber: "5/102", externalIds: { pricecharting: "77" } })?.externalIds).toEqual({ pricecharting: "77" });
+  });
+});
+
+describe("which copies may share a row", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+  const base = { game: "pokemon" as const, name: "Charizard", setName: "Base Set", cardNumber: "4/102" };
+
+  it("keeps a different variant, language or condition apart, and a blank apart from a value", async () => {
+    const { intakeCard } = await import("@/lib/cards");
+    createCard({ ...base, variant: "holo", language: "English" });
+    expect(intakeCard({ ...base, variant: null, language: "English" }).result).toBe("ambiguous");
+    expect(intakeCard({ ...base, variant: "holo", language: "Japanese" }).result).toBe("ambiguous");
+    expect(intakeCard({ ...base, variant: "holo", language: "English", condition: "DMG" }).result).toBe("ambiguous");
+    expect(listCards()).toHaveLength(1);
+  });
+
+  it("does not let case or spacing divide copies", async () => {
+    const { intakeCard } = await import("@/lib/cards");
+    createCard({ ...base, variant: "Holo", language: "English" });
+    const merged = intakeCard({ ...base, variant: " holo ", language: "english" });
+    expect(merged).toMatchObject({ result: "merged" });
+    if (merged.result === "merged") expect(merged.card.quantity).toBe(2);
+  });
+});
+
+describe("what an edit does to the value", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+  const quote = (over: Partial<PriceQuote>): PriceQuote => ({
+    source: "pokemontcg", sourceLabel: "TCGplayer", currency: "USD", url: null, matchedName: "Charizard", matchedDetail: null,
+    ungraded: null, ungradedVariants: {}, graded: {}, fetchedAt: "2026-03-01T00:00:00.000Z", ...over,
+  });
+  const priced = () => {
+    const c = createCard({ game: "pokemon", name: "Charizard" });
+    const quotes = [quote({ ungraded: 100 }), quote({ source: "pricecharting", sourceLabel: "PriceCharting", graded: { "PSA 9": 300 } })];
+    addSnapshot(c.id, summarize(quotes, [], DEFAULT_SETTINGS, { condition: "NM", gradingCompany: null, grade: null }, undefined, "2026-03-01T00:00:00.000Z"));
+    return c;
+  };
+
+  it("values a newly graded copy at its grade at once, from the quotes it already has, without a new row or an alert", () => {
+    const c = priced();
+    expect(latestSnapshot(c.id)?.summary.yourCopyValue).toBe(100);
+    updateCard(c.id, { gradingCompany: "PSA", grade: "9" });
+    const latest = latestSnapshot(c.id)!;
+    expect(latest.summary.yourCopyValue).toBe(300);
+    expect(latest.summary.yourCopyBasis).toMatch(/PSA 9/);
+    expect(latest.fetchedAt).toBe("2026-03-01T00:00:00.000Z");
+    expect(latest.summary.recomputedAt).toBeDefined();
+    expect(listSnapshots(c.id)).toHaveLength(1);
+    expect(listAlerts()).toHaveLength(0);
+  });
+
+  it("values a worn copy by its condition, and a manual price over everything, once", () => {
+    const c = priced();
+    updateCard(c.id, { condition: "LP" });
+    expect(latestSnapshot(c.id)?.summary.yourCopyValue).toBe(Math.round(100 * DEFAULT_SETTINGS.conditionMultipliers.LP * 100) / 100);
+    updateCard(c.id, { manualUngraded: 50 });
+    const latest = latestSnapshot(c.id)!;
+    expect(latest.summary.ungraded).toBe(50);
+    expect(latest.summary.quotes.filter((q) => q.source === "manual")).toHaveLength(1);
+    updateCard(c.id, { manualUngraded: 60 });
+    expect(latestSnapshot(c.id)?.summary.ungraded).toBe(60);
+    expect(latestSnapshot(c.id)?.summary.quotes.filter((q) => q.source === "manual")).toHaveLength(1);
+  });
+
+  it("raises a price-move alert at once when the owner's own price jumps past the threshold, and not for a grade", () => {
+    const c = priced();
+    updateCard(c.id, { manualUngraded: 400 });
+    const alerts = listAlerts();
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({ kind: "price_move", cardId: c.id });
+    expect(alerts[0]?.title).toMatch(/up 300\.0%/);
+    expect(alerts[0]?.body).toMatch(/when you changed its price/);
+    updateCard(c.id, { manualUngraded: 401 }); // a quarter of a percent is not a move
+    updateCard(c.id, { gradingCompany: "PSA", grade: "9" }); // a reclassification is not a move either
+    expect(listAlerts()).toHaveLength(1);
+  });
+
+  it("leaves the snapshot alone when the edit changes nothing about the value", () => {
+    const c = priced();
+    updateCard(c.id, { notes: "x", location: "Binder 1" });
+    expect(latestSnapshot(c.id)?.summary.recomputedAt).toBeUndefined();
+  });
+});
+
+describe("what the database indexes", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("finds a card by game and name without reading the whole collection", () => {
+    const names = (table: string) => (getDb().prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string }>).map((i) => i.name);
+    expect(names("cards")).toEqual(expect.arrayContaining(["idx_cards_game_name", "idx_cards_updated", "idx_cards_location"]));
+    expect(names("sale_lots")).toContain("idx_sale_lots_acquisition");
+    expect(names("submission_cards")).toContain("idx_submission_cards_card");
+    expect(names("alerts")).toContain("idx_alerts_card");
+    const plan = (getDb()
+      .prepare("EXPLAIN QUERY PLAN SELECT * FROM cards WHERE game = ? AND lower(trim(name)) = ? ORDER BY updated_at DESC, id DESC")
+      .all("pokemon", "charizard") as Array<{ detail: string }>)
+      .map((r) => r.detail)
+      .join("; ");
+    expect(plan).toMatch(/idx_cards_game_name/);
+    expect(plan).not.toMatch(/SCAN cards/);
+  });
+});

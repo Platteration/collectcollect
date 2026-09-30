@@ -322,3 +322,51 @@ describe("what PriceCharting refuses to answer with", () => {
   });
 });
 
+describe("what a refresh leaves alone", () => {
+  it("learns a provider id without counting it as an edit, so the collection keeps its order", async () => {
+    setDb(openDatabase(":memory:"));
+    const { getDb } = await import("@/lib/db");
+    const { getCard, listCards } = await import("@/lib/cards");
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    const a = createCard({ game: "pokemon", name: "Pikachu", cardNumber: "58" });
+    const b = createCard({ game: "pokemon", name: "Bulbasaur", cardNumber: "44" });
+    getDb().prepare("UPDATE cards SET updated_at = ? WHERE id = ?").run("2026-01-01T00:00:00.000Z", a.id);
+    getDb().prepare("UPDATE cards SET updated_at = ? WHERE id = ?").run("2026-01-02T00:00:00.000Z", b.id);
+    const original = globalThis.fetch;
+    globalThis.fetch = fakeFetch([
+      ["api.pokemontcg.io", { data: [{ id: "base1-58", name: "Pikachu", number: "58", set: { id: "base1", name: "Base" }, images: { large: "https://img.example/58.png" }, tcgplayer: { prices: { normal: { market: 5 } } } }] }],
+    ]);
+    try {
+      const first = await refreshCard(getCard(a.id)!);
+      expect(first.stored).toBe(true);
+      expect(first.card.externalIds).toEqual({ pokemontcg: "base1-58" });
+      expect(first.card.referenceImageUrl).toBe("https://img.example/58.png");
+      expect(getCard(a.id)?.updatedAt).toBe("2026-01-01T00:00:00.000Z");
+      expect(listCards().map((c) => c.id)).toEqual([b.id, a.id]);
+      const again = await refreshCard(getCard(a.id)!);
+      expect(again.card.externalIds).toEqual({ pokemontcg: "base1-58" });
+      expect(getCard(a.id)?.updatedAt).toBe("2026-01-01T00:00:00.000Z");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("stores nothing over a card's last price when the best answer is not plausibly the card", async () => {
+    setDb(openDatabase(":memory:"));
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    const card = createCard({ game: "pokemon", name: "Pikachu", cardNumber: "58", setName: "Base" });
+    addSnapshot(card.id, summarizeFixture(50));
+    const original = globalThis.fetch;
+    globalThis.fetch = fakeFetch([
+      ["api.pokemontcg.io", { data: [{ id: "swsh4-44", name: "Pikachu VMAX", number: "44", set: { id: "swsh4", name: "Vivid Voltage" }, tcgplayer: { prices: { holofoil: { market: 30 } } } }] }],
+    ]);
+    try {
+      const r = await refreshCard(card);
+      expect(r.stored).toBe(false);
+      expect(listSnapshots(card.id)).toHaveLength(1);
+      expect(listSnapshots(card.id)[0]?.summary.ungraded).toBe(50);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});

@@ -131,3 +131,16 @@ describe("persistent scan inbox", () => {
     expect(listScanDrafts()).toEqual([]);
   });
 });
+
+describe("what a scan may be folded into", () => {
+  it("keeps a scan out of a copy in another language until the owner says so", () => {
+    const japanese = createCard({ game: "pokemon", name: "Pikachu", setName: "Jungle", cardNumber: "60", language: "Japanese" });
+    const d = identified(); // the model read this one as English
+    const review = commitScanDraft(d.id, d.revision, "auto");
+    expect(review.draft.status).toBe("review");
+    expect(review.candidates?.[0]?.id).toBe(japanese.id);
+    expect(() => commitScanDraft(d.id, review.draft.revision, "merge", japanese.id)).toThrow(/must stay separate/);
+    expect(commitScanDraft(d.id, review.draft.revision, "separate").draft.result).toBe("created");
+    expect(listCards()).toHaveLength(2);
+  });
+});

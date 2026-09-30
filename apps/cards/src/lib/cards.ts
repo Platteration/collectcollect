@@ -7,12 +7,16 @@ import type {
   Identification,
   PriceSnapshot,
   PriceSummary,
+  Settings,
 } from "./types";
 import { CONDITIONS, GAMES, GRADING_STATUSES, MAX_MONEY, MAX_QUANTITY, type GradingStatus } from "./types";
 import { addLot, costBasisByCard, deleteLot, getLot, listLots, reconcileToQuantity, recomputePurchasePrice, type AcquisitionInput } from "./acquisitions";
 import { isValidUploadName } from "./images";
 import { mirrorCard, unmirrorCard } from "./markdown/mirror";
 import { normalizeNumber } from "./pricing/match";
+import { summarize } from "./pricing";
+import { getSettings } from "./settings";
+import { alertsForRefresh, createAlert, deliver } from "./alerts";
 
 export interface CardRow {
   id: number;
@@ -268,6 +272,15 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
     const existing = getCard(id);
     if (!existing) return null;
     const merged = normalizeInput({ ...existing, ...patch, game: patch.game ?? existing.game, name: patch.name ?? existing.name });
+    // A card whose identity changed is no longer the product the sources were
+    // matched to. Forget the learned ids and the reference image, unless the
+    // edit set them itself, so the next refresh searches afresh instead of
+    // asking for the old product by id — which is how a wrong match used to
+    // outlive every correction.
+    if (identityChanged(existing, merged)) {
+      if (patch.externalIds === undefined) merged.externalIds = {};
+      if (patch.referenceImageUrl === undefined) merged.referenceImageUrl = null;
+    }
     getDb()
       .prepare(
         `UPDATE cards SET game=@game, sport=@sport, name=@name, set_name=@setName, set_code=@setCode,
@@ -302,11 +315,162 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
       }
     }
     recomputePurchasePrice(id);
+    // The grade, the condition and the owner's own prices decide what the
+    // copy is worth; the latest snapshot keeps the quotes to work that out
+    // from, so the value moves now rather than at the next refresh.
+    const revalued = (fields: readonly (typeof REVALUING_FIELDS)[number][]) =>
+      fields.some((f) => patch[f] !== undefined && canonical(existing[f]) !== canonical(merged[f]));
+    if (revalued(REVALUING_FIELDS)) {
+      const settings = getSettings();
+      const before = latestSnapshot(id);
+      const result = recomputeLatestSnapshot(id, settings);
+      // The owner's own price is the recorded price, so a change past the
+      // alert threshold is a move worth mentioning, and it is mentioned now
+      // rather than at the next refresh, which would no longer see it. A grade
+      // or a condition is a reclassification, not a move, and says nothing.
+      if (result?.changed && before && revalued(MANUAL_PRICE_FIELDS)) {
+        const card = getCard(id);
+        if (card) {
+          for (const alert of alertsForRefresh(card, before.summary, result.snapshot.summary, [], settings, "when you changed its price")) {
+            if (alert.kind === "price_move") void deliver(createAlert(alert), settings);
+          }
+        }
+      }
+    }
     return getCard(id);
   });
   const card = run();
   touch(card);
   return card;
+}
+
+/** The fields that say which product a card is, as the price sources are asked about it. */
+const IDENTITY_FIELDS = ["game", "name", "sport", "setName", "setCode", "cardNumber", "year", "variant", "manufacturer", "language"] as const;
+
+/** The fields that change what the owner's copy is worth without a new lookup. */
+const REVALUING_FIELDS = ["grade", "gradingCompany", "condition", "manualUngraded", "manualGraded"] as const;
+/** The two of those that are prices, whose movement is an alert's business. */
+const MANUAL_PRICE_FIELDS = ["manualUngraded", "manualGraded"] as const;
+
+/** JSON with keys in a fixed order, so two objects that mean the same compare equal. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v ?? null,
+  );
+}
+
+function identityChanged(before: CardRecord, after: ReturnType<typeof normalizeInput>): boolean {
+  const norm = (v: unknown) => (typeof v === "string" ? v.trim().toLowerCase() : v ?? null);
+  return IDENTITY_FIELDS.some((f) => norm(before[f]) !== norm(after[f]));
+}
+
+/**
+ * Whether two copies can share one row. Grade and grading company, as before:
+ * a raw scan must never be folded into a slab. And variant, language and
+ * condition, since each is valued differently — a 1st Edition, a Japanese
+ * printing or a Damaged copy priced as the Unlimited, English, Near Mint row
+ * it was folded into would be the wrong money. Case and whitespace do not
+ * divide copies and a blank on both sides agrees, but a blank on one side does
+ * not match a value on the other: a scan that could not read the variant must
+ * not be folded into a holo row.
+ */
+export function interchangeable(
+  a: Pick<CardRecord, "grade" | "gradingCompany" | "variant" | "language" | "condition">,
+  b: Pick<CardRecord, "grade" | "gradingCompany" | "variant" | "language" | "condition">,
+): boolean {
+  const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
+  return (["grade", "gradingCompany", "variant", "language", "condition"] as const).every((f) => norm(a[f]) === norm(b[f]));
+}
+
+/**
+ * Keep what a refresh learned about a card — provider ids, a reference image —
+ * without counting it as an edit: no updated_at, so a whole-collection refresh
+ * does not reorder the collection, and no Markdown of its own, since the
+ * snapshot the refresh stores rewrites the file anyway. Existing ids win, so
+ * a match already made is not swapped for another; forgetting one is an edit.
+ */
+export function rememberLearned(id: number, learned: { externalIds: Record<string, string>; referenceImageUrl: string | null }): boolean {
+  const existing = getCard(id);
+  if (!existing) return false;
+  const externalIds = { ...learned.externalIds, ...existing.externalIds };
+  const referenceImageUrl = existing.referenceImageUrl ?? learned.referenceImageUrl;
+  if (canonical(externalIds) === canonical(existing.externalIds) && referenceImageUrl === existing.referenceImageUrl) return false;
+  getDb().prepare("UPDATE cards SET external_ids = ?, reference_image_url = ? WHERE id = ?").run(JSON.stringify(externalIds), referenceImageUrl, id);
+  return true;
+}
+
+/**
+ * Re-derive the latest snapshot's summary from the quotes it stored, for the
+ * card as it is now and the settings as they are now. summarize() is pure and
+ * every snapshot keeps its quotes, so a grade, a condition, a manual price or
+ * a multiplier changes the value at once rather than at the next refresh.
+ *
+ * The snapshot is rewritten in place: a new row would put a second point on
+ * the same date in every history and store the quotes twice. The quotes and
+ * fetchedAt are untouched — the prices are still the ones fetched then —
+ * and recomputedAt says the derived figures moved later. Nothing here is a
+ * price move, so no alert is raised.
+ *
+ * The same rule as a refresh: a result with no price at all is not written
+ * over a snapshot that has one. A manual price taken away from a card no
+ * source prices leaves the last known value standing, as a lookup that finds
+ * nothing does, rather than zeroing the card out of the portfolio.
+ */
+export function recomputeLatestSnapshot(cardId: number, settings: Settings): { snapshot: PriceSnapshot; changed: boolean } | null {
+  const card = getCard(cardId);
+  const latest = latestSnapshot(cardId);
+  if (!card || !latest) return null;
+  // The manual quote is re-added by summarize from the card's own prices, so
+  // the stored one is left out rather than counted twice.
+  const quotes = latest.summary.quotes.filter((q) => q.source !== "manual");
+  const next = summarize(
+    quotes,
+    latest.summary.errors,
+    settings,
+    { condition: card.condition, gradingCompany: card.gradingCompany, grade: card.grade },
+    { ungraded: card.manualUngraded, graded: card.manualGraded },
+    latest.fetchedAt,
+  );
+  const { recomputedAt: _before, ...was } = latest.summary;
+  void _before;
+  if (canonical(was) === canonical(next)) return { snapshot: latest, changed: false };
+  if (!hasAnyPrice(next) && hasAnyPrice(was)) return { snapshot: latest, changed: false };
+  const summary: PriceSummary = { ...next, recomputedAt: new Date().toISOString() };
+  getDb().prepare("UPDATE price_snapshots SET summary = ? WHERE id = ?").run(JSON.stringify(summary), latest.id);
+  return { snapshot: { ...latest, summary }, changed: true };
+}
+
+/** Whether a summary prices the card at all, the way a refresh judges its own answer. */
+function hasAnyPrice(s: PriceSummary): boolean {
+  return Boolean(s.ungraded || s.yourCopyValue || Object.keys(s.graded).length);
+}
+
+/**
+ * Re-derive every card's latest value after the settings changed. One
+ * transaction, one Markdown write per card that actually moved; a card whose
+ * figures come out the same is left alone.
+ */
+export function recomputeAllLatest(settings: Settings): number {
+  const ids = [...latestSnapshotsByCard().keys()];
+  let changed = 0;
+  const run = getDb().transaction(() => {
+    for (const id of ids) {
+      if (recomputeLatestSnapshot(id, settings)?.changed) {
+        changed++;
+        touch(getCard(id), { mayHaveOldName: false });
+      }
+    }
+  });
+  try {
+    run();
+    flushDeferredMirror();
+  } catch (e) {
+    discardDeferredMirror();
+    throw e;
+  }
+  return changed;
 }
 
 /** Thrown when a card that has sales on record is asked to go. */
@@ -440,15 +604,11 @@ export function intakeCardWithin(input: CardInput): IntakeOutcome {
       cardNumber: clean.cardNumber,
       setName: clean.setName,
     });
-    const interchangeable = candidates.filter(
-      (c) =>
-        (c.grade ?? null) === (clean.grade ?? null) &&
-        (c.gradingCompany ?? null) === (clean.gradingCompany ?? null),
-    );
-    if (candidates.length > 0 && interchangeable.length !== 1) {
+    const alike = candidates.filter((c) => interchangeable(c, clean));
+    if (candidates.length > 0 && alike.length !== 1) {
       return { result: "ambiguous", candidates };
     }
-    const existing = interchangeable.length === 1 ? interchangeable[0] : undefined;
+    const existing = alike.length === 1 ? alike[0] : undefined;
     if (existing) {
       const copies = clean.quantity || 1;
       // The copies being merged in are their own purchase at their own price;

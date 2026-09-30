@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb, openDatabase, setDb } from "@/lib/db";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { PUT } from "@/app/api/settings/route";
-import { DEFAULT_SETTINGS } from "@/lib/types";
+import { DEFAULT_SETTINGS, type PriceQuote } from "@/lib/types";
+import { addSnapshot, createCard, latestSnapshot } from "@/lib/cards";
+import { summarize } from "@/lib/pricing";
 
 const put = (body: unknown) =>
   PUT(new Request("http://localhost/api/settings", { method: "PUT", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }));
@@ -72,6 +74,24 @@ describe("saving settings", () => {
     const res = await put({ gradeMultipliers: { "PSA 10": 3 } });
     expect(res.status).toBe(200);
     expect(getSettings().gradeMultipliers).toEqual({ "PSA 10": 3 });
+  });
+});
+
+describe("what a saved setting does to the values already on record", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("works every card's value out again with the new multipliers, and says how many moved", async () => {
+    const quote: PriceQuote = { source: "pokemontcg", sourceLabel: "TCGplayer", currency: "USD", url: null, matchedName: "x", matchedDetail: null, ungraded: 100, ungradedVariants: {}, graded: {}, fetchedAt: "2026-03-01T00:00:00.000Z" };
+    const slab = createCard({ game: "pokemon", name: "Charizard", gradingCompany: "PSA", grade: "10" });
+    addSnapshot(slab.id, summarize([quote], [], DEFAULT_SETTINGS, { condition: "NM", gradingCompany: "PSA", grade: "10" }));
+    const unpriced = createCard({ game: "pokemon", name: "Nobody asked" });
+    expect(latestSnapshot(slab.id)?.summary.yourCopyValue).toBe(100 * DEFAULT_SETTINGS.gradeMultipliers["PSA 10"]!);
+    const res = await put({ gradeMultipliers: { ...DEFAULT_SETTINGS.gradeMultipliers, "PSA 10": 5 } });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { recomputed: number }).recomputed).toBe(1);
+    expect(latestSnapshot(slab.id)?.summary.yourCopyValue).toBe(500);
+    expect(latestSnapshot(slab.id)?.summary.estimatedGraded["PSA 10"]).toBe(500);
+    expect(latestSnapshot(unpriced.id)).toBeNull();
   });
 });
 

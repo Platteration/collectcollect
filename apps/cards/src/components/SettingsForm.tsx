@@ -143,7 +143,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
       <section className="card-surface p-4">
         <h2 className="font-semibold">Alerts</h2>
         <p className="mt-1 text-sm text-neutral-500">
-          Raised when prices refresh. The webhook is optional: every alert is POSTed to it as JSON, so you can forward
+          Raised when prices refresh, or when a price you set moves the value. The webhook is optional: every alert is POSTed to it as JSON, so you can forward
           them to email, push or chat through a service you control.
         </p>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -187,7 +187,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
           {status === "saving" ? "Saving…" : "Save settings"}
         </button>
         {status === "saved" && (
-          <span className="text-sm text-green-800 dark:text-green-300">Saved. New multipliers apply the next time a card&rsquo;s prices are refreshed.</span>
+          <span className="text-sm text-green-800 dark:text-green-300">Saved. Every card&rsquo;s value has been worked out again with the new multipliers.</span>
         )}
       </div>
     </div>
