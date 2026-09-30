@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
   fetched_at TEXT NOT NULL,
-  summary TEXT NOT NULL
+  summary TEXT NOT NULL,
+  checked_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_card ON price_snapshots(card_id, fetched_at DESC);
 CREATE TABLE IF NOT EXISTS sales (
@@ -139,6 +140,9 @@ const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "cards", column: "grading_status", ddl: "ALTER TABLE cards ADD COLUMN grading_status TEXT NOT NULL DEFAULT 'undecided'" },
   { table: "cards", column: "accent_color", ddl: "ALTER TABLE cards ADD COLUMN accent_color TEXT" },
   { table: "cards", column: "location", ddl: "ALTER TABLE cards ADD COLUMN location TEXT" },
+  // When a refresh last found these same prices, so an unchanged price is a
+  // note on the row rather than a copy of it.
+  { table: "price_snapshots", column: "checked_at", ddl: "ALTER TABLE price_snapshots ADD COLUMN checked_at TEXT" },
 ];
 
 /**

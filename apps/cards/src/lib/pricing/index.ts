@@ -24,28 +24,40 @@ export interface ManualPrices {
   graded?: Record<string, number>;
 }
 
-/** Run every applicable provider; a failing provider becomes an error entry, never a thrown exception. */
+/** How long one source gets to answer about one card before it is given up on. */
+export const PROVIDER_TIMEOUT_MS = 20_000;
+
+/**
+ * Run every applicable provider; a failing provider becomes an error entry,
+ * never a thrown exception. Each source gets its own deadline, and a source
+ * that misses it has its request abandoned, not merely ignored: a race that
+ * left the request running kept the connection, and its timer, alive.
+ */
 export async function fetchQuotes(
   query: CardQuery,
   fetchImpl: typeof fetch = fetch,
+  opts: { timeoutMs?: number } = {},
 ): Promise<{ quotes: PriceQuote[]; errors: PriceSummary["errors"] }> {
+  const timeoutMs = opts.timeoutMs ?? PROVIDER_TIMEOUT_MS;
   // Each outcome carries its own provider, so a failure is attributed without
   // lining results up against the provider list by position.
   type Outcome = { quotes: PriceQuote[] } | { error: PriceSummary["errors"][number] };
   const outcomes = await Promise.all(
     providersFor(query.game).map(async (p): Promise<Outcome> => {
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new ProviderError(p.id, `${p.label} timed out`)), 20_000),
-      );
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(new ProviderError(p.id, `${p.label} did not answer within ${Math.round(timeoutMs / 1000)} seconds`)), timeoutMs);
       try {
-        return { quotes: await Promise.race([p.lookup(query, fetchImpl), timeout]) };
+        return { quotes: await p.lookup(query, fetchImpl, controller.signal) };
       } catch (err) {
+        const cause = controller.signal.aborted ? controller.signal.reason : err;
         return {
           error: {
-            source: err instanceof ProviderError ? err.source : p.id,
-            message: err instanceof Error ? err.message : String(err),
+            source: cause instanceof ProviderError ? cause.source : p.id,
+            message: cause instanceof Error ? cause.message : String(cause),
           },
         };
+      } finally {
+        clearTimeout(timer);
       }
     }),
   );
@@ -187,6 +199,30 @@ export function summarize(
     quotes: all,
     errors,
   };
+}
+
+/**
+ * What a refresh compares to decide whether it learned anything: every figure
+ * the app shows or sums, and what each source matched, but not when it was
+ * asked. Two summaries the same by this measure are the same price, and the
+ * second is a check, not a snapshot.
+ */
+export function sameSummary(a: PriceSummary, b: PriceSummary): boolean {
+  const project = (s: PriceSummary) =>
+    JSON.stringify({
+      ungraded: s.ungraded,
+      ungradedSource: s.ungradedSource,
+      graded: s.graded,
+      gradedSource: s.gradedSource,
+      estimatedGraded: s.estimatedGraded,
+      yourCopyValue: s.yourCopyValue,
+      yourCopyBasis: s.yourCopyBasis,
+      quotes: s.quotes.map((q) => ({ source: q.source, currency: q.currency, ungraded: q.ungraded, ungradedVariants: q.ungradedVariants, graded: q.graded, externalId: q.externalId ?? null })),
+      // A source that failed last time and answered this time is worth a row,
+      // or the page would go on showing an error that has cleared.
+      errors: s.errors,
+    });
+  return project(a) === project(b);
 }
 
 export function cardToQuery(card: Pick<CardRecord, "game" | "name" | "sport" | "setName" | "setCode" | "cardNumber" | "year" | "variant" | "manufacturer" | "externalIds">): CardQuery {

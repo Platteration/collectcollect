@@ -21,7 +21,8 @@ export interface PriceProvider {
   optional: boolean;
   note: string;
   isConfigured(): boolean;
-  lookup(query: CardQuery, fetchImpl?: typeof fetch): Promise<PriceQuote[]>;
+  /** The signal is the caller's deadline: a request still out when it fires is abandoned. */
+  lookup(query: CardQuery, fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<PriceQuote[]>;
 }
 
 export class ProviderError extends Error {

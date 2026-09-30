@@ -1,11 +1,17 @@
 import Link from "next/link";
-import { costBasisByCard, latestSnapshotsByCard, listCards, listLocations } from "@/lib/cards";
+import { CARD_SORTS, collectionTotals, countCards, isCardSort, latestValuesByCard, listCards, listLocations, type CardSort, type ListOptions } from "@/lib/cards";
 import { money } from "@/lib/format";
 import { GAMES, GAME_IDS, isGame } from "@/lib/types";
 import { CollectionGrid } from "@/components/CollectionGrid";
+import { tileCard } from "@/components/CardTile";
 import { listSubmissions } from "@/lib/submissions";
 
 export const dynamic = "force-dynamic";
+
+/** Tiles per page: a thousand-card collection is not one page of tiles. */
+export const PAGE_SIZE = 120;
+
+const SORT_LABELS: Record<CardSort, string> = { updated: "Recently updated", name: "Name", value: "Value", added: "Recently added" };
 
 export default async function CollectionPage({ searchParams }: PageProps<"/collection">) {
   const sp = await searchParams;
@@ -15,40 +21,43 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
   // still needs putting away.
   const locationParam = typeof sp.location === "string" ? sp.location : undefined;
   const missingCost = sp.cost === "missing";
-  const basis = costBasisByCard();
-  const cards = listCards({
+  const sort: CardSort = isCardSort(sp.sort) ? sp.sort : "updated";
+  const filters: ListOptions = {
     game: gameParam,
     search: q,
     location: locationParam === undefined ? undefined : locationParam === "none" ? "" : locationParam,
-  }).filter((card) => !missingCost || (basis.get(card.id)?.copiesWithoutCost ?? 0) > 0);
+    missingCost,
+  };
+  // The figures at the top are over everything the filter matches; the tiles
+  // are one page of it, and each carries only what a tile draws.
+  const total = countCards(filters);
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const requested = Number.parseInt(typeof sp.page === "string" ? sp.page : "", 10);
+  const page = Math.min(pages, Math.max(1, Number.isFinite(requested) ? requested : 1));
+  const cards = listCards({ ...filters, sort, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
+  const totals = collectionTotals(filters);
   const locations = listLocations();
-  const prices = latestSnapshotsByCard();
+  const prices = latestValuesByCard(cards.map((c) => c.id));
 
-  const owned = cards.filter((c) => c.quantity > 0);
-  let totalQty = 0;
-  let totalValue = 0;
-  let totalUngraded = 0;
-  let priced = 0;
-  for (const c of cards) {
-    totalQty += c.quantity;
-    const s = prices.get(c.id)?.summary;
-    if (s?.yourCopyValue) {
-      totalValue += s.yourCopyValue * c.quantity;
-      if (c.quantity > 0) priced++;
+  const query = (overrides: Record<string, string | undefined>) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries({ q: q || undefined, game: gameParam, location: locationParam, cost: missingCost ? "missing" : undefined, sort: sort === "updated" ? undefined : sort, ...overrides })) {
+      if (value !== undefined) params.set(key, value);
     }
-    if (s?.ungraded) totalUngraded += s.ungraded * c.quantity;
-  }
+    const text = params.toString();
+    return text ? `/collection?${text}` : "/collection";
+  };
 
   return (
     <div className="space-y-6">
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Cards" value={String(owned.length)} sub={`${totalQty} total copies${cards.length - owned.length ? ` · ${cards.length - owned.length} sold` : ""}`} />
-        <Stat label="Collection value" value={money(totalValue)} sub={`${priced} of ${owned.length} priced`} />
-        <Stat label="Ungraded value" value={money(totalUngraded)} sub="if every copy were raw NM" />
+        <Stat label="Cards" value={String(totals.owned)} sub={`${totals.copies} total copies${totals.cards - totals.owned ? ` · ${totals.cards - totals.owned} sold` : ""}`} />
+        <Stat label="Collection value" value={money(totals.value)} sub={`${totals.priced} of ${totals.owned} priced`} />
+        <Stat label="Ungraded value" value={money(totals.ungraded)} sub="if every copy were raw NM" />
         <Stat
           label="Unpriced"
-          value={String(Math.max(0, owned.length - priced))}
-          sub={owned.length - priced ? "open a card and refresh prices" : "everything is priced"}
+          value={String(Math.max(0, totals.owned - totals.priced))}
+          sub={totals.owned - totals.priced ? "open a card and refresh prices" : "everything is priced"}
         />
       </section>
 
@@ -74,10 +83,17 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
           </select>
         )}
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="cost" value="missing" defaultChecked={missingCost} /> Missing purchase costs</label>
+        <select name="sort" defaultValue={sort} className="input max-w-[12rem]" aria-label="Sort by">
+          {CARD_SORTS.map((s) => (
+            <option key={s} value={s}>
+              {SORT_LABELS[s]}
+            </option>
+          ))}
+        </select>
         <button className="btn-secondary" type="submit">
           Filter
         </button>
-        {(q || gameParam || locationParam || missingCost) && (
+        {(q || gameParam || locationParam || missingCost || sort !== "updated") && (
           <Link href="/collection" className="text-sm text-neutral-500 underline">
             Clear
           </Link>
@@ -117,12 +133,22 @@ export default async function CollectionPage({ searchParams }: PageProps<"/colle
         </div>
       ) : (
         <CollectionGrid
-          cards={cards.map((c) => ({ card: c, price: prices.get(c.id)?.summary ?? null }))}
+          cards={cards.map((c) => ({ card: tileCard(c), price: prices.get(c.id) ?? null }))}
           locations={locations.map((l) => l.location)}
           drafts={listSubmissions()
             .filter((s) => s.status === "draft")
             .map((s) => ({ id: s.id, name: s.name, company: s.company }))}
         />
+      )}
+
+      {pages > 1 && (
+        <nav className="flex flex-wrap items-center justify-between gap-2 text-sm" aria-label="Pages">
+          {page > 1 ? <Link href={query({ page: page === 2 ? undefined : String(page - 1) })} className="btn-secondary">Previous</Link> : <span />}
+          <span className="text-neutral-500">
+            Page {page} of {pages} · {total} cards
+          </span>
+          {page < pages ? <Link href={query({ page: String(page + 1) })} className="btn-secondary">Next</Link> : <span />}
+        </nav>
       )}
     </div>
   );

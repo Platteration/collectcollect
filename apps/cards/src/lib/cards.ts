@@ -651,13 +651,36 @@ export function deleteCard(id: number): boolean {
   return gone;
 }
 
+export type CardSort = "updated" | "name" | "value" | "added";
+export const CARD_SORTS: readonly CardSort[] = ["updated", "name", "value", "added"];
+export function isCardSort(value: unknown): value is CardSort {
+  return typeof value === "string" && (CARD_SORTS as readonly string[]).includes(value);
+}
+
 export interface ListOptions {
   game?: Game;
   search?: string;
   location?: string;
+  /** Only cards holding copies whose cost was never recorded. */
+  missingCost?: boolean;
+  /** The order; the default is by when each card was last touched. */
+  sort?: CardSort;
+  /** One page of the list, for a collection too large to send whole. */
+  limit?: number;
+  offset?: number;
 }
 
-export function listCards(opts: ListOptions = {}): CardRecord[] {
+/** The value the tile shows, read from a card's latest snapshot by the database. */
+const LATEST_VALUE = `(SELECT json_extract(p.summary, '$.yourCopyValue') FROM price_snapshots p WHERE p.card_id = cards.id ORDER BY p.fetched_at DESC, p.id DESC LIMIT 1)`;
+
+const ORDER: Record<CardSort, string> = {
+  updated: "updated_at DESC, id DESC",
+  name: "lower(trim(name)) ASC, id ASC",
+  value: `${LATEST_VALUE} DESC NULLS LAST, updated_at DESC, id DESC`,
+  added: "created_at DESC, id DESC",
+};
+
+function whereFor(opts: ListOptions): { where: string; params: Record<string, unknown> } {
   const where: string[] = [];
   const params: Record<string, unknown> = {};
   if (opts.game) {
@@ -678,8 +701,75 @@ export function listCards(opts: ListOptions = {}): CardRecord[] {
       params.location = opts.location;
     }
   }
-  const sql = `SELECT * FROM cards ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY updated_at DESC, id DESC`;
+  // The same reading costBasisByCard gives: a copy still held from a lot with no cost.
+  if (opts.missingCost) where.push("EXISTS (SELECT 1 FROM acquisitions a WHERE a.card_id = cards.id AND a.remaining > 0 AND a.unit_cost IS NULL)");
+  return { where: where.length ? "WHERE " + where.join(" AND ") : "", params };
+}
+
+export function listCards(opts: ListOptions = {}): CardRecord[] {
+  const { where, params } = whereFor(opts);
+  const page = opts.limit === undefined ? "" : " LIMIT @limit OFFSET @offset";
+  if (opts.limit !== undefined) {
+    params.limit = Math.max(0, Math.floor(opts.limit));
+    params.offset = Math.max(0, Math.floor(opts.offset ?? 0));
+  }
+  const sql = `SELECT * FROM cards ${where} ORDER BY ${ORDER[opts.sort ?? "updated"]}${page}`;
   return (getDb().prepare(sql).all(params) as CardRow[]).map(rowToCard);
+}
+
+/** How many cards a filter matches, whatever page of them is shown. */
+export function countCards(opts: ListOptions = {}): number {
+  const { where, params } = whereFor(opts);
+  return (getDb().prepare(`SELECT count(*) AS n FROM cards ${where}`).get(params) as { n: number }).n;
+}
+
+/** The figures at the top of the collection page, over every card the filter matches. */
+export interface CollectionTotals {
+  cards: number;
+  /** Cards with copies left; the rest were sold. */
+  owned: number;
+  copies: number;
+  /** What the copies are worth at each card's latest value, and if every copy were raw. */
+  value: number;
+  ungraded: number;
+  /** Owned cards whose latest snapshot values them. */
+  priced: number;
+}
+
+export function collectionTotals(opts: ListOptions = {}): CollectionTotals {
+  const { where, params } = whereFor(opts);
+  const row = getDb()
+    .prepare(
+      `SELECT count(*) AS cards,
+        coalesce(sum(CASE WHEN quantity > 0 THEN 1 ELSE 0 END), 0) AS owned,
+        coalesce(sum(quantity), 0) AS copies,
+        coalesce(sum(quantity * coalesce(v.value, 0)), 0) AS value,
+        coalesce(sum(quantity * coalesce(v.ungraded, 0)), 0) AS ungraded,
+        coalesce(sum(CASE WHEN quantity > 0 AND v.value > 0 THEN 1 ELSE 0 END), 0) AS priced
+       FROM cards LEFT JOIN (
+         SELECT p.card_id, json_extract(p.summary, '$.yourCopyValue') AS value, json_extract(p.summary, '$.ungraded') AS ungraded
+         FROM price_snapshots p
+         WHERE p.id = (SELECT q.id FROM price_snapshots q WHERE q.card_id = p.card_id ORDER BY q.fetched_at DESC, q.id DESC LIMIT 1)
+       ) v ON v.card_id = cards.id ${where}`,
+    )
+    .get(params) as CollectionTotals;
+  return { ...row, value: Math.round(row.value * 100) / 100, ungraded: Math.round(row.ungraded * 100) / 100 };
+}
+
+/** The two figures a collection tile shows, for these cards, from each one's latest snapshot. */
+export function latestValuesByCard(ids: number[]): Map<number, Pick<PriceSummary, "yourCopyValue" | "ungraded">> {
+  const map = new Map<number, Pick<PriceSummary, "yourCopyValue" | "ungraded">>();
+  if (ids.length === 0) return map;
+  const rows = getDb()
+    .prepare(
+      `SELECT c.id AS card_id, json_extract(s.summary, '$.yourCopyValue') AS your_copy_value, json_extract(s.summary, '$.ungraded') AS ungraded
+       FROM cards c JOIN price_snapshots s ON s.id = (
+         SELECT p.id FROM price_snapshots p WHERE p.card_id = c.id ORDER BY p.fetched_at DESC, p.id DESC LIMIT 1
+       ) WHERE c.id IN (${ids.map(() => "?").join(",")})`,
+    )
+    .all(...ids) as Array<{ card_id: number; your_copy_value: number | null; ungraded: number | null }>;
+  for (const r of rows) map.set(r.card_id, { yourCopyValue: r.your_copy_value, ungraded: r.ungraded });
+  return map;
 }
 
 /** Every location in use, with how many cards are kept there. */
@@ -706,18 +796,33 @@ interface SnapshotRow {
   card_id: number;
   fetched_at: string;
   summary: string;
+  checked_at: string | null;
+}
+
+function rowToSnapshot(r: SnapshotRow): PriceSnapshot {
+  return {
+    id: r.id,
+    cardId: r.card_id,
+    fetchedAt: r.fetched_at,
+    summary: JSON.parse(r.summary) as PriceSummary,
+    ...(r.checked_at ? { checkedAt: r.checked_at } : {}),
+  };
+}
+
+/**
+ * A refresh found the same prices this snapshot already holds: note when,
+ * rather than storing a copy. Only the marker changes, so the holdings history
+ * (which listens to the summary) records nothing, and nothing is mirrored.
+ */
+export function markChecked(snapshotId: number, at: string): void {
+  getDb().prepare("UPDATE price_snapshots SET checked_at = ? WHERE id = ?").run(at, snapshotId);
 }
 
 export function listSnapshots(cardId: number, limit = 50): PriceSnapshot[] {
   const rows = getDb()
     .prepare("SELECT * FROM price_snapshots WHERE card_id = ? ORDER BY fetched_at DESC, id DESC LIMIT ?")
     .all(cardId, limit) as SnapshotRow[];
-  return rows.map((r) => ({
-    id: r.id,
-    cardId: r.card_id,
-    fetchedAt: r.fetched_at,
-    summary: JSON.parse(r.summary) as PriceSummary,
-  }));
+  return rows.map(rowToSnapshot);
 }
 
 export function latestSnapshot(cardId: number): PriceSnapshot | null {
@@ -729,12 +834,7 @@ export function allSnapshots(): PriceSnapshot[] {
   const rows = getDb()
     .prepare("SELECT * FROM price_snapshots ORDER BY fetched_at ASC, id ASC")
     .all() as SnapshotRow[];
-  return rows.map((r) => ({
-    id: r.id,
-    cardId: r.card_id,
-    fetchedAt: r.fetched_at,
-    summary: JSON.parse(r.summary) as PriceSummary,
-  }));
+  return rows.map(rowToSnapshot);
 }
 
 /** Latest snapshot for every card in one query (for the collection view). */
@@ -750,13 +850,57 @@ export function latestSnapshotsByCard(): Map<number, PriceSnapshot> {
     )
     .all() as SnapshotRow[];
   const map = new Map<number, PriceSnapshot>();
+  for (const r of rows) map.set(r.card_id, rowToSnapshot(r));
+  return map;
+}
+
+/** The two figures the portfolio line sums, for one snapshot. */
+export interface SnapshotValue {
+  id: number;
+  cardId: number;
+  fetchedAt: string;
+  checkedAt?: string;
+  summary: Pick<PriceSummary, "yourCopyValue" | "ungraded">;
+}
+
+/**
+ * Every snapshot's value figures, oldest first, read out of the JSON by the
+ * database rather than by parsing each summary with its quotes: the dashboard
+ * only ever sums two numbers per row.
+ */
+export function snapshotValues(): SnapshotValue[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, card_id, fetched_at, checked_at,
+        json_extract(summary, '$.yourCopyValue') AS your_copy_value,
+        json_extract(summary, '$.ungraded') AS ungraded
+       FROM price_snapshots ORDER BY fetched_at ASC, id ASC`,
+    )
+    .all() as Array<{ id: number; card_id: number; fetched_at: string; checked_at: string | null; your_copy_value: number | null; ungraded: number | null }>;
+  return rows.map((r) => ({
+    id: r.id,
+    cardId: r.card_id,
+    fetchedAt: r.fetched_at,
+    ...(r.checked_at ? { checkedAt: r.checked_at } : {}),
+    summary: { yourCopyValue: r.your_copy_value, ungraded: r.ungraded },
+  }));
+}
+
+/** The newest `perCard` snapshots of every card, oldest first within each card, for the grading outlook. */
+export function recentSnapshotsByCard(perCard: number): Map<number, PriceSnapshot[]> {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, card_id, fetched_at, summary, checked_at FROM (
+        SELECT *, row_number() OVER (PARTITION BY card_id ORDER BY fetched_at DESC, id DESC) AS rn FROM price_snapshots
+      ) WHERE rn <= ? ORDER BY card_id, fetched_at ASC, id ASC`,
+    )
+    .all(perCard) as SnapshotRow[];
+  const map = new Map<number, PriceSnapshot[]>();
   for (const r of rows) {
-    map.set(r.card_id, {
-      id: r.id,
-      cardId: r.card_id,
-      fetchedAt: r.fetched_at,
-      summary: JSON.parse(r.summary) as PriceSummary,
-    });
+    const s = rowToSnapshot(r);
+    const list = map.get(s.cardId);
+    if (list) list.push(s);
+    else map.set(s.cardId, [s]);
   }
   return map;
 }

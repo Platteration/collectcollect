@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb, openDatabase, setDb } from "@/lib/db";
-import { HasSalesError, addAcquisition, addSnapshot, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
+import { HasSalesError, addAcquisition, addSnapshot, allSnapshots, collectionTotals, countCards, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, latestValuesByCard, listCards, listSnapshots, markChecked, recentSnapshotsByCard, snapshotValues, updateCard } from "@/lib/cards";
 import { verifyLotInvariant } from "@/lib/acquisitions";
 import { deleteSale, recordSale } from "@/lib/sales";
 import { createAlert } from "@/lib/alerts";
@@ -407,5 +407,104 @@ describe("what the database indexes", () => {
       .join("; ");
     expect(plan).toMatch(/idx_cards_game_name/);
     expect(plan).not.toMatch(/SCAN cards/);
+  });
+});
+
+describe("what the dashboard reads of the price history", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("reads the two figures the portfolio sums straight out of every row, in the same order", () => {
+    const a = createCard({ game: "pokemon", name: "A" });
+    const b = createCard({ game: "pokemon", name: "B" });
+    addSnapshot(a.id, summary(3));
+    addSnapshot(b.id, { ...summary(2), yourCopyValue: null, ungraded: null });
+    const marked = addSnapshot(a.id, { ...summary(5), ungraded: 4.25 });
+    markChecked(marked.id, "2026-02-01T00:00:00.000Z");
+    const values = snapshotValues();
+    expect(values).toEqual(
+      allSnapshots().map((s) => ({
+        id: s.id,
+        cardId: s.cardId,
+        fetchedAt: s.fetchedAt,
+        ...(s.checkedAt ? { checkedAt: s.checkedAt } : {}),
+        summary: { yourCopyValue: s.summary.yourCopyValue ?? null, ungraded: s.summary.ungraded ?? null },
+      })),
+    );
+    expect(values.map((v) => v.summary.yourCopyValue)).toEqual([null, 3, 5]);
+    expect(values.at(-1)).toMatchObject({ checkedAt: "2026-02-01T00:00:00.000Z", summary: { ungraded: 4.25 } });
+  });
+
+  it("hands the outlook each card's newest snapshots only, oldest first", () => {
+    const a = createCard({ game: "pokemon", name: "A" });
+    const b = createCard({ game: "pokemon", name: "B" });
+    for (const v of [1, 2, 3]) addSnapshot(a.id, summary(v));
+    addSnapshot(b.id, summary(7));
+    const recent = recentSnapshotsByCard(2);
+    expect(recent.get(a.id)?.map((s) => s.summary.yourCopyValue)).toEqual([2, 3]);
+    expect(recent.get(b.id)?.map((s) => s.summary.yourCopyValue)).toEqual([7]);
+    expect(recent.get(a.id)?.[1]).toEqual(listSnapshots(a.id)[0]);
+  });
+});
+
+describe("sorting and paging the collection", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  function seed() {
+    const charizard = createCard({ game: "pokemon", name: "Charizard", quantity: 2, purchasePrice: 50 });
+    const abra = createCard({ game: "pokemon", name: "abra" });
+    const bulbasaur = createCard({ game: "pokemon", name: "Bulbasaur", quantity: 3 });
+    const sold = createCard({ game: "yugioh", name: "Sold out", quantity: 0 });
+    addSnapshot(charizard.id, summary(100));
+    // The fixture dates a snapshot by its value; this one is the newest.
+    addSnapshot(charizard.id, { ...summary(90), fetchedAt: new Date(2026, 5, 1).toISOString(), ungraded: 80 });
+    addSnapshot(bulbasaur.id, summary(5));
+    addSnapshot(sold.id, summary(1));
+    return { charizard, abra, bulbasaur, sold };
+  }
+
+  it("orders by name, by value with unpriced cards last, and by when a card was added", () => {
+    const { charizard, abra, bulbasaur, sold } = seed();
+    getDb().prepare("UPDATE cards SET created_at = ? WHERE id = ?").run("2026-01-01T00:00:00.000Z", abra.id);
+    expect(listCards({ sort: "name" }).map((c) => c.name)).toEqual(["abra", "Bulbasaur", "Charizard", "Sold out"]);
+    expect(listCards({ sort: "value" }).map((c) => c.name)).toEqual(["Charizard", "Bulbasaur", "Sold out", "abra"]);
+    expect(latestValuesByCard([charizard.id]).get(charizard.id)?.yourCopyValue).toBe(90);
+    expect(listCards({ sort: "added" }).map((c) => c.id)).toEqual([sold.id, bulbasaur.id, charizard.id, abra.id]);
+    // The default is untouched: last touched first.
+    expect(listCards().map((c) => c.id)).toEqual(listCards({ sort: "updated" }).map((c) => c.id));
+  });
+
+  it("hands back one page at a time, and says how many there are in all", () => {
+    seed();
+    expect(listCards({ sort: "name", limit: 2 }).map((c) => c.name)).toEqual(["abra", "Bulbasaur"]);
+    expect(listCards({ sort: "name", limit: 2, offset: 2 }).map((c) => c.name)).toEqual(["Charizard", "Sold out"]);
+    expect(listCards({ sort: "name", limit: 2, offset: 4 })).toEqual([]);
+    expect(countCards()).toBe(4);
+    expect(countCards({ game: "yugioh" })).toBe(1);
+    expect(countCards({ search: "saur" })).toBe(1);
+  });
+
+  it("totals the whole filtered collection, whatever page is shown", () => {
+    const { charizard, bulbasaur } = seed();
+    // The same numbers the page used to add up card by card.
+    expect(collectionTotals()).toEqual({ cards: 4, owned: 3, copies: 6, value: 90 * 2 + 5 * 3, ungraded: 80 * 2 + 5 * 3, priced: 2 });
+    expect(collectionTotals({ game: "yugioh" })).toEqual({ cards: 1, owned: 0, copies: 0, value: 0, ungraded: 0, priced: 0 });
+    expect(collectionTotals({ search: "zard" })).toMatchObject({ cards: 1, value: 180, priced: 1 });
+    expect(latestValuesByCard([charizard.id, bulbasaur.id, 999])).toEqual(
+      new Map([
+        [charizard.id, { yourCopyValue: 90, ungraded: 80 }],
+        [bulbasaur.id, { yourCopyValue: 5, ungraded: 5 }],
+      ]),
+    );
+    expect(latestValuesByCard([])).toEqual(new Map());
+  });
+
+  it("finds the cards whose copies have no recorded cost, in the database rather than after the fact", () => {
+    const { charizard, abra } = seed();
+    addAcquisition(abra.id, { quantity: 1, unitCost: null, acquiredAt: "2026-01-02" });
+    expect(listCards({ missingCost: true }).map((c) => c.name).sort()).toEqual(["Bulbasaur", "abra"]);
+    expect(countCards({ missingCost: true })).toBe(2);
+    expect(listCards({ missingCost: true, game: "pokemon", search: "abra" }).map((c) => c.id)).toEqual([abra.id]);
+    expect(countCards({ missingCost: true, search: "zard" })).toBe(0);
+    expect(charizard.purchasePrice).toBe(50);
   });
 });

@@ -1,8 +1,8 @@
-import { addSnapshot, getCard, latestSnapshot, latestSnapshotsByCard, listCards, listSnapshots, refreshMirror, rememberLearned } from "../cards";
+import { addSnapshot, getCard, latestSnapshot, latestSnapshotsByCard, listCards, listSnapshots, markChecked, refreshMirror, rememberLearned } from "../cards";
 import { alertsForRefresh, createAlert, deliver } from "../alerts";
 import { getSettings } from "../settings";
 import type { CardRecord, PriceSnapshot, PriceSummary } from "../types";
-import { learnFromQuotes, priceCard } from "./index";
+import { learnFromQuotes, priceCard, sameSummary } from "./index";
 import { createGate } from "@collectcollect/core/gate";
 import { BusyError } from "@collectcollect/core/gate";
 import type { JobRefreshOptions } from "@collectcollect/core/price-jobs";
@@ -20,8 +20,13 @@ function hasPrice(s: PriceSummary): boolean {
  * this game, or no match) is returned so the UI can explain, but it is not
  * stored over an existing snapshot: a network blip or a missing API key must
  * not erase a card's last known value from the portfolio history.
+ *
+ * A lookup that found exactly the prices the latest snapshot already holds is
+ * not a new fact about the card either: that snapshot is marked as checked
+ * now (`unchanged`) rather than copied, so a card refreshed every day for a
+ * year does not carry a year of identical rows.
  */
-export async function refreshCard(card: CardRecord): Promise<{ card: CardRecord; snapshot: PriceSnapshot; stored: boolean; skipped?: boolean }> {
+export async function refreshCard(card: CardRecord): Promise<{ card: CardRecord; snapshot: PriceSnapshot; stored: boolean; skipped?: boolean; unchanged?: boolean }> {
   if (archiveGate.busy) throw new BusyError("A backup or restore is in progress.");
   refreshState.__cardsActivePrices = (refreshState.__cardsActivePrices ?? 0) + 1;
   try {
@@ -36,7 +41,16 @@ export async function refreshCard(card: CardRecord): Promise<{ card: CardRecord;
     // not an edit: the collection's order is by when the owner last touched a
     // card, not by which one a refresh finished last.
     const remembered = rememberLearned(card.id, learnFromQuotes(summary.quotes));
-    const failed = !hasPrice(summary) && latestSnapshot(card.id) !== null;
+    const latest = latestSnapshot(card.id);
+    const failed = !hasPrice(summary) && latest !== null;
+    // A snapshot an edit revalued in place is derived from an older fetch, not
+    // a fetch of its own; the first lookup after it is a new fact even when
+    // the figures agree, and it keeps the card's chart a line, not a point.
+    if (!failed && latest && !latest.summary.recomputedAt && sameSummary(latest.summary, summary)) {
+      markChecked(latest.id, summary.fetchedAt);
+      if (remembered) refreshMirror(card.id);
+      return { card: getCard(card.id) ?? current, snapshot: { ...latest, checkedAt: summary.fetchedAt }, stored: false, unchanged: true };
+    }
     const snapshot: PriceSnapshot = failed
       ? { id: 0, cardId: card.id, fetchedAt: summary.fetchedAt, summary }
       : addSnapshot(card.id, summary);
@@ -56,6 +70,8 @@ export async function refreshCard(card: CardRecord): Promise<{ card: CardRecord;
 
 export interface RefreshResult {
   refreshed: number;
+  /** Lookups that found the same prices as last time; the latest snapshot was marked as checked, and nothing stored. */
+  unchanged: number;
   /** Lookups that returned no prices (errors from every source); nothing stored for these. */
   unpriced: number;
   skipped: number;
@@ -131,11 +147,13 @@ async function refreshEverything(opts: { staleHours?: number; concurrency?: numb
     if (opts.ids && !opts.ids.includes(c.id)) return false;
     if (cutoff === null) return true;
     const snap = latest.get(c.id);
-    const lastStored = snap ? new Date(snap.fetchedAt).getTime() : 0;
+    // A check that found the same prices counts as a refresh, or a stable card
+    // would be asked about every hour of every day.
+    const lastStored = snap ? new Date(snap.checkedAt ?? snap.fetchedAt).getTime() : 0;
     const lastTried = Math.max(lastStored, lastAttempt.get(c.id) ?? 0);
     return lastTried < cutoff;
   });
-  const result: RefreshResult = { refreshed: 0, unpriced: 0, skipped: listCards().length - queue.length, failed: [] };
+  const result: RefreshResult = { refreshed: 0, unchanged: 0, unpriced: 0, skipped: listCards().length - queue.length, failed: [] };
   const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
     while (queue.length) {
       const card = queue.shift()!;
@@ -147,9 +165,11 @@ async function refreshEverything(opts: { staleHours?: number; concurrency?: numb
         if (r.skipped) { result.skipped++; opts.onProgress?.({ id: card.id, status: "skipped", message: "Card was removed or sold out during refresh." }); continue; }
         const priced = hasPrice(r.snapshot.summary);
         if (r.stored) result.refreshed++;
+        else if (r.unchanged) result.unchanged++;
         else result.unpriced++;
-        opts.onProgress?.({ id: card.id, status: priced ? "priced" : r.snapshot.summary.errors.length ? "failed" : "unpriced",
-          message: r.snapshot.summary.errors.map(e => `${e.source}: ${e.message}`).join("; ") || (priced ? undefined : "No matching price found; previous value kept.") });
+        const errors = r.snapshot.summary.errors.map(e => `${e.source}: ${e.message}`).join("; ");
+        opts.onProgress?.({ id: card.id, status: priced ? "priced" : errors ? "failed" : "unpriced",
+          message: r.unchanged ? `Unchanged since ${r.snapshot.fetchedAt.slice(0, 10)}.${errors ? ` ${errors}` : ""}` : errors || (priced ? undefined : "No matching price found; previous value kept.") });
       } catch (e) {
         result.failed.push({ cardId: card.id, message: e instanceof Error ? e.message : String(e) });
         opts.onProgress?.({ id: card.id, status: "failed", message: e instanceof Error ? e.message : String(e) });

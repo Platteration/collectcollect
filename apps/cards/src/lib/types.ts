@@ -264,6 +264,12 @@ export interface PriceSnapshot {
   cardId: number;
   fetchedAt: string;
   summary: PriceSummary;
+  /**
+   * When a later refresh last found exactly these prices. Such a refresh adds
+   * no snapshot; it marks this one, so the row is the price and this is how
+   * recently it was confirmed.
+   */
+  checkedAt?: string;
 }
 
 export interface Settings {

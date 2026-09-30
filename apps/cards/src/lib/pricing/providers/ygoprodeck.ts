@@ -53,12 +53,12 @@ export const ygoprodeckProvider: PriceProvider = {
   optional: true,
   note: "Free, no key required.",
   isConfigured: () => true,
-  async lookup(q, fetchImpl = fetch) {
+  async lookup(q, fetchImpl = fetch, signal?: AbortSignal) {
     let cards: YgoCard[] = [];
-    const exact = await fetchImpl(`${BASE}?name=${encodeURIComponent(q.name)}`);
+    const exact = await fetchImpl(`${BASE}?name=${encodeURIComponent(q.name)}`, { signal });
     if (exact.ok) cards = ((await exact.json()) as { data?: YgoCard[] }).data ?? [];
     if (cards.length === 0) {
-      const fuzzy = await fetchImpl(`${BASE}?fname=${encodeURIComponent(q.name)}&num=20&offset=0`);
+      const fuzzy = await fetchImpl(`${BASE}?fname=${encodeURIComponent(q.name)}&num=20&offset=0`, { signal });
       if (fuzzy.status === 400) return []; // YGOPRODeck answers 400 for "no cards matching"
       if (!fuzzy.ok) throw new ProviderError("ygoprodeck", `YGOPRODeck returned HTTP ${fuzzy.status}`);
       cards = ((await fuzzy.json()) as { data?: YgoCard[] }).data ?? [];

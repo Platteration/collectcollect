@@ -17,14 +17,15 @@ export default function ReportPage() {
   const prices = latestSnapshotsByCard();
   const rows = cards
     .map((c) => {
-      const s = prices.get(c.id)?.summary;
+      const snap = prices.get(c.id);
+      const s = snap?.summary;
       const each = s?.yourCopyValue ?? null;
       return {
         card: c,
         each,
         total: each === null ? null : each * c.quantity,
         source: s?.ungradedSource ?? null,
-        asOf: s?.fetchedAt ?? null,
+        asOf: snap?.checkedAt ?? s?.fetchedAt ?? null,
       };
     })
     .sort((a, b) => (b.total ?? 0) - (a.total ?? 0));

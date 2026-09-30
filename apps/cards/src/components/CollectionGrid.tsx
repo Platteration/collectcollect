@@ -3,12 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { CardTile } from "./CardTile";
-import { GRADING_STATUSES, type CardRecord, type GradingStatus, type PriceSummary, type Submission } from "@/lib/types";
+import { CardTile, type TileCard, type TilePrice } from "./CardTile";
+import { GRADING_STATUSES, type GradingStatus, type Submission } from "@/lib/types";
 
+/** One tile's worth of a card: the grid is sent what it draws, not every card's whole record and price summary. */
 export interface GridCard {
-  card: CardRecord;
-  price: PriceSummary | null;
+  card: TileCard;
+  price: TilePrice | null;
 }
 
 /**

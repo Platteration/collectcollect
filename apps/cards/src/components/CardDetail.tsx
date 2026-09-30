@@ -83,11 +83,15 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
     setBusy("price");
     setError(null);
     try {
-      const res = await api<{ card: CardRecord; snapshot: PriceSnapshot; stored: boolean }>(`/api/cards/${card.id}/price`, { method: "POST" });
+      const res = await api<{ card: CardRecord; snapshot: PriceSnapshot; stored: boolean; unchanged?: boolean }>(`/api/cards/${card.id}/price`, { method: "POST" });
       setCard(res.card);
       if (res.stored) {
         setLatest(res.snapshot.summary);
         setHistory((h) => [res.snapshot, ...h]);
+      } else if (res.unchanged) {
+        // The same prices as before: the latest row now says when it was checked.
+        setLatest(res.snapshot.summary);
+        setHistory((h) => [res.snapshot, ...h.slice(1)]);
       } else {
         // Keep showing the last good prices; explain why nothing changed.
         const errs = res.snapshot.summary.errors.map((e) => `${e.source}: ${e.message}`).join("; ");
@@ -427,7 +431,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
           </dl>
         )}
 
-        <PricePanel summary={latest} loading={busy === "price"} onRefresh={refreshPrice} onReject={rejectMatch} />
+        <PricePanel summary={latest} checkedAt={history[0]?.checkedAt ?? null} loading={busy === "price"} onRefresh={refreshPrice} onReject={rejectMatch} />
 
         {valuePoints.length > 1 && firstPoint && (
           <section className="card-surface p-4">
@@ -746,7 +750,10 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
                 <tbody>
                   {history.map((s) => (
                     <tr key={s.id} className="border-t border-black/5 dark:border-white/5">
-                      <td className="py-1 pr-3 whitespace-nowrap">{when(s.fetchedAt)}</td>
+                      <td className="py-1 pr-3 whitespace-nowrap">
+                        {when(s.fetchedAt)}
+                        {s.checkedAt ? <span className="text-neutral-500"> · unchanged at {when(s.checkedAt)}</span> : null}
+                      </td>
                       <td className="py-1 pr-3">{money(s.summary.ungraded)}</td>
                       <td className="py-1 pr-3">{money(s.summary.yourCopyValue)}</td>
                       <td className="py-1 pr-3">

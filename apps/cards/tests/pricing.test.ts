@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { fetchQuotes, gradeKey, gradeLookupKeys, learnFromQuotes, summarize } from "@/lib/pricing";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fetchQuotes, gradeKey, gradeLookupKeys, learnFromQuotes, sameSummary, summarize } from "@/lib/pricing";
 import { priceChartingProvider } from "@/lib/pricing/providers/pricecharting";
 import { refreshAll, resetRefreshThrottle } from "@/lib/pricing/refresh";
 import { addSnapshot, createCard, listSnapshots, updateCard } from "@/lib/cards";
@@ -116,6 +116,44 @@ describe("fetchQuotes", () => {
   });
 });
 
+describe("a source that does not answer", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("is given up on at the deadline, and its request abandoned with it", async () => {
+    vi.useFakeTimers();
+    let aborted = false;
+    const hanging = ((_url: unknown, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => { aborted = true; reject(init.signal!.reason); }))) as unknown as typeof fetch;
+    const pending = fetchQuotes({ game: "pokemon", name: "Pikachu" }, hanging);
+    await vi.advanceTimersByTimeAsync(20_000);
+    const { quotes, errors } = await pending;
+    expect(quotes).toEqual([]);
+    expect(errors).toEqual([{ source: "pokemontcg", message: expect.stringMatching(/did not answer within 20 seconds/) }]);
+    expect(aborted).toBe(true);
+    // Nothing left ticking for a request that is over.
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("clears its deadline as soon as the source answers", async () => {
+    vi.useFakeTimers();
+    await fetchQuotes({ game: "pokemon", name: "Pikachu" }, fakeFetch([["api.pokemontcg.io", { data: [] }]]));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("what makes two summaries the same price", () => {
+  it("ignores when the sources were asked, and nothing else the app shows", () => {
+    const a: PriceSummary = { ...blank, fetchedAt: "2026-01-01T00:00:00.000Z", ungraded: 5, ungradedSource: "TCGplayer", yourCopyValue: 5, yourCopyBasis: "Ungraded market price from TCGplayer.", quotes: [quote({ ungraded: 5, externalId: "base1-58", url: "https://a.example" })] };
+    const later: PriceSummary = { ...a, fetchedAt: "2026-02-01T00:00:00.000Z", recomputedAt: "2026-02-02T00:00:00.000Z", quotes: [{ ...a.quotes[0]!, fetchedAt: "2026-02-01T00:00:00.000Z", url: "https://b.example" }] };
+    expect(sameSummary(a, later)).toBe(true);
+    expect(sameSummary(a, { ...later, ungraded: 6, yourCopyValue: 6 })).toBe(false);
+    expect(sameSummary(a, { ...later, graded: { "PSA 10": 50 } })).toBe(false);
+    expect(sameSummary(a, { ...later, quotes: [{ ...later.quotes[0]!, externalId: "base1-59" }] })).toBe(false);
+    expect(sameSummary(a, { ...later, quotes: [] })).toBe(false);
+    expect(sameSummary(a, { ...later, errors: [{ source: "pricecharting", message: "down" }] })).toBe(false);
+  });
+});
+
 describe("learnFromQuotes", () => {
   it("collects external ids and the first reference image", () => {
     const learned = learnFromQuotes([
@@ -211,8 +249,72 @@ describe("refreshing a whole collection", () => {
 
     // Everything is fresh now, so a second pass has nothing to do.
     expect(await refreshAll({ staleHours: 24 })).toMatchObject({ refreshed: 0, skipped: 2 });
-    // With no cutoff, everything is priced again.
-    expect(await refreshAll()).toMatchObject({ refreshed: 2, skipped: 0 });
+    // With no cutoff, everything is asked about again: the card whose stored
+    // row predates manual quotes gets a new one, the card priced a moment ago
+    // finds the same prices and is only marked as checked.
+    expect(await refreshAll()).toMatchObject({ refreshed: 1, unchanged: 1, skipped: 0 });
+    expect(listSnapshots(stale.id)).toHaveLength(2);
+    expect(listSnapshots(fresh.id)).toHaveLength(2);
+  });
+
+  it("notes a check that found the same prices on the row it has, rather than storing it again", async () => {
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    const { getCard } = await import("@/lib/cards");
+    // Once the card carries the id it learned, the lookup is by id, which answers with one card rather than a list.
+    const pikachu = (market: number) => {
+      const found = { id: "base1-58", name: "Pikachu", number: "58", set: { id: "base1", name: "Base" }, tcgplayer: { prices: { normal: { market } } } };
+      return fakeFetch([["v2/cards/base1-58", { data: found }], ["api.pokemontcg.io", { data: [found] }]]);
+    };
+    const card = createCard({ game: "pokemon", name: "Pikachu", cardNumber: "58" });
+    const original = globalThis.fetch;
+    try {
+      globalThis.fetch = pikachu(5);
+      const first = await refreshCard(getCard(card.id)!);
+      expect(first.stored).toBe(true);
+      const again = await refreshCard(getCard(card.id)!);
+      expect(again).toMatchObject({ stored: false, unchanged: true });
+      const rows = listSnapshots(card.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ id: first.snapshot.id, fetchedAt: first.snapshot.fetchedAt, checkedAt: again.snapshot.checkedAt });
+      expect(Date.parse(rows[0]!.checkedAt!)).toBeGreaterThanOrEqual(Date.parse(rows[0]!.fetchedAt));
+      // A whole-collection pass counts it as a check, and treats the card as
+      // fresh from then: the check is what decides staleness, not the row's date.
+      expect(await refreshAll()).toMatchObject({ refreshed: 0, unchanged: 1, unpriced: 0, skipped: 0 });
+      const { getDb } = await import("@/lib/db");
+      getDb().prepare("UPDATE price_snapshots SET fetched_at = ? WHERE id = ?").run(new Date(Date.now() - 72 * 3600e3).toISOString(), first.snapshot.id);
+      resetRefreshThrottle();
+      expect(await refreshAll({ staleHours: 24 })).toMatchObject({ refreshed: 0, unchanged: 0, skipped: 1 });
+      // A move is a new fact, and gets a row of its own; the checked one keeps
+      // its note, which the whole-collection pass above brought forward.
+      const checked = listSnapshots(card.id)[0]?.checkedAt;
+      expect(Date.parse(checked!)).toBeGreaterThanOrEqual(Date.parse(rows[0]!.checkedAt!));
+      globalThis.fetch = pikachu(6);
+      expect((await refreshCard(getCard(card.id)!)).stored).toBe(true);
+      const after = listSnapshots(card.id);
+      expect(after).toHaveLength(2);
+      expect(after[0]?.checkedAt).toBeUndefined();
+      expect(after[1]?.checkedAt).toBe(checked);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("stores the first lookup after an edit revalued the latest snapshot in place, then checks", async () => {
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    const { getCard } = await import("@/lib/cards");
+    // No source prices "other", so the manual price is the whole answer and nothing reaches the network.
+    const card = createCard({ game: "other", name: "Edited by hand", manualUngraded: 100 });
+    expect((await refreshCard(getCard(card.id)!)).stored).toBe(true);
+    // The edit revalues the stored row at once (its recomputedAt says so)...
+    updateCard(card.id, { manualUngraded: 250 });
+    expect(listSnapshots(card.id)).toHaveLength(1);
+    expect(listSnapshots(card.id)[0]?.summary).toMatchObject({ yourCopyValue: 250, recomputedAt: expect.any(String) });
+    // ...and the next lookup is a fetch of its own, not a check of a derived row.
+    expect(await refreshCard(getCard(card.id)!)).toMatchObject({ stored: true });
+    expect(listSnapshots(card.id).map((s) => s.summary.yourCopyValue)).toEqual([250, 250]);
+    // From then on the same price is a check again.
+    expect(await refreshCard(getCard(card.id)!)).toMatchObject({ stored: false, unchanged: true });
+    expect(listSnapshots(card.id)).toHaveLength(2);
   });
 
   it("runs one whole-collection pass at a time", async () => {
@@ -222,8 +324,9 @@ describe("refreshing a whole collection", () => {
     // The second caller is told, not queued: the pass it wants is the one running.
     await expect(refreshAll()).rejects.toBeInstanceOf(BusyError);
     expect(await first).toMatchObject({ refreshed: 1 });
-    // And the gate opens again once the first is done.
-    expect(await refreshAll()).toMatchObject({ refreshed: 1 });
+    // And the gate opens again once the first is done: the pass runs, and
+    // finds the same manual price it stored a moment ago.
+    expect(await refreshAll()).toMatchObject({ refreshed: 0, unchanged: 1 });
   });
 
   it("records the first look even when nothing has a price for the card", async () => {

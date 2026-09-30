@@ -124,18 +124,18 @@ export const priceChartingProvider: PriceProvider = {
   optional: true,
   note: "Set PRICECHARTING_TOKEN (paid API) to get graded PSA/BGS/CGC/SGC prices for every category.",
   isConfigured: () => Boolean(process.env.PRICECHARTING_TOKEN),
-  async lookup(q, fetchImpl = fetch) {
+  async lookup(q, fetchImpl = fetch, signal?: AbortSignal) {
     const token = process.env.PRICECHARTING_TOKEN;
     if (!token) return [];
     const knownId = q.externalIds?.pricecharting;
     if (knownId) {
-      const res = await fetchImpl(`https://www.pricecharting.com/api/product?t=${encodeURIComponent(token)}&id=${encodeURIComponent(knownId)}`);
+      const res = await fetchImpl(`https://www.pricecharting.com/api/product?t=${encodeURIComponent(token)}&id=${encodeURIComponent(knownId)}`, { signal });
       if (res.ok) {
         const body = (await res.json()) as PcProduct & { status?: string };
         if (body.status === "success" && body["product-name"]) return [productToQuote(body)];
       }
     }
-    const res = await fetchImpl(`https://www.pricecharting.com/api/products?t=${encodeURIComponent(token)}&q=${encodeURIComponent(buildSearch(q))}`);
+    const res = await fetchImpl(`https://www.pricecharting.com/api/products?t=${encodeURIComponent(token)}&q=${encodeURIComponent(buildSearch(q))}`, { signal });
     if (!res.ok) throw new ProviderError("pricecharting", `PriceCharting returned HTTP ${res.status}`);
     const body = (await res.json()) as { status?: string; products?: PcProduct[]; "error-message"?: string };
     if (body.status && body.status !== "success") {

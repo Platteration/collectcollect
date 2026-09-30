@@ -4,7 +4,7 @@ import { thinPoints } from "@collectcollect/core/series";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { PriceRefresh } from "@collectcollect/core/components/PriceRefresh";
-import { RANGES, change, sliceRange, type Allocation, type OutlookPoint, type PortfolioPoint, type Range, type Realized, type Returns, type Verdict } from "@/lib/analytics";
+import { RANGES, capOutlook, change, sliceRange, type Allocation, type OutlookPoint, type PortfolioPoint, type Range, type Realized, type Returns, type Verdict } from "@/lib/analytics";
 import { money, when } from "@/lib/format";
 import { GAMES, GRADING_STATUSES, type Game, type GradingStatus, type Settings } from "@/lib/types";
 import { PortfolioChart } from "./charts/PortfolioChart";
@@ -79,6 +79,7 @@ export function Portfolio({ points: historyPoints, pricePoints, historyStartedAt
   const points = historyMode ? historyPoints : pricePoints;
   const [range, setRange] = useState<Range>("1M");
   const [filter, setFilter] = useState<OutlookFilter>("active");
+  const [showAll, setShowAll] = useState(false);
   const [hover, setHover] = useState<PortfolioPoint | null>(null);
 
   const visible = useMemo(() => thinPoints(sliceRange(points, range)), [points, range]);
@@ -120,6 +121,9 @@ export function Portfolio({ points: historyPoints, pricePoints, historyStartedAt
     if (filter === "ready") return ready.includes(o);
     return o.status === filter;
   });
+  // A chart per raw card is a page that takes seconds to draw for a few
+  // hundred cards; the list is sorted with the ones worth acting on first.
+  const { shown: drawn, hidden } = capOutlook(visibleOpportunities, showAll);
 
   return (
     <div className="space-y-8">
@@ -264,8 +268,9 @@ export function Portfolio({ points: historyPoints, pricePoints, historyStartedAt
         ) : visibleOpportunities.length === 0 ? (
           <div className="card-surface p-6 text-sm text-neutral-500">Nothing in this group.</div>
         ) : (
+          <>
           <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {visibleOpportunities.map((o) => {
+            {drawn.map((o) => {
               const last = o.series[o.series.length - 1];
               return (
                 <li key={o.id} className="card-surface p-3">
@@ -318,6 +323,12 @@ export function Portfolio({ points: historyPoints, pricePoints, historyStartedAt
               );
             })}
           </ul>
+          {hidden > 0 && (
+            <button type="button" className="btn-secondary mt-3" onClick={() => setShowAll(true)}>
+              Show {hidden} more
+            </button>
+          )}
+          </>
         )}
       </section>
 

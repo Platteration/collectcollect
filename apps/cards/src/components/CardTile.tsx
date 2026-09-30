@@ -3,8 +3,20 @@ import { imageSrc, money } from "@/lib/format";
 import { GAMES, type CardRecord, type PriceSummary } from "@/lib/types";
 import { Card3D } from "./Card3D";
 
-export function CardTile({ card, price, selected = false }: { card: CardRecord; price: PriceSummary | null; selected?: boolean }) {
-  const src = imageSrc(card);
+/** What a tile shows of a card: the record's identity and look, not its notes, identification or ids. */
+export type TileCard = Pick<
+  CardRecord,
+  "id" | "name" | "game" | "setName" | "cardNumber" | "year" | "quantity" | "grade" | "gradingCompany" | "condition" | "variant" | "rarity" | "accentColor" | "imagePath" | "referenceImageUrl"
+>;
+export type TilePrice = Pick<PriceSummary, "yourCopyValue" | "ungraded">;
+
+export function tileCard(card: CardRecord): TileCard {
+  const { id, name, game, setName, cardNumber, year, quantity, grade, gradingCompany, condition, variant, rarity, accentColor, imagePath, referenceImageUrl } = card;
+  return { id, name, game, setName, cardNumber, year, quantity, grade, gradingCompany, condition, variant, rarity, accentColor, imagePath, referenceImageUrl };
+}
+
+export function CardTile({ card, price, selected = false }: { card: TileCard; price: TilePrice | null; selected?: boolean }) {
+  const src = imageSrc(card, "thumb");
   const graded = Boolean(card.grade);
   return (
     <Link href={`/cards/${card.id}`} className={`card-surface group flex flex-col overflow-hidden hover:shadow-md ${card.quantity === 0 ? "opacity-60" : ""} ${selected ? "ring-2 ring-amber-500" : ""}`}>

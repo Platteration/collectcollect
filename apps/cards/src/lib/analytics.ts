@@ -1,4 +1,4 @@
-import { extent } from "@collectcollect/core/series";
+import { extent, thinPoints } from "@collectcollect/core/series";
 import type { CostBasis } from "./acquisitions";
 import type { CardRecord, PriceSnapshot, PriceSummary, Settings } from "./types";
 import { round2 } from "./pricing/match";
@@ -24,7 +24,16 @@ export interface PortfolioPoint {
  * most recent snapshot of every card. Quantities are taken from the cards as
  * they are now. Actual holdings history is recorded separately.
  */
-export function portfolioSeries(cards: CardRecord[], snapshots: PriceSnapshot[]): PortfolioPoint[] {
+/** What the portfolio line needs of a snapshot: a `PriceSnapshot`, or the two figures read out of one. */
+export interface PortfolioInput {
+  id: number;
+  cardId: number;
+  fetchedAt: string;
+  checkedAt?: string;
+  summary: Pick<PriceSummary, "yourCopyValue" | "ungraded">;
+}
+
+export function portfolioSeries(cards: Array<Pick<CardRecord, "id" | "quantity">>, snapshots: PortfolioInput[]): PortfolioPoint[] {
   const qty = new Map(cards.map((c) => [c.id, c.quantity]));
   const current = new Map<number, { value: number; ungraded: number }>();
   const points: PortfolioPoint[] = [];
@@ -54,6 +63,13 @@ export function portfolioSeries(cards: CardRecord[], snapshots: PriceSnapshot[])
     if (prev && prev.t === point.t) points[points.length - 1] = point;
     else points.push(point);
   }
+  // A refresh that found the same prices adds no snapshot; it marks the
+  // latest one as checked. Without this the line would stop at the last
+  // change rather than reach the last time the prices were confirmed.
+  const last = points.at(-1);
+  let checked: string | null = null;
+  for (const s of snapshots) if (s.checkedAt && qty.has(s.cardId) && (!checked || s.checkedAt > checked)) checked = s.checkedAt;
+  if (last && checked && checked > last.t) points.push({ ...last, t: checked });
   return points;
 }
 
@@ -182,6 +198,35 @@ export function gradingOutlook(summary: PriceSummary, settings: Settings, expect
 
 export interface OutlookPoint extends Outlook {
   t: string;
+}
+
+/**
+ * How many of a card's newest snapshots the outlook is drawn from. The verdict
+ * reads the last point and the peak within the series; three months of daily
+ * checks is what "recent peak" means to a person, and it keeps the dashboard
+ * from loading a card's whole life for a chart forty pixels high.
+ */
+export const OUTLOOK_SNAPSHOTS = 90;
+
+/** How many outlook charts the dashboard draws before asking; the rest are one click away. */
+export const OUTLOOK_SHOWN = 12;
+
+/**
+ * How many points of a card's outlook travel to the browser. The verdict is
+ * decided on the server from the whole series; the chart is forty pixels
+ * high, and ninety points a card for a few hundred cards was most of the page.
+ */
+export const OUTLOOK_POINTS = 30;
+
+/** The series as the chart is sent it: thinned, with its first and last points kept. */
+export function outlookForChart(series: OutlookPoint[]): OutlookPoint[] {
+  return thinPoints(series, OUTLOOK_POINTS);
+}
+
+/** The charts to draw now, and how many the reader would have to ask for. */
+export function capOutlook<T>(list: T[], showAll: boolean, limit = OUTLOOK_SHOWN): { shown: T[]; hidden: number } {
+  if (showAll || list.length <= limit) return { shown: list, hidden: 0 };
+  return { shown: list.slice(0, limit), hidden: list.length - limit };
 }
 
 export function outlookSeries(snapshots: PriceSnapshot[], settings: Settings, expectedGrade?: string | null): OutlookPoint[] {

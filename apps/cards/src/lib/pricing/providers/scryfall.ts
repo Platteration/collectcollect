@@ -27,19 +27,19 @@ export const scryfallProvider: PriceProvider = {
   optional: true,
   note: "Free, no key required.",
   isConfigured: () => true,
-  async lookup(q, fetchImpl = fetch) {
+  async lookup(q, fetchImpl = fetch, signal?: AbortSignal) {
     let card: ScryCard | null = null;
     const num = numberPart(q.cardNumber);
     if (q.setCode && num) {
-      const res = await fetchImpl(`https://api.scryfall.com/cards/${encodeURIComponent(q.setCode.toLowerCase())}/${encodeURIComponent(num)}`, { headers: HEADERS });
+      const res = await fetchImpl(`https://api.scryfall.com/cards/${encodeURIComponent(q.setCode.toLowerCase())}/${encodeURIComponent(num)}`, { headers: HEADERS, signal });
       if (res.ok) card = (await res.json()) as ScryCard;
     }
     if (!card) {
       const params = new URLSearchParams({ fuzzy: q.name });
       if (q.setCode) params.set("set", q.setCode.toLowerCase());
-      let res = await fetchImpl(`https://api.scryfall.com/cards/named?${params}`, { headers: HEADERS });
+      let res = await fetchImpl(`https://api.scryfall.com/cards/named?${params}`, { headers: HEADERS, signal });
       if (res.status === 404 && q.setCode) {
-        res = await fetchImpl(`https://api.scryfall.com/cards/named?${new URLSearchParams({ fuzzy: q.name })}`, { headers: HEADERS });
+        res = await fetchImpl(`https://api.scryfall.com/cards/named?${new URLSearchParams({ fuzzy: q.name })}`, { headers: HEADERS, signal });
       }
       if (res.status === 404) return [];
       if (!res.ok) throw new ProviderError("scryfall", `Scryfall returned HTTP ${res.status}`);

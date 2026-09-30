@@ -99,7 +99,7 @@ export const pokemonTcgProvider: PriceProvider = {
   optional: true,
   note: "Works without a key; set POKEMONTCG_API_KEY for higher rate limits.",
   isConfigured: () => true,
-  async lookup(q, fetchImpl = fetch) {
+  async lookup(q, fetchImpl = fetch, signal?: AbortSignal) {
     const headers: Record<string, string> = { Accept: "application/json" };
     if (process.env.POKEMONTCG_API_KEY) headers["X-Api-Key"] = process.env.POKEMONTCG_API_KEY;
 
@@ -109,7 +109,7 @@ export const pokemonTcgProvider: PriceProvider = {
     let asked: CardQuery = q;
     const knownId = q.externalIds?.pokemontcg;
     if (knownId) {
-      const res = await fetchImpl(`https://api.pokemontcg.io/v2/cards/${encodeURIComponent(knownId)}`, { headers });
+      const res = await fetchImpl(`https://api.pokemontcg.io/v2/cards/${encodeURIComponent(knownId)}`, { headers, signal });
       // A 200 whose body has no `data` would otherwise put undefined in the
       // list and blow up in scoring; fall through to the search instead.
       const one = res.ok ? ((await res.json()) as { data?: PtcgCard }).data : null;
@@ -117,14 +117,14 @@ export const pokemonTcgProvider: PriceProvider = {
     }
     if (cards.length === 0) {
       const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(buildQuery(q))}&pageSize=50&orderBy=-set.releaseDate`;
-      const res = await fetchImpl(url, { headers });
+      const res = await fetchImpl(url, { headers, signal });
       if (!res.ok) throw new ProviderError("pokemontcg", `Pokémon TCG API returned HTTP ${res.status}`);
       cards = ((await res.json()) as { data?: PtcgCard[] }).data ?? [];
       if (cards.length === 0 && q.cardNumber) {
         // Retry on name alone in case the number was misread.
         const res2 = await fetchImpl(
           `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(buildQuery({ ...q, cardNumber: null }))}&pageSize=50`,
-          { headers },
+          { headers, signal },
         );
         if (res2.ok) cards = ((await res2.json()) as { data?: PtcgCard[] }).data ?? [];
         asked = { ...q, cardNumber: null };

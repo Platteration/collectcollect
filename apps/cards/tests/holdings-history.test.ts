@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDatabase, setDb, getDb, closeDatabase } from "@/lib/db";
-import { createCard, updateCard, addSnapshot, deleteCard, latestSnapshot, latestSnapshotsByCard } from "@/lib/cards";
+import { createCard, updateCard, addSnapshot, deleteCard, latestSnapshot, latestSnapshotsByCard, markChecked } from "@/lib/cards";
 import { recordSale, deleteSale } from "@/lib/sales";
 import { verifyLotInvariant } from "@/lib/acquisitions";
 import { holdingsHistory } from "@collectcollect/core/holdings-history";
@@ -69,5 +69,13 @@ describe("a latest snapshot revalued in place", () => {
     getDb().prepare("UPDATE price_snapshots SET summary = ? WHERE id = ?").run(JSON.stringify({ ...latest.summary, yourCopyValue: 99 }), latest.id);
     expect(events()).toHaveLength(n);
     expect(holdingsHistory(getDb()).points.at(-1)?.value).toBe(30);
+  });
+  it("records nothing for a check that found the same prices", () => {
+    const card = createCard({ name: "Steady", game: "other", quantity: 1 });
+    const snapshot = addSnapshot(card.id, price(10));
+    const events = getDb().prepare("SELECT * FROM holdings_events ORDER BY id").all();
+    markChecked(snapshot.id, new Date().toISOString());
+    expect(getDb().prepare("SELECT * FROM holdings_events ORDER BY id").all()).toEqual(events);
+    expect(latestSnapshot(card.id)?.checkedAt).toBeDefined();
   });
 });

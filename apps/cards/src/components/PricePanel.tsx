@@ -5,6 +5,8 @@ import type { PriceSummary } from "@/lib/types";
 
 interface Props {
   summary: PriceSummary | null;
+  /** When a later refresh last found these same prices, if one did. */
+  checkedAt?: string | null;
   loading: boolean;
   onRefresh: () => void;
   /** Forget the product the sources matched and search again; offered only when a source remembered one. */
@@ -12,7 +14,7 @@ interface Props {
   title?: string;
 }
 
-export function PricePanel({ summary, loading, onRefresh, onReject, title = "Market prices" }: Props) {
+export function PricePanel({ summary, checkedAt, loading, onRefresh, onReject, title = "Market prices" }: Props) {
   const gradedEntries = summary ? Object.entries(summary.graded) : [];
   const estimatedEntries = summary ? Object.entries(summary.estimatedGraded) : [];
   return (
@@ -121,6 +123,7 @@ export function PricePanel({ summary, loading, onRefresh, onReject, title = "Mar
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-neutral-500">
             <span>
               Fetched {when(summary.fetchedAt)}
+              {checkedAt && checkedAt !== summary.fetchedAt ? ` · checked ${when(checkedAt)}, unchanged` : ""}
               {summary.recomputedAt ? ` · revalued ${when(summary.recomputedAt)}` : ""}
             </span>
             {onReject && summary.quotes.some((q) => q.externalId) && (

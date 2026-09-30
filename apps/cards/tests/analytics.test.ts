@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allocationByGame, change, gradingOutlook, gradingVerdict, isReadyToGrade, outlookSeries, portfolioSeries, realizedReturn, sliceRange, totalReturn } from "@/lib/analytics";
+import { OUTLOOK_POINTS, OUTLOOK_SHOWN, allocationByGame, capOutlook, outlookForChart, change, gradingOutlook, gradingVerdict, isReadyToGrade, outlookSeries, portfolioSeries, realizedReturn, sliceRange, totalReturn } from "@/lib/analytics";
 import { DEFAULT_SETTINGS, type CardRecord, type PriceSnapshot, type PriceSummary } from "@/lib/types";
 import type { OutlookPoint } from "@/lib/analytics";
 
@@ -31,6 +31,15 @@ const card = (id: number, quantity = 1): CardRecord =>
   ({ id, quantity, game: "pokemon", name: `c${id}`, condition: "NM", grade: null, gradingCompany: null } as unknown as CardRecord);
 
 describe("portfolioSeries", () => {
+  it("reaches the last time the prices were confirmed, not only the last change", () => {
+    const pts = portfolioSeries([card(1)], [{ ...snap(1, 1, 0, { yourCopyValue: 5 }), checkedAt: day(9) }]);
+    expect(pts.map((p) => p.t)).toEqual([day(0), day(9)]);
+    expect(pts[1]).toMatchObject({ value: 5, priced: 1 });
+    // A check older than a later change adds nothing.
+    const later = portfolioSeries([card(1)], [{ ...snap(1, 1, 0, { yourCopyValue: 5 }), checkedAt: day(3) }, snap(2, 1, 5, { yourCopyValue: 6 })]);
+    expect(later.map((p) => p.t)).toEqual([day(0), day(5)]);
+  });
+
   it("steps the total as each card's latest snapshot changes, weighted by quantity", () => {
     const cards = [card(1), card(2, 3)];
     const snaps = [
@@ -313,5 +322,28 @@ describe("a long history", () => {
     expect(x(times[times.length - 1]!)).toBe(790);
     const xs = times.map(x);
     expect(timeTicks(times, xs, times.map(String)).length).toBeGreaterThan(1);
+  });
+});
+
+describe("what an outlook chart is sent", () => {
+  it("is at most thirty points, still ending on the newest one the verdict read", () => {
+    const point = (i: number): OutlookPoint => ({ t: day(i), raw: 10 + i, min: 20, max: 40 + i, minLabel: "PSA 8", maxLabel: "PSA 10", fee: 20, upside: 10 + i, expected: null, expectedLabel: null, basis: { rawSource: "x", gradedSource: null, estimatedGrades: [] } } as unknown as OutlookPoint);
+    const ninety = Array.from({ length: 90 }, (_, i) => point(i));
+    const sent = outlookForChart(ninety);
+    expect(sent).toHaveLength(OUTLOOK_POINTS);
+    expect(sent[0]).toBe(ninety[0]);
+    expect(sent.at(-1)).toBe(ninety.at(-1));
+    expect(outlookForChart(ninety.slice(0, 5))).toEqual(ninety.slice(0, 5));
+  });
+});
+
+describe("how many outlook charts are drawn", () => {
+  it("draws the first twelve and says how many more there are, until asked for all", () => {
+    const many = Array.from({ length: OUTLOOK_SHOWN + 5 }, (_, i) => i);
+    expect(capOutlook(many, false)).toEqual({ shown: many.slice(0, OUTLOOK_SHOWN), hidden: 5 });
+    expect(capOutlook(many, true)).toEqual({ shown: many, hidden: 0 });
+    const few = [1, 2, 3];
+    expect(capOutlook(few, false)).toEqual({ shown: few, hidden: 0 });
+    expect(capOutlook(many, false, 3)).toEqual({ shown: [0, 1, 2], hidden: OUTLOOK_SHOWN + 2 });
   });
 });
