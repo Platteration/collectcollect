@@ -19,6 +19,15 @@ export interface ProxyOptions {
   /** Browser features the app uses; everything not named here is refused. */
   permissions?: { camera?: boolean };  /** Where revoked sessions are recorded; without one, a signed cookie is good until it runs out. */
   sessions?: { revoked(): Revoked };
+  /**
+   * The one path the host allowlist does not apply to. A container's own
+   * liveness check arrives by address — 127.0.0.1 from inside the container —
+   * whatever ALLOWED_HOSTS names, so a deployment that lists only its domain
+   * would otherwise be reported unhealthy by the very check meant to watch it.
+   * What a rebound page gains by that is what the route answers to anyone:
+   * whether the process is up. Defaults to "/api/health".
+   */
+  healthPath?: string;
 }
 
 /** The value of a fresh nonce, base64 so it survives an HTTP header. */
@@ -67,17 +76,111 @@ export function securityHeaders(csp: string, permissions: ProxyOptions["permissi
   return headers;
 }
 
+/** Methods a browser may send cross-site without changing anything. */
+const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * Names that cannot be pointed at this machine by a DNS answer the attacker
+ * controls: addresses, single-label names, and the private-use suffixes.
+ */
+const PRIVATE_SUFFIXES = [".localhost", ".local", ".lan", ".internal", ".home.arpa"];
+
+/**
+ * The name part of a Host or Origin authority, without the port, IPv6 brackets
+ * or the trailing dot of a fully qualified name (which both sides lose, so it
+ * cannot be used to slip past the list).
+ */
+export function hostname(authority: string): string {
+  const value = authority.trim().toLowerCase();
+  let host: string;
+  if (value.startsWith("[")) {
+    const end = value.indexOf("]");
+    host = end === -1 ? value.slice(1) : value.slice(1, end);
+  } else {
+    const colon = value.indexOf(":");
+    host = colon === -1 ? value : value.slice(0, colon);
+  }
+  return host.endsWith(".") ? host.slice(0, -1) : host;
+}
+
+/** After the port is gone, a remaining colon can only have come from an IPv6 literal. */
+function isAddress(host: string): boolean {
+  return host.includes(":") || /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+}
+
+/**
+ * Which Host headers this instance answers to. Nothing else validates the Host,
+ * and the server listens on every interface, so without this a short-TTL name
+ * that resolves first to the attacker's server and then to this box becomes
+ * same-origin with the app and can read the whole collection (DNS rebinding).
+ *
+ * The default accepts the ways a self-hosted instance is actually reached — by
+ * address, by the machine's own single-label name, or by an mDNS/private-use
+ * name — none of which a public DNS record can impersonate. Set ALLOWED_HOSTS
+ * (comma-separated, or `*` to disable the check) to reach it by any other name,
+ * such as a domain terminated by a reverse proxy. One variable for both apps,
+ * like TRUST_PROXY: it describes the machine, not the collection.
+ */
+export function hostAllowed(host: string): boolean {
+  const configured = process.env.ALLOWED_HOSTS?.trim();
+  if (configured) {
+    if (configured === "*") return true;
+    return configured
+      .split(",")
+      .map((entry) => hostname(entry))
+      .filter(Boolean)
+      .includes(host);
+  }
+  if (!host) return false;
+  if (isAddress(host)) return true;
+  if (!host.includes(".")) return true;
+  return PRIVATE_SUFFIXES.some((suffix) => host.endsWith(suffix));
+}
+
+/**
+ * Whether this is a state-changing request that a browser made from another
+ * site. There is no CSRF token, and no session at all in the default
+ * no-password setup, and every write route is reachable with a CORS-safelisted
+ * content type, so a page the owner merely visits could otherwise restore a
+ * crafted backup over the collection or spend the API budget.
+ *
+ * Only headers a browser sets are consulted: `curl` and scripts send neither,
+ * and are left alone.
+ */
+function crossSiteWrite(request: NextRequest, host: string): boolean {
+  if (READ_METHODS.has(request.method)) return false;
+
+  const site = request.headers.get("sec-fetch-site");
+  if (site && site !== "same-origin") return true;
+
+  const origin = request.headers.get("origin");
+  if (origin) {
+    let authority: string;
+    try {
+      authority = new URL(origin).host.toLowerCase();
+    } catch {
+      return true; // including the opaque `null` origin
+    }
+    if (authority !== host) return true;
+  }
+  return false;
+}
+
 /**
  * The gate every request passes through.
  *
- * Two jobs. When a password is set, nothing but the public paths is reachable
- * without a session, and an API call without one gets a status rather than a
- * redirect. Always, every response leaves with the security headers, and every
- * page render is handed a nonce for its one inline script — Next reads it back
- * out of the policy on the request and applies it to its own scripts as well.
+ * Three jobs. Always, the request has to name a host this instance answers to,
+ * and a browser's cross-site write is refused — both ahead of the password
+ * gate, so they hold in the default no-password setup. When a password is set,
+ * nothing but the public paths is reachable without a session, and an API call
+ * without one gets a status rather than a redirect. And every response leaves
+ * with the security headers, with every page render handed a nonce for its one
+ * inline script — Next reads it back out of the policy on the request and
+ * applies it to its own scripts as well.
  */
 export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
   const opts: ProxyOptions = Array.isArray(options) ? { publicPaths: options } : options;
+  const healthPath = opts.healthPath ?? "/api/health";
 
   return async function proxy(request: NextRequest) {
     const nonce = makeNonce();
@@ -93,10 +196,23 @@ export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
       requestHeaders.set("Content-Security-Policy", csp);
       return secure(NextResponse.next({ request: { headers: requestHeaders } }));
     };
+    const { pathname, search } = request.nextUrl;
+    // A refusal is still a response a browser acts on, so it carries the headers too.
+    const forbidden = (message: string) =>
+      secure(
+        pathname.startsWith("/api/")
+          ? NextResponse.json({ error: message }, { status: 403 })
+          : new NextResponse(message, { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8" } }),
+      );
+
+    const host = (request.headers.get("host") ?? request.nextUrl.host).trim().toLowerCase();
+    if (pathname !== healthPath && !hostAllowed(hostname(host))) {
+      return forbidden("This server does not answer to that host name. Set ALLOWED_HOSTS to add it.");
+    }
+    if (crossSiteWrite(request, host)) return forbidden("Cross-site request refused.");
 
     if (!auth.authEnabled()) return next();
 
-    const { pathname, search } = request.nextUrl;
     if (opts.publicPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return next();
 
     try {
