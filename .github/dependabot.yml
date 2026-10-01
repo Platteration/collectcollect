@@ -1,0 +1,19 @@
+# Weekly update checks. Security updates are opened as soon as an advisory is
+# published, whatever this schedule says. The workspaces share one lockfile at
+# the root, so one npm entry covers all three.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
