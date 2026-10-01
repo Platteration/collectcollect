@@ -58,12 +58,22 @@ export function PricePanel({ summary, checkedAt, loading, onRefresh, onReject, t
               <p className="text-sm text-neutral-500">No graded prices available.</p>
             ) : (
               <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-4">
-                {gradedEntries.map(([k, v]) => (
-                  <div key={k} className="rounded-md border border-black/10 px-2 py-1.5 dark:border-white/10">
-                    <div className="text-xs text-neutral-500">{k}</div>
-                    <div className="font-medium">{money(v)}</div>
-                  </div>
-                ))}
+                {gradedEntries.map(([k, v]) => {
+                  const behind = summary.gradedSources?.[k] ?? [];
+                  const manual = summary.quotes.some((q) => q.source === "manual" && Object.hasOwn(q.graded, k));
+                  const prices = behind.map((e) => e.price);
+                  return (
+                    <div key={k} className="rounded-md border border-black/10 px-2 py-1.5 dark:border-white/10">
+                      <div className="text-xs text-neutral-500">{k}</div>
+                      <div className="font-medium">{money(v)}</div>
+                      {behind.length > 1 && (
+                        <div className="text-[10px] text-neutral-500" title={behind.map((e) => `${e.source} ${money(e.price)}`).join(" · ")}>
+                          {manual ? "your price" : `avg of ${behind.length} sources · ${money(Math.min(...prices))}–${money(Math.max(...prices))}`}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
                 {estimatedEntries.map(([k, v]) => (
                   <div key={k} className="rounded-md border border-dashed border-black/15 px-2 py-1.5 dark:border-white/15" title="Estimated from the ungraded price using your Settings multipliers">
                     <div className="text-xs text-neutral-500">

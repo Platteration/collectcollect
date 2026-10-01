@@ -141,15 +141,31 @@ export function summarize(
   const ungradedQuote = byPriority.find((q) => q.currency === "USD" && q.ungraded);
   const ungraded = ungradedQuote?.ungraded ?? null;
 
-  // Graded prices: manual overrides win per key, then the first real graded source.
-  const graded: Record<string, number> = {};
-  let gradedSource: string | null = null;
+  // Graded prices: a manual price wins its key outright; otherwise a key that
+  // several sources report is their average, and every source is kept so the
+  // page can show what was averaged. One source reporting a key is that source.
+  const sources = new Map<string, Array<{ source: string; price: number }>>();
+  const manualKeys = new Set<string>();
+  const contributors: string[] = [];
   for (const q of byPriority) {
-    if (q.currency !== "USD" || Object.keys(q.graded).length === 0) continue;
-    for (const [k, v] of Object.entries(q.graded)) if (!Object.hasOwn(graded, k)) graded[k] = v;
-    if (!gradedSource) gradedSource = q.sourceLabel;
-    else if (q.source !== "manual" && gradedSource === "Manual entry") gradedSource = `Manual entry + ${q.sourceLabel}`;
+    if (q.currency !== "USD") continue;
+    const entries = Object.entries(q.graded).filter(([, v]) => Number.isFinite(v) && v > 0);
+    if (entries.length === 0) continue;
+    if (!contributors.includes(q.sourceLabel)) contributors.push(q.sourceLabel);
+    for (const [k, v] of entries) {
+      if (!sources.has(k)) sources.set(k, []);
+      sources.get(k)!.push({ source: q.sourceLabel, price: v });
+      if (q.source === "manual") manualKeys.add(k);
+    }
   }
+  const graded: Record<string, number> = {};
+  const gradedSources: Record<string, Array<{ source: string; price: number }>> = {};
+  for (const [k, list] of sources) {
+    // The manual quote comes first by priority, so it heads its key's list.
+    graded[k] = manualKeys.has(k) ? list[0]!.price : round2(list.reduce((sum, e) => sum + e.price, 0) / list.length);
+    gradedSources[k] = list;
+  }
+  const gradedSource = contributors.length ? contributors.join(" + ") : null;
 
   const estimatedGraded: Record<string, number> = {};
   if (ungraded) {
@@ -166,7 +182,11 @@ export function summarize(
     const hit = keys.find((k) => k in graded);
     if (hit) {
       yourCopyValue = graded[hit] ?? null;
-      yourCopyBasis = `${hit} price from ${gradedSource}.`;
+      const behind = gradedSources[hit] ?? [];
+      yourCopyBasis =
+        behind.length > 1 && !manualKeys.has(hit)
+          ? `${hit} price, average of ${behind.length} sources (${behind.map((e) => e.source).join(" + ")}).`
+          : `${hit} price from ${gradedSource}.`;
     } else {
       const est = keys.find((k) => k in estimatedGraded);
       if (est) {
@@ -198,6 +218,9 @@ export function summarize(
     yourCopyBasis,
     quotes: all,
     errors,
+    // Only when something graded was reported, so a summary with none is
+    // byte for byte what it was before the sources were kept.
+    ...(Object.keys(gradedSources).length ? { gradedSources } : {}),
   };
 }
 
@@ -205,7 +228,8 @@ export function summarize(
  * What a refresh compares to decide whether it learned anything: every figure
  * the app shows or sums, and what each source matched, but not when it was
  * asked. Two summaries the same by this measure are the same price, and the
- * second is a check, not a snapshot.
+ * second is a check, not a snapshot. The sources behind each graded price are
+ * not compared on their own: they are derived from the quotes, which are.
  */
 export function sameSummary(a: PriceSummary, b: PriceSummary): boolean {
   const project = (s: PriceSummary) =>

@@ -2,18 +2,21 @@ import type { Game, PriceQuote } from "../../types";
 import type { CardQuery, PriceProvider } from "../types";
 import { ProviderError } from "../types";
 import { numberPart, round2, sameNumber, setSimilarity, tokenOverlap, tokens } from "../match";
+import { rateLimit, retryAfterMs, type RateLimit } from "@collectcollect/core/limiter";
 
 /**
  * PriceCharting (https://www.pricecharting.com/api-documentation). Requires a
  * paid API token (PRICECHARTING_TOKEN). It is the one source here that reports
- * graded prices (PSA / BGS / CGC / SGC) and it covers Pokémon, Yu-Gi-Oh!,
+ * graded prices (PSA / BGS / CGC / SGC / TAG) and it covers Pokémon, Yu-Gi-Oh!,
  * Magic and sports cards alike, so when it is configured it is preferred.
  *
  * Prices come back in cents. For trading cards the legacy video-game field
- * names map to grades as follows:
+ * names map to grades as follows (its "Description of Keys" table):
  *   loose-price -> Ungraded      cib-price -> Grade 7        new-price -> Grade 8
  *   graded-price -> Grade 9      box-only-price -> Grade 9.5  manual-only-price -> PSA 10
  *   bgs-10-price -> BGS 10       condition-17-price -> CGC 10  condition-18-price -> SGC 10
+ *   condition-19-price -> CGC 10 Pristine   condition-20-price -> BGS 10 Black Label
+ *   condition-21-price -> TAG 10
  */
 
 export interface PcProduct {
@@ -30,6 +33,9 @@ export interface PcProduct {
   "bgs-10-price"?: number;
   "condition-17-price"?: number;
   "condition-18-price"?: number;
+  "condition-19-price"?: number;
+  "condition-20-price"?: number;
+  "condition-21-price"?: number;
 }
 
 const GRADED_FIELDS: Array<[keyof PcProduct, string]> = [
@@ -41,7 +47,39 @@ const GRADED_FIELDS: Array<[keyof PcProduct, string]> = [
   ["bgs-10-price", "BGS 10"],
   ["condition-17-price", "CGC 10"],
   ["condition-18-price", "SGC 10"],
+  ["condition-19-price", "CGC 10 Pristine"],
+  ["condition-20-price", "BGS 10 Black Label"],
+  ["condition-21-price", "TAG 10"],
 ];
+
+/**
+ * PriceCharting allows one call a second and revokes a key that keeps
+ * exceeding it. A whole-collection refresh runs a few cards at once and each
+ * lookup can make two calls, so the pacing is one shared queue for the whole
+ * process rather than per lookup. On the global object, like the database
+ * handle: a development reload that made a fresh limiter would forget the
+ * call just made.
+ */
+const globalForLimiter = globalThis as unknown as { __cardsPriceChartingLimiter?: RateLimit };
+let limiter: RateLimit = (globalForLimiter.__cardsPriceChartingLimiter ??= rateLimit(1, 1000));
+
+/** Tests only: replace the shared limit so a test does not wait a real second. */
+export function setPriceChartingLimit(next: RateLimit): void {
+  limiter = globalForLimiter.__cardsPriceChartingLimiter = next;
+}
+
+/** One paced request; a refusal pauses every PriceCharting call for as long as it asks. */
+async function paced(fetchImpl: typeof fetch, url: string, signal?: AbortSignal): Promise<Response> {
+  await limiter.take(signal);
+  if (signal?.aborted) throw new ProviderError("pricecharting", "Gave up waiting for a turn to ask PriceCharting.");
+  const res = await fetchImpl(url, { signal });
+  if (res.status === 429) {
+    const wait = retryAfterMs(res.headers.get("retry-after"), Date.now(), 60_000);
+    limiter.cooldown(wait);
+    throw new ProviderError("pricecharting", `PriceCharting is rate limiting this app; every PriceCharting lookup waits ${Math.ceil(wait / 1000)} seconds before asking again.`);
+  }
+  return res;
+}
 
 export function buildSearch(q: CardQuery): string {
   const num = numberPart(q.cardNumber);
@@ -122,20 +160,20 @@ export const priceChartingProvider: PriceProvider = {
   label: "PriceCharting",
   games: ["pokemon", "yugioh", "mtg", "sports", "other"],
   optional: true,
-  note: "Set PRICECHARTING_TOKEN (paid API) to get graded PSA/BGS/CGC/SGC prices for every category.",
+  note: "Set PRICECHARTING_TOKEN (paid API) to get graded PSA/BGS/CGC/SGC/TAG prices for every category.",
   isConfigured: () => Boolean(process.env.PRICECHARTING_TOKEN),
   async lookup(q, fetchImpl = fetch, signal?: AbortSignal) {
     const token = process.env.PRICECHARTING_TOKEN;
     if (!token) return [];
     const knownId = q.externalIds?.pricecharting;
     if (knownId) {
-      const res = await fetchImpl(`https://www.pricecharting.com/api/product?t=${encodeURIComponent(token)}&id=${encodeURIComponent(knownId)}`, { signal });
+      const res = await paced(fetchImpl, `https://www.pricecharting.com/api/product?t=${encodeURIComponent(token)}&id=${encodeURIComponent(knownId)}`, signal);
       if (res.ok) {
         const body = (await res.json()) as PcProduct & { status?: string };
         if (body.status === "success" && body["product-name"]) return [productToQuote(body)];
       }
     }
-    const res = await fetchImpl(`https://www.pricecharting.com/api/products?t=${encodeURIComponent(token)}&q=${encodeURIComponent(buildSearch(q))}`, { signal });
+    const res = await paced(fetchImpl, `https://www.pricecharting.com/api/products?t=${encodeURIComponent(token)}&q=${encodeURIComponent(buildSearch(q))}`, signal);
     if (!res.ok) throw new ProviderError("pricecharting", `PriceCharting returned HTTP ${res.status}`);
     const body = (await res.json()) as { status?: string; products?: PcProduct[]; "error-message"?: string };
     if (body.status && body.status !== "success") {

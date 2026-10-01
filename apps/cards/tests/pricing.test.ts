@@ -94,6 +94,28 @@ describe("summarize", () => {
     expect(s.yourCopyValue).toBe(1000);
     expect(s.quotes[0]?.source).toBe("manual");
   });
+  it("averages a grade that two sources report, lists both behind it, and lets a manual price win its key", () => {
+    const two = [
+      quote({ source: "pricecharting", sourceLabel: "PriceCharting", ungraded: 100, graded: { "PSA 10": 900, "PSA 9": 200 } }),
+      quote({ source: "pokemontcg", sourceLabel: "TCGplayer", ungraded: 110, graded: { "PSA 10": 1000 } }),
+    ];
+    const owner = { condition: "NM" as const, gradingCompany: "PSA", grade: "10" };
+    const s = summarize(two, [], DEFAULT_SETTINGS, owner);
+    expect(s.graded).toEqual({ "PSA 10": 950, "PSA 9": 200 });
+    expect(s.gradedSources).toEqual({
+      "PSA 10": [{ source: "PriceCharting", price: 900 }, { source: "TCGplayer", price: 1000 }],
+      "PSA 9": [{ source: "PriceCharting", price: 200 }],
+    });
+    expect(s.gradedSource).toBe("PriceCharting + TCGplayer");
+    expect(s.yourCopyValue).toBe(950);
+    expect(s.yourCopyBasis).toBe("PSA 10 price, average of 2 sources (PriceCharting + TCGplayer).");
+    const manual = summarize(two, [], DEFAULT_SETTINGS, owner, { graded: { "PSA 10": 1200 } });
+    expect(manual.graded["PSA 10"]).toBe(1200);
+    expect(manual.yourCopyBasis).toBe("PSA 10 price from Manual entry + PriceCharting + TCGplayer.");
+    expect(manual.gradedSources?.["PSA 10"]?.[0]).toEqual({ source: "Manual entry", price: 1200 });
+    // Nothing graded reported: no sources field at all, so the summary is byte for byte what it was.
+    expect(summarize([quote({ ungraded: 50 })], [], DEFAULT_SETTINGS, { condition: "NM", gradingCompany: null, grade: null })).not.toHaveProperty("gradedSources");
+  });
   it("reports nothing gracefully", () => {
     const s = summarize([], [{ source: "pokemontcg", message: "down" }], DEFAULT_SETTINGS, { condition: "NM", gradingCompany: null, grade: null });
     expect(s.yourCopyValue).toBeNull();

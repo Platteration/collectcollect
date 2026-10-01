@@ -54,7 +54,7 @@ docker build -t collectcollect-skins --build-arg APP=skins .
 
 | Source | Games | Key | What it provides |
 | --- | --- | --- | --- |
-| [PriceCharting](https://www.pricecharting.com/api-documentation) | all | `PRICECHARTING_TOKEN` (paid) | Ungraded **and graded** prices (PSA 10, Grade 9/9.5, BGS 10, CGC 10, SGC 10) |
+| [PriceCharting](https://www.pricecharting.com/api-documentation) | all | `PRICECHARTING_TOKEN` (paid) | Ungraded **and graded** prices (PSA 10, Grade 7–9.5, BGS 10 and BGS 10 Black Label, CGC 10 and CGC 10 Pristine, SGC 10, TAG 10), asked one call a second |
 | [PSA Public API](https://www.psacard.com/publicapi) | all | `PSA_API_TOKEN` (free account; PSA approves API access) | A graded card's grade, label, population and PSA's own scans from its cert number; no prices |
 | [Pokémon TCG API](https://pokemontcg.io) | Pokémon | optional `POKEMONTCG_API_KEY` | TCGplayer market price per printing (normal / holo / reverse / 1st ed.), Cardmarket EUR |
 | [Scryfall](https://scryfall.com/docs/api) | Magic | none | USD / EUR, foil and non-foil |
@@ -66,7 +66,7 @@ The first four also supply set checklists for completion tracking, except PriceC
 For each card the app shows:
 
 - **Ungraded (raw NM)** market price and where it came from.
-- **Graded copies**: real graded prices when a source has them (PriceCharting or your manual entry). Grades with no real data are shown as **estimates** (`est.`) computed as *ungraded price × multiplier*; the multipliers live in Settings and default to conservative round numbers, so tune them per your experience.
+- **Graded copies**: real graded prices when a source has them (PriceCharting or your manual entry). Grades with no real data are shown as **estimates** (`est.`) computed as *ungraded price × multiplier*; the multipliers live in Settings and default to conservative round numbers, so tune them per your experience (TAG 10 and TAG 9 are in the defaults for a new install; an existing Settings keeps its own rows, so add them there to estimate TAG grades). When more than one source reports the same grade, the figure shown is their average and the card page lists each source behind it; a price you enter yourself still wins its grade outright. Today PriceCharting is the only source of graded prices, so the average appears once a second one is wired in.
 - **Your copy**: the value of the specific copy you own. A PSA 9 uses the PSA 9 / Grade 9 price; a raw Lightly Played copy uses the ungraded price × the LP condition multiplier.
 
 A refresh stores a snapshot when anything about the price changed, so a card's detail page shows how its price has moved and the portfolio chart fills in; one that finds the same prices only notes when it checked, so a card refreshed daily for a year does not carry a year of identical rows. A refresh that returns no price (source down, no source configured for that game, no match) is reported but never stored over a card's last known value.

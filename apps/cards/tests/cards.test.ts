@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb, initializeDatabase, openDatabase, setDb } from "@/lib/db";
-import { HasSalesError, addAcquisition, addSnapshot, allSnapshots, collectionTotals, countCards, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, latestValuesByCard, listCards, listSnapshots, markChecked, recentSnapshotsByCard, snapshotValues, updateCard } from "@/lib/cards";
+import { HasSalesError, addAcquisition, addSnapshot, allSnapshots, collectionTotals, countCards, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, latestValuesByCard, listCards, listSnapshots, markChecked, recentSnapshotsByCard, recomputeAllLatest, snapshotValues, updateCard } from "@/lib/cards";
 import { verifyLotInvariant } from "@/lib/acquisitions";
 import { deleteSale, recordSale } from "@/lib/sales";
 import { createAlert } from "@/lib/alerts";
@@ -428,6 +428,26 @@ describe("what an edit does to the value", () => {
     updateCard(c.id, { manualUngraded: 401 }); // a quarter of a percent is not a move
     updateCard(c.id, { gradingCompany: "PSA", grade: "9" }); // a reclassification is not a move either
     expect(listAlerts()).toHaveLength(1);
+  });
+
+  it("re-derives a stored snapshot's averaged prices from its quotes, in place, when the settings are saved", () => {
+    const card = createCard({ game: "pokemon", name: "Charizard", gradingCompany: "PSA", grade: "10" });
+    const quote = (source: PriceQuote["source"], sourceLabel: string, graded: Record<string, number>): PriceQuote => ({
+      source, sourceLabel, currency: "USD", url: null, matchedName: "x", matchedDetail: null, ungraded: 100, ungradedVariants: {}, graded, fetchedAt: new Date(2026, 0, 1).toISOString(),
+    });
+    const quotes = [quote("pricecharting", "PriceCharting", { "PSA 10": 900 }), quote("pokemontcg", "TCGplayer", { "PSA 10": 1000 })];
+    // A snapshot stored before the sources were kept: first source wins, nothing behind it.
+    const before = summarize(quotes, [], DEFAULT_SETTINGS, { condition: "NM", gradingCompany: "PSA", grade: "10" });
+    const { gradedSources: _dropped, ...older } = before;
+    void _dropped;
+    addSnapshot(card.id, { ...older, graded: { "PSA 10": 900 }, yourCopyValue: 900, yourCopyBasis: "PSA 10 price from PriceCharting + TCGplayer." });
+    expect(recomputeAllLatest(getSettings())).toBe(1);
+    const latest = latestSnapshot(card.id)!;
+    expect(latest.summary.graded["PSA 10"]).toBe(950);
+    expect(latest.summary.yourCopyValue).toBe(950);
+    expect(latest.summary.gradedSources?.["PSA 10"]).toHaveLength(2);
+    expect(latest.summary.recomputedAt).toBeTruthy();
+    expect(listSnapshots(card.id)).toHaveLength(1);
   });
 
   it("leaves the snapshot alone when the edit changes nothing about the value", () => {

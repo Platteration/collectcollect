@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeFetch } from "./helpers";
 import { buildQuery, pickVariantKey, pokemonTcgProvider } from "@/lib/pricing/providers/pokemontcg";
 import { ygoprodeckProvider } from "@/lib/pricing/providers/ygoprodeck";
 import { scryfallProvider } from "@/lib/pricing/providers/scryfall";
-import { buildSearch, priceChartingProvider, productToQuote, scoreProduct, type PcProduct } from "@/lib/pricing/providers/pricecharting";
+import { buildSearch, priceChartingProvider, productToQuote, scoreProduct, setPriceChartingLimit, type PcProduct } from "@/lib/pricing/providers/pricecharting";
+import { NO_LIMIT, rateLimit } from "@collectcollect/core/limiter";
 
 describe("Pokémon TCG provider", () => {
   it("builds a name+number query", () => {
@@ -150,6 +151,7 @@ describe("Scryfall provider", () => {
 });
 
 describe("PriceCharting provider", () => {
+  beforeEach(() => setPriceChartingLimit(NO_LIMIT));
   afterEach(() => {
     delete process.env.PRICECHARTING_TOKEN;
   });
@@ -161,10 +163,38 @@ describe("PriceCharting provider", () => {
     expect(buildSearch({ game: "sports", name: "Mike Trout", year: 2011, manufacturer: "Topps", setName: "Topps Update", cardNumber: "US175" })).toBe("2011 Topps Update Mike Trout #US175");
     expect(buildSearch({ game: "pokemon", name: "Charizard", cardNumber: "4/102", setName: "Base Set" })).toBe("Charizard #4 Base Set");
   });
-  it("maps the grade fields and cents to dollars", () => {
-    const q = productToQuote({ id: "1", "product-name": "Charizard #4", "console-name": "Pokemon Base Set", "loose-price": 25000, "graded-price": 80000, "manual-only-price": 500000, "bgs-10-price": 2000000, "box-only-price": 150000 });
+  it("maps every grade field, the agency-specific 10s included, and cents to dollars", () => {
+    const q = productToQuote({
+      id: "1", "product-name": "Charizard #4", "console-name": "Pokemon Base Set", "loose-price": 25000,
+      "cib-price": 40000, "new-price": 60000, "graded-price": 80000, "box-only-price": 150000, "manual-only-price": 500000,
+      "bgs-10-price": 2000000, "condition-17-price": 450000, "condition-18-price": 400000, "condition-19-price": 900000, "condition-20-price": 3000000, "condition-21-price": 550000,
+    });
     expect(q.ungraded).toBe(250);
-    expect(q.graded).toEqual({ "Grade 9": 800, "Grade 9.5": 1500, "PSA 10": 5000, "BGS 10": 20000 });
+    expect(q.graded).toEqual({
+      "Grade 7": 400, "Grade 8": 600, "Grade 9": 800, "Grade 9.5": 1500, "PSA 10": 5000, "BGS 10": 20000, "CGC 10": 4500, "SGC 10": 4000,
+      "CGC 10 Pristine": 9000, "BGS 10 Black Label": 30000, "TAG 10": 5500,
+    });
+    // A field PriceCharting leaves out or zeroes is no price.
+    expect(productToQuote({ id: "2", "product-name": "x", "console-name": "y", "condition-21-price": 0 }).graded).toEqual({});
+  });
+  it("paces its calls to one a second across the process, and backs off for as long as a refusal asks", async () => {
+    process.env.PRICECHARTING_TOKEN = "t";
+    let now = 0;
+    const sleeps: number[] = [];
+    setPriceChartingLimit(rateLimit(1, 1000, { now: () => now, sleep: async (ms) => { sleeps.push(ms); now += ms; } }));
+    const q = { game: "pokemon" as const, name: "Charizard", externalIds: { pricecharting: "b" } };
+    const fetchImpl = fakeFetch([["api/product?", { status: "success", id: "b", "product-name": "Charizard #4", "console-name": "Pokemon Base Set", "loose-price": 26000 }]]);
+    await priceChartingProvider.lookup(q, fetchImpl);
+    await priceChartingProvider.lookup(q, fetchImpl);
+    // The second call waited out the second the first one started.
+    expect(sleeps).toEqual([1000]);
+    now += 1000;
+    const refusing = vi.fn(async () => new Response("{}", { status: 429, headers: { "retry-after": "30" } })) as unknown as typeof fetch;
+    await expect(priceChartingProvider.lookup(q, refusing)).rejects.toThrow(/PriceCharting is rate limiting this app; every PriceCharting lookup waits 30 seconds/);
+    now += 1000;
+    await priceChartingProvider.lookup(q, fetchImpl);
+    // Past the per-second window but inside the pause PriceCharting asked for: the rest of it is waited out.
+    expect(sleeps).toEqual([1000, 29000]);
   });
   it("ranks the product whose number and set match", async () => {
     process.env.PRICECHARTING_TOKEN = "t";
