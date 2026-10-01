@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Auth, Revoked } from "./auth";
-import { isSecureRequest } from "./net";
+import { isAllowedHost, isCrossSiteWrite, isSecureRequest } from "./net";
 
 /**
  * What a page is allowed to load, beyond itself.
@@ -70,11 +70,13 @@ export function securityHeaders(csp: string, permissions: ProxyOptions["permissi
 /**
  * The gate every request passes through.
  *
- * Two jobs. When a password is set, nothing but the public paths is reachable
- * without a session, and an API call without one gets a status rather than a
- * redirect. Always, every response leaves with the security headers, and every
- * page render is handed a nonce for its one inline script — Next reads it back
- * out of the policy on the request and applies it to its own scripts as well.
+ * When a password is set, nothing but the public paths is reachable without a
+ * session, and an API call without one gets a status rather than a redirect.
+ * When none is set, only a Host no other site can own is answered. Always, a
+ * write sent by another site is refused, every response leaves with the
+ * security headers, and every page render is handed a nonce for its one inline
+ * script — Next reads it back out of the policy on the request and applies it
+ * to its own scripts as well.
  */
 export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
   const opts: ProxyOptions = Array.isArray(options) ? { publicPaths: options } : options;
@@ -94,7 +96,23 @@ export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
       return secure(NextResponse.next({ request: { headers: requestHeaders } }));
     };
 
-    if (!auth.authEnabled()) return next();
+    // Before anything else, with or without a password: a page on another site
+    // may not change anything here (see isCrossSiteWrite).
+    if (isCrossSiteWrite(request)) {
+      return secure(NextResponse.json({ error: "Refused: this request came from another site" }, { status: 403 }));
+    }
+
+    if (!auth.authEnabled()) {
+      // With no password the browser's same-origin rule is the only lock, and a
+      // rebound name opens it (see isAllowedHost).
+      if (!isAllowedHost(request.headers.get("host"))) {
+        return secure(new NextResponse(
+          "This app answers to localhost and IP addresses. To reach it by another name, add that name to ALLOWED_HOSTS, or set a password.",
+          { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8" } },
+        ));
+      }
+      return next();
+    }
 
     const { pathname, search } = request.nextUrl;
     if (opts.publicPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return next();

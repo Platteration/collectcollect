@@ -86,3 +86,69 @@ export function isSecureRequest(request: Request): boolean {
   return (proto ? proto.split(",")[0] : null)?.trim().toLowerCase() === "https";
 }
 
+
+/**
+ * Whether a request's Host names this machine in a way no other site can.
+ *
+ * With no password set, the only thing keeping a page on the internet from
+ * reading the collection is that the browser will not hand it a response from
+ * another origin. DNS rebinding takes that away: the page points a name it
+ * owns at 127.0.0.1, and from then on the browser treats this app as that
+ * page's own origin. The request still carries the page's name in Host, so
+ * answering only to names an outside page cannot own closes it: `localhost`
+ * and its subdomains (browsers resolve those to loopback themselves), an IP
+ * address written as one, and whatever `ALLOWED_HOSTS` lists (comma-separated,
+ * ports ignored) for a name of your own on a network you trust.
+ */
+export function isAllowedHost(hostHeader: string | null, allowed = process.env.ALLOWED_HOSTS ?? ""): boolean {
+  if (!hostHeader) return false;
+  const host = hostWithoutPort(hostHeader);
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) return true; // an address, v4 or v6
+  return allowed
+    .split(",")
+    .map((name) => hostWithoutPort(name.trim()))
+    .some((name) => name !== "" && name === host);
+}
+
+/** The host part of a Host header or URL host, lower-cased, brackets kept off v6. */
+function hostWithoutPort(value: string): string {
+  const host = value.trim().toLowerCase();
+  if (host.startsWith("[")) return host.slice(1, host.indexOf("]") > 0 ? host.indexOf("]") : undefined);
+  return host.replace(/:\d*$/, "");
+}
+
+/**
+ * Whether a request that can change something was sent by another site.
+ *
+ * A page anywhere can make a browser POST here: a form, or a `fetch` whose
+ * body is `text/plain`, needs no preflight, and the routes read JSON whatever
+ * the content type says. The session cookie is SameSite=Lax, so with a
+ * password set such a request arrives signed out; with none set there is
+ * nothing else in the way, and it could add, change or restore over the
+ * collection, or spend the identification key. Browsers say where a request
+ * came from in `Sec-Fetch-Site`, and older ones in `Origin`; either one naming
+ * somewhere else refuses it. A request that carries neither — curl, a script,
+ * the app's own health check — is not from a page and is let through.
+ */
+export function isCrossSiteWrite(request: Request): boolean {
+  const method = request.method.toUpperCase();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null) return site !== "same-origin" && site !== "none";
+  const origin = request.headers.get("origin");
+  if (origin === null) return false;
+  if (origin === "null") return true; // a sandboxed frame or a file
+  let originHost: string;
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    return true;
+  }
+  // Names, not ports: behind a proxy that terminates TLS the Host this server
+  // sees carries no port while the page's origin implies 443, and a browser
+  // too old to send Sec-Fetch-Site is the only one that gets this far.
+  const forwarded = trustProxy() ? request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() : undefined;
+  const host = forwarded || request.headers.get("host") || new URL(request.url).host;
+  return hostWithoutPort(originHost) !== hostWithoutPort(host);
+}
