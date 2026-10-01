@@ -402,7 +402,9 @@ different cataloguing tool can take it from here.
 ## What these files do not hold
 
 The per-provider quotes behind each price are left out — the recorded prices
-themselves are all here. Photos are not in this folder: they live in
+themselves are all here. A grading company's report and the measured centering
+are in the block at the top and repeated below it as prose; the prose is for
+you, the block is what the app reads back. Photos are not in this folder: they live in
 \`uploads\` next to it in the app's data directory, so keep the two together,
 and use the full backup rather than the Markdown download if you want both in
 one file.

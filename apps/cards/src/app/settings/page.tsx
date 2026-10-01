@@ -103,7 +103,7 @@ export default function SettingsPage() {
                     </span>
                   ))}
                 </div>
-                <ProviderTest id={p.id} />
+                {p.testable ? <ProviderTest id={p.id} /> : <p className="mt-2 text-xs text-neutral-500">Tested by the first lookup from a card page.</p>}
               </div>
               <span className={`badge ${p.configured ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100" : "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200"}`}>
                 {p.configured ? "Configured" : "Not configured"}

@@ -15,7 +15,7 @@ test.describe("the card as an object", () => {
     const label = page.locator(".slab-label").first();
     await expect(label).toContainText("PSA");
     await expect(label).toContainText("10");
-    await expect(page.getByText("CERT 55501234")).toBeVisible();
+    await expect(page.getByText("CERT 55501234", { exact: true })).toBeVisible();
     await expect(page.locator(".card3d-wear").first()).toHaveAttribute("data-wear-count", "0");
     await expect(page.locator(".slab3d-front")).toHaveCount(1);
 

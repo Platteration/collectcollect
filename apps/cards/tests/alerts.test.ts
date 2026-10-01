@@ -70,6 +70,17 @@ describe("alertsForRefresh", () => {
     const already = alertsForRefresh(card(), jump, { ...jump, fetchedAt: day(5) }, [...history, snap(4, jump)], DEFAULT_SETTINGS);
     expect(already.map((a) => a.kind)).not.toContain("ready_to_grade");
   });
+
+  it("does not call a card ready when its centering takes the gem-mint outcome away", () => {
+    const flat = summary({ ungraded: 100, yourCopyValue: 100, estimatedGraded: { "PSA 10": 150, "PSA 8": 100 } });
+    const history = [snap(1, flat), snap(2, flat), snap(3, flat)];
+    const jump = summary({ ungraded: 100, yourCopyValue: 100, estimatedGraded: { "PSA 10": 400, "PSA 8": 100 } });
+    // A front at 70/30 can be a 7 at most, and nothing is priced under a 10 but the 8.
+    const offCentre = card({ centering: { front: { lr: [70, 30], tb: null }, back: { lr: null, tb: null } }, game: "pokemon" });
+    expect(alertsForRefresh(offCentre, flat, { ...jump, fetchedAt: day(4) }, history, DEFAULT_SETTINGS).map((a) => a.kind)).not.toContain("ready_to_grade");
+    // The same card well centred is the case above.
+    expect(alertsForRefresh(card(), flat, { ...jump, fetchedAt: day(4) }, history, DEFAULT_SETTINGS).map((a) => a.kind)).toContain("ready_to_grade");
+  });
 });
 
 describe("alert storage", () => {

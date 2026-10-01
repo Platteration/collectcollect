@@ -15,7 +15,7 @@ docker compose up -d --build cards
 
 On PowerShell use `Copy-Item .env.example .env`. Open `http://localhost:3000`. Manual entry, CSV imports, purchases and goals need no API keys. The setup checklist links to those steps and can be reopened in Settings.
 
-For photo identification add `ANTHROPIC_API_KEY` to `.env`; for paid graded prices add `PRICECHARTING_TOKEN`. Apply environment changes with `docker compose up -d --force-recreate cards`. Settings distinguishes configuration from a tested connection. A connection test makes a small provider request; the vision check asks whether the configured model is available without sending a photo.
+For photo identification add `ANTHROPIC_API_KEY` to `.env`; for paid graded prices add `PRICECHARTING_TOKEN`; to fill a slab's grade and PSA's scans from its cert number add `PSA_API_TOKEN`. Apply environment changes with `docker compose up -d --force-recreate cards`. Settings distinguishes configuration from a tested connection. A connection test makes a small provider request; the vision check asks whether the configured model is available without sending a photo.
 
 The named `collectcollect-data` volume holds `/data`. Container replacement preserves it. Do not use `docker compose down -v` when keeping your collection: that removes its volume. Start skins separately with `docker compose up -d --build skins` on port 3001.
 

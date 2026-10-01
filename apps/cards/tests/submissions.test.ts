@@ -247,3 +247,30 @@ describe("what a returned grade is booked at, and what a failed batch leaves", (
     expect(getCard(a.id)?.gradingStatus).toBe("submitted");
   });
 });
+
+describe("the cert that comes back with a grade", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("writes the cert and a report that links the company's page, none for a company with no public report, and refuses a cert that is not text", () => {
+    const a = pricedCard("Charizard", 100, 900);
+    const b = pricedCard("Blastoise", 50, 300);
+    const sub = createSubmission({ company: "PSA" });
+    addCard(sub.id, a.id);
+    addCard(sub.id, b.id);
+    markSent(sub.id);
+    expect(() => recordReturn(sub.id, [{ cardId: a.id, grade: "10", certNumber: { no: true } }])).toThrow(/cert number for card .* has to be text/);
+    recordReturn(sub.id, [
+      { cardId: a.id, grade: "10", certNumber: " 12345678 " },
+      { cardId: b.id, grade: "9" },
+    ]);
+    expect(getCard(a.id)).toMatchObject({ certNumber: "12345678", gradingReport: { company: "PSA", cert: "12345678", grade: "10", source: "manual", url: "https://www.psacard.com/cert/12345678/psa" } });
+    expect(getCard(b.id)).toMatchObject({ grade: "9", certNumber: null, gradingReport: null });
+
+    const c = pricedCard("Venusaur", 40, 200);
+    const other = createSubmission({ company: "Other" });
+    addCard(other.id, c.id);
+    markSent(other.id);
+    recordReturn(other.id, [{ cardId: c.id, grade: "9", certNumber: "X1" }]);
+    expect(getCard(c.id)).toMatchObject({ gradingCompany: "Other", certNumber: "X1", gradingReport: null });
+  });
+});

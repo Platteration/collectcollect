@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
-import { CONDITIONS, GAMES, GAME_IDS, GRADING_COMPANIES, type CardInput, type Game } from "@/lib/types";
+import { CONDITIONS, GAMES, GAME_IDS, GRADING_COMPANIES, type CardInput, type Centering, type CenteringInput, type Game, type Ratio } from "@/lib/types";
+import { ratioText } from "@/lib/grading/centering";
+import { CenteringInputs, type CenteringForm } from "./CenteringInputs";
 
 /** String-typed form state; converted to CardInput on submit. */
-export interface CardFormState {
+export interface CardFormState extends CenteringForm {
   game: Game;
   name: string;
   sport: string;
@@ -47,7 +49,28 @@ export const emptyForm = (game: Game = "pokemon"): CardFormState => ({
   purchasePrice: "",
   location: "",
   notes: "",
+  ...centeringToForm(null),
 });
+
+/**
+ * The four centering fields as the form shows them: "55/45" or blank. Takes
+ * a card's stored centering (pairs) or what a form already holds (text).
+ */
+export function centeringToForm(c: Centering | CenteringInput | null | undefined): CenteringForm {
+  const axis = (side: unknown, key: "lr" | "tb"): string => {
+    if (typeof side === "string") return key === "lr" ? side : "";
+    if (!side || typeof side !== "object") return "";
+    const v = (side as Record<string, unknown>)[key];
+    if (Array.isArray(v)) return ratioText(v as Ratio);
+    return typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
+  };
+  return {
+    centeringFrontLr: axis(c?.front, "lr"),
+    centeringFrontTb: axis(c?.front, "tb"),
+    centeringBackLr: axis(c?.back, "lr"),
+    centeringBackTb: axis(c?.back, "tb"),
+  };
+}
 
 export function formFromCard(card: Partial<CardInput> & { game: Game; name: string }): CardFormState {
   const s = (v: unknown) => (v === null || v === undefined ? "" : String(v));
@@ -71,6 +94,7 @@ export function formFromCard(card: Partial<CardInput> & { game: Game; name: stri
     purchasePrice: s(card.purchasePrice),
     location: s(card.location),
     notes: s(card.notes),
+    ...centeringToForm(card.centering),
   };
 }
 
@@ -94,6 +118,8 @@ export function formToInput(f: CardFormState): CardInput {
     gradingCompany: t(f.gradingCompany),
     grade: t(f.grade),
     certNumber: t(f.certNumber),
+    // Sent as the text typed; the server reads "55/45" and refuses what is not a ratio.
+    centering: { front: { lr: t(f.centeringFrontLr), tb: t(f.centeringFrontTb) }, back: { lr: t(f.centeringBackLr), tb: t(f.centeringBackTb) } },
     purchasePrice: n(f.purchasePrice),
     location: t(f.location),
     notes: t(f.notes),
@@ -226,6 +252,7 @@ export function CardForm({ value, onChange, disabled, purchasePriceReadOnly }: P
           </select>
         </label>
       )}
+      <CenteringInputs value={value} onChange={(next) => onChange({ ...value, ...next })} />
       <label className="block">
         <span className="label">Purchase price (USD)</span>
         <input className="input" value={value.purchasePrice} onChange={set("purchasePrice")} inputMode="decimal" readOnly={purchasePriceReadOnly} />

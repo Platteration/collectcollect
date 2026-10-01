@@ -36,7 +36,7 @@ Guidance:
 - Magic: report the set code and collector number from the bottom-left, and whether the card is foil.
 - Sports cards: give the player name, the year and manufacturer/product (e.g. 2011 Topps Update), the card number, and any parallel, refractor, rookie (RC) or autograph designation.
 - If the card is in a grading company's slab, read the label for the company, grade and certification number.
-- Assess condition only from what the photo actually shows. Report centering, corners, edges and surface separately, and give a conservative-to-optimistic range for the 10-point grade a raw card would likely receive. Be sceptical: most cards pulled from a binder are not gem mint, glare and low resolution hide scratches and whitening, and a photo of the front alone cannot rule out back damage. Say so in the caveat rather than guessing past the evidence. For a card already in a slab, leave the estimated grades null and read the printed grade instead.
+- Assess condition only from what the photo actually shows. Report centering, corners, edges and surface separately, and give a conservative-to-optimistic range for the 10-point grade a raw card would likely receive. Give the centering as border ratios too (left/right and top/bottom, front and back when visible, each adding up to 100, the left or top border first), as a grader would write them. Be sceptical: most cards pulled from a binder are not gem mint, glare and low resolution hide scratches and whitening, and a photo of the front alone cannot rule out back damage. Say so in the caveat rather than guessing past the evidence. For a card already in a slab, leave the estimated grades null and read the printed grade instead.
 - If you cannot be sure, give your best single answer with an honest confidence and list the plausible alternatives.`;
 
 
@@ -157,6 +157,14 @@ function normalize(id: Identification): Identification {
           estimated_grade_low: trim(id.condition_assessment.estimated_grade_low),
           estimated_grade_high: trim(id.condition_assessment.estimated_grade_high),
           caveat: trim(id.condition_assessment.caveat),
+          centering_ratios: id.condition_assessment.centering_ratios
+            ? {
+                front_lr: trim(id.condition_assessment.centering_ratios.front_lr),
+                front_tb: trim(id.condition_assessment.centering_ratios.front_tb),
+                back_lr: trim(id.condition_assessment.centering_ratios.back_lr),
+                back_tb: trim(id.condition_assessment.centering_ratios.back_tb),
+              }
+            : null,
         }
       : null,
     confidence: Math.min(1, Math.max(0, id.confidence)),

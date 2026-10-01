@@ -1,7 +1,8 @@
 import { extent, thinPoints } from "@collectcollect/core/series";
 import type { CostBasis } from "./acquisitions";
-import type { CardRecord, PriceSnapshot, PriceSummary, Settings } from "./types";
+import type { CardRecord, Centering, Game, PriceSnapshot, PriceSummary, Settings } from "./types";
 import { round2 } from "./pricing/match";
+import { highestGradeAllowed, type CenteringCap } from "./grading/centering";
 
 // ---------------------------------------------------------------------------
 // Portfolio value over time
@@ -129,13 +130,15 @@ export interface Outlook {
   /** Provenance of each bound; a measured high end never makes the low end measured. */
   provenance?: { min: "observed" | "estimated"; max: "observed" | "estimated"; likely: "observed" | "estimated" | null; source: string | null; fetchedAt: string;
     minSource: string | null; maxSource: string | null; minAt: string; maxAt: string;
-    likelySource: string | null; likelyAt: string | null };
+    likelySource: string | null; likelyAt: string | null;
+    /** The centering limit that held the best case under a 10, when one did. */
+    centeringCap: CenteringCap | null };
   /** Value at the grade the photo suggests this copy would receive, when one was estimated. */
   likely: number | null;
   likelyLabel: string | null;
 }
 
-const MAX_KEYS = ["PSA 10", "BGS 10", "CGC 10", "SGC 10"];
+const MAX_KEYS = ["PSA 10", "BGS 10", "CGC 10", "SGC 10", "TAG 10"];
 const MIN_KEYS = ["PSA 8", "Grade 8", "CGC 8", "BGS 8", "PSA 7", "Grade 7"];
 
 function pick(summary: PriceSummary, keys: string[]): { value: number; label: string; real: boolean } | null {
@@ -145,27 +148,65 @@ function pick(summary: PriceSummary, keys: string[]): { value: number; label: st
 }
 
 /** Price at a specific expected grade, from real data first then the multiplier estimates. */
-function atGrade(summary: PriceSummary, grade: string | null | undefined): { value: number; label: string } | null {
+function atGrade(summary: PriceSummary, grade: string | null | undefined): { value: number; label: string; real: boolean } | null {
   const g = (grade ?? "").trim().replace(/[^0-9.]/g, "");
   if (!g) return null;
-  for (const key of [`PSA ${g}`, `Grade ${g}`, `CGC ${g}`, `BGS ${g}`]) {
-    if (summary.graded[key]) return { value: summary.graded[key], label: key };
+  const keys = [`PSA ${g}`, `Grade ${g}`, `CGC ${g}`, `BGS ${g}`, `SGC ${g}`, `TAG ${g}`];
+  for (const key of keys) {
+    if (summary.graded[key]) return { value: summary.graded[key], label: key, real: true };
   }
-  for (const key of [`PSA ${g}`, `Grade ${g}`, `CGC ${g}`, `BGS ${g}`]) {
-    if (summary.estimatedGraded[key]) return { value: summary.estimatedGraded[key], label: key };
+  for (const key of keys) {
+    if (summary.estimatedGraded[key]) return { value: summary.estimatedGraded[key], label: key, real: false };
   }
   return null;
 }
 
-/** Outlook from one snapshot; null when the card has no usable ungraded price. */
-export function gradingOutlook(summary: PriceSummary, settings: Settings, expectedGrade?: string | null): Outlook | null {
+/** The number a grade label carries: "PSA 9.5" is 9.5, "Grade 8" is 8. */
+function gradeNumber(label: string): number {
+  const numbers = label.match(/\d+(?:\.\d+)?/g);
+  return numbers ? Number(numbers[numbers.length - 1]) : NaN;
+}
+
+/** The company whose limits a best-case label is judged by; the generic grades follow PSA's. */
+function companyOf(label: string): string {
+  const word = label.split(" ")[0] ?? "";
+  return word === "Grade" ? "PSA" : word;
+}
+
+/** The best priced grade at or under a cap, stepping down by half grades. */
+function bestAtOrBelow(summary: PriceSummary, grade: number): { value: number; label: string; real: boolean } | null {
+  for (let g = grade; g >= 1; g -= 0.5) {
+    const hit = atGrade(summary, String(g));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * Outlook from one snapshot; null when the card has no usable ungraded price.
+ *
+ * A measured centering caps the best case: a card whose borders are further
+ * off than the company allows for a 10 is priced at the best grade its
+ * centering leaves open, and the grade the photo suggests is held there too.
+ * Nothing measured, or nothing on the front, leaves the outlook as it was.
+ */
+export function gradingOutlook(summary: PriceSummary, settings: Settings, expectedGrade?: string | null, centering?: Centering | null, game?: Game | null): Outlook | null {
   const raw = summary.yourCopyValue ?? summary.ungraded;
   if (!raw) return null;
-  const max = pick(summary, MAX_KEYS);
-  if (!max) return null;
+  const best = pick(summary, MAX_KEYS);
+  if (!best) return null;
   const min = pick(summary, MIN_KEYS) ?? { value: raw, label: "Ungraded", real: false };
   const fee = settings.gradingFee;
-  const likely = atGrade(summary, expectedGrade);
+  const cap = centering ? highestGradeAllowed(companyOf(best.label), centering, game) : null;
+  const capped = cap !== null && cap.grade < gradeNumber(best.label);
+  // Nothing priced at or under the cap: the best case is the mid case.
+  const max = capped ? (bestAtOrBelow(summary, cap.grade) ?? { value: min.value, label: min.label, real: min.real }) : best;
+  let likelyGrade = expectedGrade ?? null;
+  if (capped && likelyGrade) {
+    const n = Number(String(likelyGrade).replace(/[^0-9.]/g, ""));
+    if (Number.isFinite(n) && n > cap.grade) likelyGrade = String(cap.grade);
+  }
+  const likely = atGrade(summary, likelyGrade);
   const provenanceOf = (label: string, value: number) => {
     const priority = ["manual", "pricecharting", "pokemontcg", "scryfall", "ygoprodeck"];
     const quote = summary.quotes.filter(q => q.currency === "USD" && q.graded[label] === value)
@@ -192,7 +233,8 @@ export function gradingOutlook(summary: PriceSummary, settings: Settings, expect
       source: summary.gradedSource, fetchedAt: summary.fetchedAt,
       minSource: min.real ? minProvenance.source : null, maxSource: max.real ? maxProvenance.source : null,
       minAt: minProvenance.at, maxAt: maxProvenance.at,
-      likelySource: likelyProvenance?.source ?? null, likelyAt: likelyProvenance?.at ?? null },
+      likelySource: likelyProvenance?.source ?? null, likelyAt: likelyProvenance?.at ?? null,
+      centeringCap: capped ? cap : null },
   };
 }
 
@@ -229,11 +271,11 @@ export function capOutlook<T>(list: T[], showAll: boolean, limit = OUTLOOK_SHOWN
   return { shown: list.slice(0, limit), hidden: list.length - limit };
 }
 
-export function outlookSeries(snapshots: PriceSnapshot[], settings: Settings, expectedGrade?: string | null): OutlookPoint[] {
+export function outlookSeries(snapshots: PriceSnapshot[], settings: Settings, expectedGrade?: string | null, centering?: Centering | null, game?: Game | null): OutlookPoint[] {
   return [...snapshots]
     .sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt) || a.id - b.id)
     .flatMap((s) => {
-      const o = gradingOutlook(s.summary, settings, expectedGrade);
+      const o = gradingOutlook(s.summary, settings, expectedGrade, centering, game);
       return o ? [{ t: s.fetchedAt, ...o }] : [];
     });
 }

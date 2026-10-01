@@ -11,7 +11,9 @@ import type {
   Sale,
 } from "../types";
 import { CONDITIONS, GAMES, GAME_IDS, GRADING_STATUSES } from "../types";
-import { IdentificationSchema } from "../identify/schema";
+import { CenteringRatiosSchema, IdentificationSchema } from "../identify/schema";
+import { readCentering, readGradingReport } from "../grading/schema";
+import { capsFor, describeCentering } from "../grading/centering";
 import { money, parseDocument, readFenced, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "@collectcollect/core/markdown/format";
 
 /** How many prices a card's file lists, newest first; the database holds the rest. */
@@ -63,7 +65,8 @@ export interface ParsedCard {
  * their identification on the way back in would lose real data.
  */
 const STORED_IDENTIFICATION = IdentificationSchema.extend({
-  condition_assessment: IdentificationSchema.shape.condition_assessment.nullish(),
+  // The numeric centering ratios came later still, so they may be absent too.
+  condition_assessment: IdentificationSchema.shape.condition_assessment.extend({ centering_ratios: CenteringRatiosSchema.nullish() }).nullish(),
 });
 
 export interface ParsedSaleLot {
@@ -128,6 +131,63 @@ function condition(card: CardRecord): string {
     return oneLine(`${card.gradingCompany ?? "Graded"} ${card.grade}${card.certNumber ? ` (cert ${card.certNumber})` : ""}`);
   }
   return `Ungraded, ${CONDITIONS[card.condition] ?? card.condition}`;
+}
+
+/** The grading company's report, written for a person; the front matter holds the record. */
+function reportProse(r: NonNullable<CardRecord["gradingReport"]>): string[] {
+  const out: string[] = [];
+  out.push(
+    [
+      oneLine([r.company, r.grade, r.label].filter(Boolean).join(" ")),
+      `cert ${oneLine(r.cert)}`,
+      `checked ${r.checkedAt.slice(0, 10)}`,
+      r.source === "psa" ? "from PSA's records" : "entered by hand from the report",
+    ].join(" · "),
+  );
+  if (r.url) out.push(`Report: <${r.url}>`);
+  if (r.subgrades) {
+    const s = r.subgrades;
+    const cell = (v: number | null) => (v === null ? "" : String(v));
+    const rows: Array<Array<unknown>> = [["Front", cell(s.centering.front), cell(s.corners.front), cell(s.edges.front), cell(s.surface.front)]];
+    if ([s.centering.back, s.corners.back, s.edges.back, s.surface.back].some((v) => v !== null)) {
+      rows.push(["Back", cell(s.centering.back), cell(s.corners.back), cell(s.edges.back), cell(s.surface.back)]);
+    }
+    out.push(table(["Side", "Centering", "Corners", "Edges", "Surface"], rows));
+  }
+  if (r.tag) {
+    const t = r.tag;
+    const parts = [
+      t.score !== null ? `TAG score ${t.score} of 1000` : null,
+      Object.values(t.rollups).some((v) => v !== null)
+        ? `(${(["centering", "corners", "edges", "surface"] as const).filter((k) => t.rollups[k] !== null).map((k) => `${k} ${t.rollups[k]}`).join(", ")})`
+        : null,
+    ].filter(Boolean);
+    if (parts.length) out.push(`${parts.join(" ")}.`);
+    if (t.composite.front !== null || t.composite.back !== null) out.push(`Front ${t.composite.front ?? "—"} · back ${t.composite.back ?? "—"} of 1000.`);
+  }
+  if (r.population) {
+    const p = r.population;
+    const bits = [p.atGrade !== null ? `${p.atGrade} at this grade` : null, p.total !== null ? `${p.total} in all` : null, p.higher !== null ? `${p.higher} higher` : null].filter(Boolean);
+    if (bits.length) out.push(`Population ${bits.join(", ")}.`);
+  }
+  if (r.identity) {
+    const i = r.identity;
+    const what = oneLine([i.year, i.brand, i.variety, i.subject, i.cardNumber ? `#${i.cardNumber}` : null].filter(Boolean).join(" "));
+    if (what) out.push(`${r.company} lists it as: ${what}${i.category ? ` (${oneLine(i.category)})` : ""}.`);
+  }
+  if (r.images && (r.images.front || r.images.back)) {
+    out.push([r.images.front ? `Front scan: <${r.images.front}>` : null, r.images.back ? `Back scan: <${r.images.back}>` : null].filter(Boolean).join(" · "));
+  }
+  return out;
+}
+
+/** "Front 60/40 left-right, 55/45 top-bottom. By the published limits this allows up to PSA 9, …" */
+function centeringProse(card: CardRecord): string {
+  const c = card.centering!;
+  const caps = capsFor(c, card.game);
+  const described = describeCentering(c).replace(/^front/, "Front").replace(/; back/, "; back");
+  const allowed = caps.length ? ` By the published limits this allows up to ${caps.map((cap) => cap.label).join(", ")} (approximate).` : "";
+  return `${described}.${allowed}`;
 }
 
 /** `PSA 10 $5,000.00 · PSA 9 $1,400.00 (PriceCharting)` */
@@ -239,6 +299,8 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
     grading_company: card.gradingCompany,
     grade: card.grade,
     cert_number: card.certNumber,
+    centering: card.centering,
+    grading_report: card.gradingReport,
     grading_status: card.gradingStatus,
     purchase_price: card.purchasePrice,
     location: card.location,
@@ -290,6 +352,11 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
   if (card.notes?.trim()) {
     blocks.push("## Notes", escapeProse(card.notes.trim()));
   }
+
+  // The report and the centering are repeated here for a person; the front
+  // matter above is what the app reads back, as with the identification.
+  if (card.gradingReport) blocks.push("## Grading report", ...reportProse(card.gradingReport));
+  if (card.centering) blocks.push("## Centering", centeringProse(card));
 
   if (snapshots.length) {
     // A card checked daily for years would otherwise be a file of thousands
@@ -442,6 +509,19 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
     }
   }
 
+  // Safety net, not gatekeeper: a centering or report this version cannot
+  // read costs a warning and that field, never the card.
+  const readOptional = <T>(value: unknown, read: (v: unknown) => T | null, what: string): T | null => {
+    try {
+      return read(value);
+    } catch {
+      warnings.push(`The ${what} was not readable and was dropped`);
+      return null;
+    }
+  };
+  const centering = readOptional(data.centering, readCentering, "centering block");
+  const gradingReport = readOptional(data.grading_report, readGradingReport, "grading report");
+
   const quantity = num(data.quantity);
   const input: CardInput = {
     game,
@@ -460,6 +540,8 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
     gradingCompany: str(data.grading_company),
     grade: str(data.grade),
     certNumber: str(data.cert_number),
+    centering,
+    gradingReport,
     purchasePrice: num(data.purchase_price),
     notes: notesSection ? unescapeProse(notesSection) : null,
     imagePath: str(data.photo),

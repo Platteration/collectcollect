@@ -16,6 +16,7 @@ process.env.DATA_DIR = path.join(root, "run-0");
 // the tests would otherwise change which providers a test talks to.
 delete process.env.PRICECHARTING_TOKEN;
 delete process.env.POKEMONTCG_API_KEY;
+delete process.env.PSA_API_TOKEN;
 
 let n = 0;
 beforeEach(() => {

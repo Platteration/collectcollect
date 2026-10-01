@@ -8,5 +8,6 @@ export function GradingProvenance({ outlook }: { outlook: Outlook }) {
     {" "}High outcome: {p.max === "observed" ? `reported price (${p.maxSource ?? "recorded source"}, ${when(p.maxAt)})` : "multiplier estimate"}.
     {p.likely && ` Photo-based outcome: ${p.likely === "observed" ? `reported price (${p.likelySource ?? "recorded source"}, ${when(p.likelyAt)})` : "multiplier estimate"}.`}
     {" "}Recorded {when(p.fetchedAt)}. Estimates and photo assessments are not guaranteed outcomes.
+    {p.centeringCap && ` Best case capped at ${p.centeringCap.label} by the measured centering (${p.centeringCap.reason}); the limits are approximate.`}
   </p>;
 }

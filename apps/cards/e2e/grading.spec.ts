@@ -28,13 +28,16 @@ test("a grading submission runs from draft to a booked outcome", async ({ page }
   await page.goto("/submissions");
   await page.getByRole("link", { name: "E2E batch" }).click();
   await page.getByPlaceholder("9.5").fill("10");
+  await page.getByLabel("Cert number for Gradable Dragonite").fill("12345678");
   await page.getByRole("button", { name: "Record grades" }).click();
   await expect(page.getByText("Returned").first()).toBeVisible();
 
-  // The graded card now carries the company and grade.
+  // The graded card now carries the company, grade and cert, and links to PSA's record of it.
   await page.goto("/collection?q=Gradable");
   await page.getByRole("link", { name: /Gradable Dragonite/ }).click();
   await expect(page.getByText("PSA 10").first()).toBeVisible();
+  await expect(page.getByText("CERT 12345678", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("grading-report").getByRole("link", { name: "View on PSA" })).toHaveAttribute("href", "https://www.psacard.com/cert/12345678/psa");
 });
 
 test("a card can be put into an open batch from its own page", async ({ page }) => {

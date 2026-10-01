@@ -9,7 +9,8 @@ import type {
   PriceSummary,
   Settings,
 } from "./types";
-import { CONDITIONS, GAMES, GRADING_STATUSES, MAX_MONEY, MAX_QUANTITY, type GradingStatus } from "./types";
+import { CONDITIONS, GAMES, GRADING_STATUSES, MAX_MONEY, MAX_QUANTITY, type Centering, type GradingReport, type GradingStatus } from "./types";
+import { readCentering, readGradingReport } from "./grading/schema";
 import { addLot, costBasisByCard, deleteLot, getLot, listLots, reconcileToQuantity, recomputePurchasePrice, type AcquisitionInput } from "./acquisitions";
 import { isValidUploadName } from "./images";
 import { mirrorCard, unmirrorCard } from "./markdown/mirror";
@@ -36,6 +37,8 @@ export interface CardRow {
   grading_company: string | null;
   grade: string | null;
   cert_number: string | null;
+  centering: string | null;
+  grading_report: string | null;
   purchase_price: number | null;
   notes: string | null;
   image_path: string | null;
@@ -60,6 +63,21 @@ function parseJson<T>(text: string | null, fallback: T): T {
   }
 }
 
+/**
+ * A stored column read through the same checks its input went through. A row
+ * written by a newer version, or edited by hand into a shape this version does
+ * not know, reads as nothing rather than failing every list that touches it.
+ */
+function readStored<T>(text: string | null, read: (value: unknown) => T | null): T | null {
+  const parsed = parseJson<unknown>(text, null);
+  if (parsed === null) return null;
+  try {
+    return read(parsed);
+  } catch {
+    return null;
+  }
+}
+
 export function rowToCard(row: CardRow): CardRecord {
   return {
     id: row.id,
@@ -79,6 +97,8 @@ export function rowToCard(row: CardRow): CardRecord {
     gradingCompany: row.grading_company,
     grade: row.grade,
     certNumber: row.cert_number,
+    centering: readStored<Centering>(row.centering, readCentering),
+    gradingReport: readStored<GradingReport>(row.grading_report, readGradingReport),
     purchasePrice: row.purchase_price,
     notes: row.notes,
     imagePath: row.image_path,
@@ -136,8 +156,8 @@ export const price = (v: unknown, what: string): number | null => {
 
 /** Validate and normalize client input; throws on missing required fields. */
 export function normalizeInput(input: CardInput): Required<
-  Omit<CardInput, "identification">
-> & { identification: Identification | null } {
+  Omit<CardInput, "identification" | "centering" | "gradingReport">
+> & { identification: Identification | null; centering: Centering | null; gradingReport: GradingReport | null } {
   const game = str(input.game) as Game | null;
   // Object.hasOwn, not `in`: "constructor" and "toString" are on every object's
   // prototype, and would otherwise pass as a game, a condition or a status.
@@ -172,6 +192,10 @@ export function normalizeInput(input: CardInput): Required<
     gradingCompany: str(input.gradingCompany),
     grade: str(input.grade),
     certNumber: str(input.certNumber),
+    // Both readers throw with a reason, as a bad quantity does, so a malformed
+    // ratio or report is refused at the door rather than stored and shown.
+    centering: readCentering(input.centering),
+    gradingReport: readGradingReport(input.gradingReport),
     purchasePrice: price(input.purchasePrice, "The purchase price"),
     notes: str(input.notes),
     imagePath: str(input.imagePath) && isValidUploadName(str(input.imagePath)!) ? str(input.imagePath) : null,
@@ -238,16 +262,18 @@ export function createCard(input: CardInput): CardRecord {
   const result = getDb()
     .prepare(
       `INSERT INTO cards (game, sport, name, set_name, set_code, card_number, year, rarity, variant,
-        language, manufacturer, quantity, condition, grading_company, grade, cert_number, purchase_price,
+        language, manufacturer, quantity, condition, grading_company, grade, cert_number, centering, grading_report, purchase_price,
         notes, image_path, reference_image_url, accent_color, location, external_ids, identification, manual_ungraded, manual_graded,
         grading_status, created_at, updated_at)
        VALUES (@game, @sport, @name, @setName, @setCode, @cardNumber, @year, @rarity, @variant,
-        @language, @manufacturer, @quantity, @condition, @gradingCompany, @grade, @certNumber, @purchasePrice,
+        @language, @manufacturer, @quantity, @condition, @gradingCompany, @grade, @certNumber, @centering, @gradingReport, @purchasePrice,
         @notes, @imagePath, @referenceImageUrl, @accentColor, @location, @externalIds, @identification, @manualUngraded, @manualGraded,
         @gradingStatus, @now, @now)`,
     )
     .run({
       ...c,
+      centering: c.centering ? JSON.stringify(c.centering) : null,
+      gradingReport: c.gradingReport ? JSON.stringify(c.gradingReport) : null,
       externalIds: JSON.stringify(c.externalIds),
       identification: c.identification ? JSON.stringify(c.identification) : null,
       manualGraded: JSON.stringify(c.manualGraded),
@@ -286,7 +312,7 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
         `UPDATE cards SET game=@game, sport=@sport, name=@name, set_name=@setName, set_code=@setCode,
           card_number=@cardNumber, year=@year, rarity=@rarity, variant=@variant, language=@language,
           manufacturer=@manufacturer, quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
-          grade=@grade, cert_number=@certNumber, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
+          grade=@grade, cert_number=@certNumber, centering=@centering, grading_report=@gradingReport, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
           reference_image_url=@referenceImageUrl, accent_color=@accentColor, location=@location, external_ids=@externalIds, identification=@identification,
           manual_ungraded=@manualUngraded, manual_graded=@manualGraded, grading_status=@gradingStatus, updated_at=@now
          WHERE id=@id`,
@@ -294,6 +320,8 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
       .run({
         ...merged,
         id,
+        centering: merged.centering ? JSON.stringify(merged.centering) : null,
+        gradingReport: merged.gradingReport ? JSON.stringify(merged.gradingReport) : null,
         externalIds: JSON.stringify(merged.externalIds),
         identification: merged.identification ? JSON.stringify(merged.identification) : null,
         manualGraded: JSON.stringify(merged.manualGraded),
@@ -368,20 +396,21 @@ function identityChanged(before: CardRecord, after: ReturnType<typeof normalizeI
 
 /**
  * Whether two copies can share one row. Grade and grading company, as before:
- * a raw scan must never be folded into a slab. And variant, language and
- * condition, since each is valued differently — a 1st Edition, a Japanese
- * printing or a Damaged copy priced as the Unlimited, English, Near Mint row
- * it was folded into would be the wrong money. Case and whitespace do not
- * divide copies and a blank on both sides agrees, but a blank on one side does
- * not match a value on the other: a scan that could not read the variant must
- * not be folded into a holo row.
+ * a raw scan must never be folded into a slab. The cert number too: two slabs
+ * are two objects with two reports, and one row holds one cert. And variant,
+ * language and condition, since each is valued differently — a 1st Edition,
+ * a Japanese printing or a Damaged copy priced as the Unlimited, English,
+ * Near Mint row it was folded into would be the wrong money. Case and
+ * whitespace do not divide copies and a blank on both sides agrees, but a
+ * blank on one side does not match a value on the other: a scan that could
+ * not read the variant must not be folded into a holo row.
  */
 export function interchangeable(
-  a: Pick<CardRecord, "grade" | "gradingCompany" | "variant" | "language" | "condition">,
-  b: Pick<CardRecord, "grade" | "gradingCompany" | "variant" | "language" | "condition">,
+  a: Pick<CardRecord, "grade" | "gradingCompany" | "certNumber" | "variant" | "language" | "condition">,
+  b: Pick<CardRecord, "grade" | "gradingCompany" | "certNumber" | "variant" | "language" | "condition">,
 ): boolean {
   const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
-  return (["grade", "gradingCompany", "variant", "language", "condition"] as const).every((f) => norm(a[f]) === norm(b[f]));
+  return (["grade", "gradingCompany", "certNumber", "variant", "language", "condition"] as const).every((f) => norm(a[f]) === norm(b[f]));
 }
 
 /**

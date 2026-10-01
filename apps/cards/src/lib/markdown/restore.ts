@@ -260,16 +260,21 @@ function norm(value: string | null | undefined): string {
  * Is this card the one the file describes? Names have to agree, sets have to
  * agree when both sides name one, and the copies have to be interchangeable:
  * a raw card and a slab of the same card are different objects, worth
- * different money, with different histories. Scanning already refuses to fold
- * one into the other; a recovery tool, where being wrong costs the history
- * rather than a quantity, has no business being more permissive.
+ * different money, with different histories, and so are two slabs with two
+ * cert numbers. Scanning already refuses to fold one into the other; a
+ * recovery tool, where being wrong costs the history rather than a quantity,
+ * has no business being more permissive.
  */
 function isSameCard(existing: CardRecord, input: CardInput): boolean {
   if (norm(existing.name) !== norm(input.name)) return false;
   const a = norm(existing.setName);
   const b = norm(input.setName ?? null);
   if (a && b && a !== b) return false;
-  return norm(existing.grade) === norm(input.grade ?? null) && norm(existing.gradingCompany) === norm(input.gradingCompany ?? null);
+  return (
+    norm(existing.grade) === norm(input.grade ?? null) &&
+    norm(existing.gradingCompany) === norm(input.gradingCompany ?? null) &&
+    norm(existing.certNumber) === norm(input.certNumber ?? null)
+  );
 }
 
 /**

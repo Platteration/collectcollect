@@ -1,4 +1,5 @@
 import type { CardInput, Identification } from "./types";
+import { centeringFromIdentification } from "./grading/centering";
 
 export type ScanDraftStatus = "queued" | "identifying" | "ready" | "review" | "failed" | "committed" | "discarded";
 export interface ScanDraft {
@@ -25,6 +26,7 @@ export function inputFromIdentification(id: Identification): CardInput {
     language: id.language, manufacturer: id.manufacturer,
     condition: !Number.isFinite(grade) || grade <= 0 || grade >= 8 ? "NM" : grade >= 6 ? "LP" : grade >= 4 ? "MP" : grade >= 2 ? "HP" : "DMG",
     gradingCompany: id.grading.company, grade: id.grading.grade, certNumber: id.grading.cert_number,
+    centering: centeringFromIdentification(id),
     notes: id.condition_notes ? `Condition notes: ${id.condition_notes}` : null,
   };
 }

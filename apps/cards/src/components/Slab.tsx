@@ -7,6 +7,8 @@ const COMPANY_CLASS: Record<string, string> = {
   CGC: "slab-cgc",
   SGC: "slab-sgc",
   TAG: "slab-tag",
+  ACE: "slab-ace",
+  AGS: "slab-ags",
 };
 
 export function slabClass(company: string | null | undefined): string {

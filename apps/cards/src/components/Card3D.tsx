@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef } from "react";
-import type { Condition } from "@/lib/types";
+import type { Centering, Condition } from "@/lib/types";
 import { finishOf, gradeValue, holoPattern, wearProfile, type Assessment, type Finish, type HoloPattern } from "@/lib/wear";
 import { slabClass } from "./Slab";
 
@@ -27,6 +27,7 @@ export function Card3D({
   gradingCompany,
   certNumber,
   assessment,
+  centering,
   variant,
   rarity,
   interactive = false,
@@ -40,6 +41,8 @@ export function Card3D({
   gradingCompany?: string | null;
   certNumber?: string | null;
   assessment?: Assessment | null;
+  /** Measured border ratios, which shift the print exactly. */
+  centering?: Centering | null;
   variant?: string | null;
   rarity?: string | null;
   /** Tilt towards the pointer; only the detail page does, not a grid of tiles. */
@@ -50,7 +53,7 @@ export function Card3D({
   const graded = Boolean(grade);
   const value = gradeValue(grade, condition);
   const finish = finishOf({ variant, rarity });
-  const profile = useMemo(() => wearProfile({ seed, grade: value, assessment, finish, graded }), [seed, value, assessment, finish, graded]);
+  const profile = useMemo(() => wearProfile({ seed, grade: value, assessment, finish, graded, centering }), [seed, value, assessment, finish, graded, centering]);
   const pattern = holoPattern({ seed, grade: value, finish });
   const { axis, degrees } = profile.warp;
   const bodyRef = useRef<HTMLDivElement>(null);

@@ -17,6 +17,8 @@ import { PricePanel } from "./PricePanel";
 import { AddToSubmission } from "./AddToSubmission";
 import { PurchaseEditor } from "@collectcollect/core/components/PurchaseEditor";
 import { GradingProvenance } from "./GradingProvenance";
+import { CenteringSummary } from "./CenteringSummary";
+import { GradingReport } from "./GradingReport";
 
 interface Props {
   acquisitions: Acquisition[];
@@ -25,6 +27,8 @@ interface Props {
   history: PriceSnapshot[];
   settings: Settings;
   sales: Sale[];
+  /** Whether the server holds a PSA token, so the report section can offer the lookup. */
+  psaConfigured?: boolean;
 }
 
 /**
@@ -45,7 +49,7 @@ function useFormFocus(open: boolean, opener: RefObject<HTMLButtonElement | null>
   return container;
 }
 
-export function CardDetail({ card: initial, latest: initialLatest, history: initialHistory, settings, sales: initialSales, acquisitions: initialAcquisitions }: Props) {
+export function CardDetail({ card: initial, latest: initialLatest, history: initialHistory, settings, sales: initialSales, acquisitions: initialAcquisitions, psaConfigured = false }: Props) {
   const router = useRouter();
   const [card, setCard] = useState(initial);
   const [latest, setLatest] = useState(initialLatest);
@@ -155,6 +159,21 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
     } finally {
       setBusy("");
     }
+  };
+
+  // A report fetched or entered changes the grade, the cert and the value; the
+  // page takes the card the server now holds and the value it now shows.
+  const adoptReport = async (next: CardRecord) => {
+    setCard(next);
+    setForm(formFromCard(next));
+    try {
+      const fresh = await api<{ card: CardRecord; latestPrice: PriceSummary | null }>(`/api/cards/${next.id}`);
+      setLatest(fresh.latestPrice);
+      setHistory((h) => (fresh.latestPrice && h[0] ? [{ ...h[0], summary: fresh.latestPrice }, ...h.slice(1)] : h));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+    router.refresh();
   };
 
   const setStatus = async (gradingStatus: GradingStatus) => {
@@ -309,10 +328,11 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
   const ret = card.purchasePrice !== null && latest?.yourCopyValue ? latest.yourCopyValue - card.purchasePrice : null;
   const assessment = card.identification?.condition_assessment ?? null;
   const expectedGrade = assessment?.estimated_grade_high ?? assessment?.estimated_grade_low ?? null;
-  const outlook = graded ? [] : outlookSeries(history, settings, expectedGrade);
+  const outlook = graded ? [] : outlookSeries(history, settings, expectedGrade, card.centering, card.game);
   const verdict = gradingVerdict(outlook);
   const lastOutlook = outlook[outlook.length - 1];
   const ready = isReadyToGrade(outlook, verdict, settings);
+  const cap = lastOutlook?.provenance?.centeringCap ?? null;
 
   return (
     <div className="grid grid-cols-1 gap-6 md:grid-cols-[300px_1fr]">
@@ -331,6 +351,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             gradingCompany={card.gradingCompany}
             certNumber={card.certNumber}
             assessment={card.identification?.condition_assessment}
+            centering={card.centering}
             variant={card.variant}
             rarity={card.rarity}
           />
@@ -431,6 +452,8 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
           </dl>
         )}
 
+        {graded && !editing && <GradingReport card={card} psaConfigured={psaConfigured} onUpdated={adoptReport} />}
+
         <PricePanel summary={latest} checkedAt={history[0]?.checkedAt ?? null} loading={busy === "price"} onRefresh={refreshPrice} onReject={rejectMatch} />
 
         {valuePoints.length > 1 && firstPoint && (
@@ -496,7 +519,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             </div>
             {card.gradingStatus === "submitted" ? (
               <p className="mt-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
-                When the card comes back, hit <strong>Edit</strong> and enter the grading company and grade; it will then be valued as a graded card.
+                When the card comes back, hit <strong>Edit</strong> and enter the grading company and grade, or record them on the submission page with the cert number; it will then be valued as a graded card, and a PSA cert can fill the rest from PSA&apos;s records.
               </p>
             ) : (
               <div className="mt-3">
@@ -509,9 +532,14 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
               <div className="my-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                 <Field label="Raw (yours)" value={money(lastOutlook.raw)} />
                 <Field label={`${lastOutlook.minLabel} (min)`} value={money(lastOutlook.min)} />
-                <Field label={`${lastOutlook.maxLabel} (max)`} value={money(lastOutlook.max)} />
+                <Field label={`${lastOutlook.maxLabel} (max${cap ? ", capped by centering" : ""})`} value={money(lastOutlook.max)} />
                 <Field label="Upside after fee" value={money(lastOutlook.upside)} />
               </div>
+            )}
+            {lastOutlook && cap && (
+              <p className="mb-3 text-sm">
+                The {cap.reason} is as far off as {cap.company}&apos;s published limits allow for a {cap.label}, so the best case is priced at {lastOutlook.maxLabel} rather than a 10.
+              </p>
             )}
             {lastOutlook?.likely !== null && lastOutlook?.likelyLabel && (
               <p className="mb-3 rounded-md well px-3 py-2 text-sm">
@@ -521,6 +549,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
                     ? `${assessment.estimated_grade_low}–${assessment.estimated_grade_high}`
                     : (expectedGrade ?? "")}
                 </strong>
+                {cap && `, but the centering allows at most ${cap.label}`}
                 , worth <strong>{money(lastOutlook.likely)}</strong> at {lastOutlook.likelyLabel} against {money(lastOutlook.raw)} raw
                 {lastOutlook.likely - lastOutlook.raw - lastOutlook.fee > 0
                   ? `, so about ${money(lastOutlook.likely - lastOutlook.raw - lastOutlook.fee)} after the fee.`
@@ -529,6 +558,15 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             )}
             {lastOutlook && <OutlookChart series={outlook} />}
             {lastOutlook && <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">{verdict.detail}</p>}
+          </section>
+        )}
+
+        {!graded && (
+          <section className="card-surface p-4">
+            <h3 className="font-semibold">Centering</h3>
+            <div className="mt-2">
+              <CenteringSummary centering={card.centering} game={card.game} />
+            </div>
           </section>
         )}
 

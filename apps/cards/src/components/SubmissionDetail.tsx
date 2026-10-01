@@ -21,6 +21,7 @@ export function SubmissionDetail({ submission: initial, candidates }: { submissi
   const router = useRouter();
   const [submission, setSubmission] = useState(initial);
   const [grades, setGrades] = useState<Record<number, string>>({});
+  const [certs, setCerts] = useState<Record<number, string>>({});
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,7 +118,7 @@ export function SubmissionDetail({ submission: initial, candidates }: { submissi
                 patch({
                   results: Object.entries(grades)
                     .filter(([, g]) => g.trim())
-                    .map(([cardId, grade]) => ({ cardId: Number(cardId), grade })),
+                    .map(([cardId, grade]) => ({ cardId: Number(cardId), grade, certNumber: certs[Number(cardId)] ?? "" })),
                 })
               }
               disabled={busy || Object.values(grades).every((g) => !g.trim())}
@@ -145,16 +146,28 @@ export function SubmissionDetail({ submission: initial, candidates }: { submissi
                     </div>
                   </div>
                   {submission.status === "sent" && !c.returnedGrade && (
-                    <label className="flex items-center gap-2">
-                      <span className="text-xs text-neutral-500">Grade</span>
-                      <input
-                        className="input w-24"
-                        value={grades[c.cardId] ?? ""}
-                        onChange={(e) => setGrades((g) => ({ ...g, [c.cardId]: e.target.value }))}
-                        placeholder="9.5"
-                        inputMode="decimal"
-                      />
-                    </label>
+                    <>
+                      <label className="flex items-center gap-2">
+                        <span className="text-xs text-neutral-500">Grade</span>
+                        <input
+                          className="input w-24"
+                          value={grades[c.cardId] ?? ""}
+                          onChange={(e) => setGrades((g) => ({ ...g, [c.cardId]: e.target.value }))}
+                          placeholder="9.5"
+                          inputMode="decimal"
+                        />
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <span className="text-xs text-neutral-500">Cert number</span>
+                        <input
+                          className="input w-36"
+                          value={certs[c.cardId] ?? ""}
+                          onChange={(e) => setCerts((s) => ({ ...s, [c.cardId]: e.target.value }))}
+                          placeholder="on the label"
+                          aria-label={`Cert number for ${c.name}`}
+                        />
+                      </label>
+                    </>
                   )}
                   {c.returnedGrade && (
                     <span className="badge bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-100">

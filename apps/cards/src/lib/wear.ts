@@ -1,4 +1,5 @@
-import type { Condition } from "./types";
+import type { Centering, Condition } from "./types";
+import { centeringOffset } from "./grading/centering";
 
 /**
  * What a card's grade implies about its surface — corner and edge wear,
@@ -224,6 +225,7 @@ export function wearProfile({
   assessment,
   finish = null,
   graded = false,
+  centering = null,
 }: {
   seed: number;
   grade: number;
@@ -231,6 +233,8 @@ export function wearProfile({
   finish?: Finish | null;
   /** Sealed in a slab, which holds a card flat. */
   graded?: boolean;
+  /** Measured border ratios, which place the print exactly rather than by the seed. */
+  centering?: Centering | null;
 }): WearProfile {
   const g = Math.min(10, Math.max(1, grade));
   const wear = (10 - g) / 9;
@@ -294,9 +298,13 @@ export function wearProfile({
     return { rand, between: (lo: number, hi: number) => lo + rand() * (hi - lo) };
   };
 
-  const centering = centeringScale
-    ? { dx: (unit(id, "centering", "x") * 2 - 1) * centeringScale, dy: (unit(id, "centering", "y") * 2 - 1) * centeringScale }
-    : { dx: 0, dy: 0 };
+  // A measured centering is where the print is, on a gem-mint slab as on a
+  // raw card; the seed only places the print when nothing was measured.
+  const offset =
+    centeringOffset(centering) ??
+    (centeringScale
+      ? { dx: (unit(id, "centering", "x") * 2 - 1) * centeringScale, dy: (unit(id, "centering", "y") * 2 - 1) * centeringScale }
+      : { dx: 0, dy: 0 });
 
   /** The four corners in the order this card wears them. */
   const cornerOrder = (name: string) => ([0, 1, 2, 3] as const).map((c) => ({ c, k: unit(id, name, c) })).sort((a, b) => a.k - b.k).map(({ c }) => c);
@@ -424,7 +432,7 @@ export function wearProfile({
     grade: g,
     wear,
     gloss: 1 - wear * 0.8,
-    centering,
+    centering: offset,
     corners,
     edges,
     scratches,

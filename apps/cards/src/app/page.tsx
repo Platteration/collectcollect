@@ -34,7 +34,7 @@ export default function HomePage() {
     .filter((c) => !c.grade)
     .map((c) => {
       const assess = c.identification?.condition_assessment ?? null;
-      const series = outlookSeries(recent.get(c.id) ?? [], settings, assess?.estimated_grade_high ?? assess?.estimated_grade_low ?? null);
+      const series = outlookSeries(recent.get(c.id) ?? [], settings, assess?.estimated_grade_high ?? assess?.estimated_grade_low ?? null, c.centering, c.game);
       const verdict = gradingVerdict(series);
       return {
         id: c.id,

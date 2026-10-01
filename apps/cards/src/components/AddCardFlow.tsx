@@ -4,7 +4,8 @@ import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { ApiError, api, runQueue, withRetryAfter } from "@/lib/api-client";
 import type { CardInput, CardRecord, Identification, PriceSummary } from "@/lib/types";
-import { CardForm, emptyForm, formFromCard, formToInput, type CardFormState } from "./CardForm";
+import { CardForm, centeringToForm, emptyForm, formFromCard, formToInput, type CardFormState } from "./CardForm";
+import { centeringFromIdentification } from "@/lib/grading/centering";
 import { PricePanel } from "./PricePanel";
 
 type Status = "uploading" | "identifying" | "review" | "saving" | "saved" | "error";
@@ -59,6 +60,7 @@ function formFromIdentification(id: Identification): CardFormState {
     certNumber: id.grading.cert_number ?? "",
     notes: id.condition_notes ? `Condition notes: ${id.condition_notes}` : "",
     condition: conditionFromGrade(id.condition_assessment?.estimated_grade_low),
+    ...centeringToForm(centeringFromIdentification(id)),
   };
 }
 

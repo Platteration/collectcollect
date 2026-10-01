@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, databaseFile, openDatabase, setDb } from "@/lib/db";
 import { createCard, getCard } from "@/lib/cards";
 import { createAlert } from "@/lib/alerts";
@@ -424,8 +424,9 @@ describe("bodies a runaway client could grow without limit", () => {
       { name: "cards/[id]", limit: 64 * 1024, run: async (b) => (await import("@/app/api/cards/[id]/route")).PATCH(send(`http://localhost/api/cards/${card.id}`, b, "PATCH"), cardCtx) },
       { name: "cards/[id]/sales", limit: 16 * 1024, run: async (b) => (await import("@/app/api/cards/[id]/sales/route")).POST(send(`http://localhost/api/cards/${card.id}/sales`, b), cardCtx) },
       { name: "cards/[id]/acquisitions", limit: 16 * 1024, run: async (b) => (await import("@/app/api/cards/[id]/acquisitions/route")).POST(send(`http://localhost/api/cards/${card.id}/acquisitions`, b), cardCtx) },
+      { name: "cards/[id]/cert", limit: 4 * 1024, run: async (b) => (await import("@/app/api/cards/[id]/cert/route")).POST(send(`http://localhost/api/cards/${card.id}/cert`, b), cardCtx) },
     ];
-    expect(routes).toHaveLength(18);
+    expect(routes).toHaveLength(19);
     for (const route of routes) {
       const res = await route.run(oversized(route.limit));
       expect(res.status, route.name).toBe(413);
@@ -436,5 +437,95 @@ describe("bodies a runaway client could grow without limit", () => {
     expect(intake.status).toBe(201);
     const renamed = await (await import("@/app/api/goals/[id]/route")).PUT(send(`http://localhost/api/goals/${goal.id}`, JSON.stringify({ name: "Still fine" }), "PUT"), ctx({ id: goal.id }));
     expect(renamed.status).toBe(200);
+  });
+});
+
+describe("looking a card up on PSA", () => {
+  beforeEach(async () => {
+    setDb(openDatabase(":memory:"));
+    (await import("@/app/api/cards/[id]/cert/route")).throttle.reset();
+    const { createPsaBudget, setPsaBudget } = await import("@/lib/grading/psa");
+    setPsaBudget(createPsaBudget());
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  const post = (id: string, body: unknown = {}) => json(`http://localhost/api/cards/${id}/cert`, "POST", body);
+
+  it("refuses what it cannot look up, each with a reason: an unknown card, the wrong company, a bad cert, no token", async () => {
+    const { POST } = await import("@/app/api/cards/[id]/cert/route");
+    expect((await POST(post("999"), ctx({ id: "999" }) as never)).status).toBe(404);
+    const tag = createCard({ game: "pokemon", name: "Slabbed", gradingCompany: "TAG", grade: "10", certNumber: "A1234567" });
+    const refusedCompany = await POST(post(String(tag.id)), ctx({ id: String(tag.id) }) as never);
+    expect(refusedCompany.status).toBe(400);
+    expect((await read<{ error: string }>(refusedCompany)).error).toMatch(/Only PSA offers a cert lookup/);
+    const psa = createCard({ game: "pokemon", name: "Slabbed", gradingCompany: "PSA", grade: "10", certNumber: "12" });
+    const badCert = await POST(post(String(psa.id)), ctx({ id: String(psa.id) }) as never);
+    expect(badCert.status).toBe(400);
+    expect((await read<{ error: string }>(badCert)).error).toMatch(/8 to 10 digits/);
+    const notJsonBody = await POST(notJson(`http://localhost/api/cards/${psa.id}/cert`, "POST"), ctx({ id: String(psa.id) }) as never);
+    expect(notJsonBody.status).toBe(400);
+    const unconfigured = await POST(post(String(psa.id), { cert: "12345678" }), ctx({ id: String(psa.id) }) as never);
+    expect(unconfigured.status).toBe(503);
+    expect((await read<{ error: string }>(unconfigured)).error).toMatch(/PSA_API_TOKEN/);
+  });
+
+  it("applies PSA's record to the card: the grade, the cert and the report, the identity only when asked, and never the photo", async () => {
+    vi.stubEnv("PSA_API_TOKEN", "t");
+    const { fakeFetch } = await import("./helpers");
+    const cert = (await import("./fixtures/psa-cert.json")).default;
+    const images = (await import("./fixtures/psa-images.json")).default;
+    vi.stubGlobal("fetch", fakeFetch([
+      ["GetByCertNumber/12345678", cert],
+      ["GetImagesByCertNumber/12345678", images],
+    ]));
+    const { POST } = await import("@/app/api/cards/[id]/cert/route");
+    const card = createCard({ game: "pokemon", name: "Charizard", gradingCompany: "PSA", grade: "9", certNumber: "12345678", imagePath: "11111111-2222-4333-8444-555555555555.jpg", gradingStatus: "submitted" });
+    const res = await POST(post(String(card.id)), ctx({ id: String(card.id) }) as never);
+    expect(res.status).toBe(200);
+    const body = await read<{ card: { grade: string; gradingReport: { source: string; images: { front: string } }; imagePath: string; year: number | null; gradingStatus: string }; imagesSkipped: boolean }>(res);
+    expect(body.card).toMatchObject({ grade: "10", gradingStatus: "undecided", imagePath: "11111111-2222-4333-8444-555555555555.jpg", year: null });
+    expect(body.card.gradingReport).toMatchObject({ source: "psa", images: { front: "https://images.psacard.com/cert/12345678/front.jpg" } });
+    expect(body.imagesSkipped).toBe(false);
+    expect(getCard(card.id)?.grade).toBe("10");
+    // Asked to, it fills the blank identity fields, and only those.
+    const asked = await POST(post(String(card.id), { apply: { identity: true } }), ctx({ id: String(card.id) }) as never);
+    expect((await read<{ card: { year: number; cardNumber: string; name: string } }>(asked)).card).toMatchObject({ year: 1999, cardNumber: "4", name: "Charizard" });
+  });
+
+  it("answers what PSA answered: no record is a 404, a spent budget a 429 with a Retry-After, a refusal a 502", async () => {
+    vi.stubEnv("PSA_API_TOKEN", "t");
+    const { POST } = await import("@/app/api/cards/[id]/cert/route");
+    const card = createCard({ game: "pokemon", name: "Charizard", gradingCompany: "PSA", grade: "9", certNumber: "12345678" });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    const missing = await POST(post(String(card.id)), ctx({ id: String(card.id) }) as never);
+    expect(missing.status).toBe(404);
+    expect((await read<{ error: string }>(missing)).error).toMatch(/no record of cert 12345678/);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 403 })));
+    const refused = await POST(post(String(card.id)), ctx({ id: String(card.id) }) as never);
+    expect(refused.status).toBe(502);
+    expect((await read<{ error: string }>(refused)).error).toMatch(/not approved/);
+    const { createPsaBudget, setPsaBudget } = await import("@/lib/grading/psa");
+    setPsaBudget(createPsaBudget(0, 3600e3));
+    const spent = await POST(post(String(card.id)), ctx({ id: String(card.id) }) as never);
+    expect(spent.status).toBe(429);
+    expect(Number(spent.headers.get("Retry-After"))).toBeGreaterThan(0);
+    expect((await read<{ error: string }>(spent)).error).toMatch(/used its PSA lookups for today/);
+    // Nothing about the card changed along the way.
+    expect(getCard(card.id)).toMatchObject({ grade: "9", gradingReport: null });
+  });
+
+  it("takes a report and centering entered by hand through PATCH, and rejects a bad one with the reason", async () => {
+    const { PATCH } = await import("@/app/api/cards/[id]/route");
+    const card = createCard({ game: "pokemon", name: "Charizard", gradingCompany: "TAG", grade: "10", certNumber: "A1234567" });
+    const report = { company: "TAG", cert: "A1234567", source: "manual", checkedAt: "2026-10-01T00:00:00.000Z", grade: "10", tag: { score: "973" } };
+    const ok = await PATCH(json(`http://localhost/api/cards/${card.id}`, "PATCH", { gradingReport: report, centering: { front: "54L/46R 49T/51B" } }), ctx({ id: String(card.id) }) as never);
+    expect(ok.status).toBe(200);
+    expect((await read<{ card: { gradingReport: { tag: { score: number } }; centering: unknown } }>(ok)).card).toMatchObject({ gradingReport: { tag: { score: 973 } }, centering: { front: { lr: [54, 46], tb: [49, 51] } } });
+    const bad = await PATCH(json(`http://localhost/api/cards/${card.id}`, "PATCH", { gradingReport: { ...report, tag: { score: 5000 } } }), ctx({ id: String(card.id) }) as never);
+    expect(bad.status).toBe(400);
+    expect((await read<{ error: string }>(bad)).error).toMatch(/grading report.*tag\.score/);
   });
 });

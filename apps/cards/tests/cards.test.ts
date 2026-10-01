@@ -1,14 +1,26 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb, openDatabase, setDb } from "@/lib/db";
+import { getDb, initializeDatabase, openDatabase, setDb } from "@/lib/db";
 import { HasSalesError, addAcquisition, addSnapshot, allSnapshots, collectionTotals, countCards, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, latestValuesByCard, listCards, listSnapshots, markChecked, recentSnapshotsByCard, snapshotValues, updateCard } from "@/lib/cards";
 import { verifyLotInvariant } from "@/lib/acquisitions";
 import { deleteSale, recordSale } from "@/lib/sales";
 import { createAlert } from "@/lib/alerts";
 import { getSettings, saveSettings } from "@/lib/settings";
-import { DEFAULT_SETTINGS, type PriceQuote, type PriceSummary } from "@/lib/types";
+import { DEFAULT_SETTINGS, type GradingReportInput, type PriceQuote, type PriceSummary } from "@/lib/types";
 import { listAlerts } from "@/lib/alerts";
 import { summarize } from "@/lib/pricing";
 import { latestSnapshot } from "@/lib/cards";
+
+/** A TAG report as the owner would type it off the DIG page. */
+const tagReport = (over: Partial<GradingReportInput> = {}): GradingReportInput => ({
+  company: "TAG",
+  cert: "A1234567",
+  source: "manual",
+  checkedAt: "2026-10-01T00:00:00.000Z",
+  grade: "10",
+  label: "Pristine",
+  tag: { score: 973, rollups: { centering: 990, corners: 960, edges: 970, surface: 980 } },
+  ...over,
+});
 
 const summary = (v: number): PriceSummary => ({
   currency: "USD",
@@ -116,6 +128,30 @@ describe("findSimilar", () => {
     const card = createCard({ game: "mtg", name: "x", gradingStatus: "planned" });
     expect(card.gradingStatus).toBe("planned");
     expect(() => createCard({ game: "mtg", name: "x", gradingStatus: "lost" as never })).toThrow(/grading status/);
+  });
+
+  it("migrates older databases by adding centering and grading_report", () => {
+    const db = openDatabase(":memory:");
+    db.exec("ALTER TABLE cards DROP COLUMN centering");
+    db.exec("ALTER TABLE cards DROP COLUMN grading_report");
+    initializeDatabase(db);
+    setDb(db);
+    const card = createCard({ game: "mtg", name: "x", centering: { front: { lr: "55/45" } }, gradingReport: tagReport() });
+    expect(getCard(card.id)).toMatchObject({ centering: { front: { lr: [55, 45], tb: null }, back: { lr: null, tb: null } }, gradingReport: { company: "TAG", cert: "A1234567" } });
+  });
+
+  it("stores centering and a grading report, and refuses a bad shape with a reason", () => {
+    expect(() => createCard({ game: "mtg", name: "x", centering: { front: { lr: "60/45" } } })).toThrow(/add up to 100/);
+    expect(() => createCard({ game: "mtg", name: "x", gradingReport: tagReport({ tag: { score: 5000 } }) })).toThrow(/grading report/);
+    // A whole side typed into one box, and the back as the report prints it.
+    const card = createCard({ game: "mtg", name: "x", centering: { front: { lr: "54L/46R 49T/51B" }, back: "45L/55R" }, gradingReport: tagReport() });
+    expect(card.centering).toEqual({ front: { lr: [54, 46], tb: [49, 51] }, back: { lr: [45, 55], tb: null } });
+    expect(card.gradingReport).toMatchObject({ company: "TAG", source: "manual", grade: "10", tag: { score: 973 }, population: null });
+    // Blank boxes are no measurement; an edit that leaves them blank clears it.
+    expect(updateCard(card.id, { centering: { front: { lr: "", tb: "" }, back: { lr: "", tb: "" } }, gradingReport: null })).toMatchObject({ centering: null, gradingReport: null });
+    // An edit that says nothing about either leaves both alone.
+    const again = updateCard(card.id, { centering: { front: { lr: "55/45" } }, gradingReport: tagReport() })!;
+    expect(updateCard(card.id, { location: "Box A" })).toMatchObject({ centering: again.centering, gradingReport: again.gradingReport });
   });
 });
 
@@ -329,6 +365,16 @@ describe("which copies may share a row", () => {
     const merged = intakeCard({ ...base, variant: " holo ", language: "english" });
     expect(merged).toMatchObject({ result: "merged" });
     if (merged.result === "merged") expect(merged.card.quantity).toBe(2);
+  });
+
+  it("keeps two slabs with different certs apart, and a blank cert apart from a value", async () => {
+    const { intakeCard } = await import("@/lib/cards");
+    createCard({ ...base, gradingCompany: "PSA", grade: "9", certNumber: "11111111" });
+    expect(intakeCard({ ...base, gradingCompany: "PSA", grade: "9", certNumber: "22222222" }).result).toBe("ambiguous");
+    expect(intakeCard({ ...base, gradingCompany: "PSA", grade: "9" }).result).toBe("ambiguous");
+    expect(listCards()).toHaveLength(1);
+    // The same cert, however it is spaced, is the same slab.
+    expect(intakeCard({ ...base, gradingCompany: "PSA", grade: "9", certNumber: " 11111111 " })).toMatchObject({ result: "merged" });
   });
 });
 

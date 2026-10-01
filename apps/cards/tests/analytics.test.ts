@@ -84,6 +84,51 @@ describe("gradingOutlook", () => {
   });
 });
 
+describe("what a measured centering does to the outlook", () => {
+  const measured = (lr: [number, number]) => ({ front: { lr, tb: null }, back: { lr: null, tb: null } });
+  it("caps the best case and the likely grade at what the centering allows, and leaves a card with no centering alone", () => {
+    const s = summary({ ungraded: 100, yourCopyValue: 100, graded: { "PSA 10": 900, "PSA 9": 210 }, estimatedGraded: { "PSA 8": 100 } });
+    const capped = gradingOutlook(s, DEFAULT_SETTINGS, "10", measured([60, 40]), "pokemon")!;
+    expect(capped).toMatchObject({ max: 210, maxLabel: "PSA 9", upside: 85, likely: 210, likelyLabel: "PSA 9", min: 100, minLabel: "PSA 8" });
+    expect(capped.provenance?.centeringCap).toMatchObject({ company: "PSA", grade: 9, label: "PSA 9", reason: "front 60/40 left-right" });
+    expect(capped.provenance?.max).toBe("observed");
+    // Within the limits for a 10: nothing changes, and the cap is not reported.
+    const fine = gradingOutlook(s, DEFAULT_SETTINGS, "10", measured([55, 45]), "pokemon")!;
+    expect(fine).toMatchObject({ max: 900, maxLabel: "PSA 10", likely: 900 });
+    expect(fine.provenance?.centeringCap).toBeNull();
+    // Nothing measured: exactly what the card got before.
+    expect(gradingOutlook(s, DEFAULT_SETTINGS, "10", null)).toEqual(gradingOutlook(s, DEFAULT_SETTINGS, "10"));
+    expect(gradingOutlook(s, DEFAULT_SETTINGS, "10", { front: { lr: null, tb: null }, back: { lr: [60, 40], tb: null } })).toEqual(gradingOutlook(s, DEFAULT_SETTINGS, "10"));
+    // A series carries the same cap to every point, so the verdict sees it.
+    const series = outlookSeries([snap(1, 1, 0, s), snap(2, 1, 1, s)], DEFAULT_SETTINGS, null, measured([60, 40]), "pokemon");
+    expect(series.map((p) => p.max)).toEqual([210, 210]);
+  });
+
+  it("prices the cap at the next grade down when the capped grade has no price, and at the mid case when nothing is priced under it", () => {
+    const s = summary({ ungraded: 100, yourCopyValue: 100, graded: { "PSA 10": 900 }, estimatedGraded: { "PSA 8": 120, "PSA 7": 90 } });
+    // 60/40 allows a 9; nothing is priced at 9 or 8.5, so the 8 stands in.
+    expect(gradingOutlook(s, DEFAULT_SETTINGS, null, measured([60, 40]))).toMatchObject({ max: 120, maxLabel: "PSA 8", min: 120, minLabel: "PSA 8" });
+    // 70/30 allows a 7 at most, and the 7 is priced.
+    expect(gradingOutlook(s, DEFAULT_SETTINGS, null, measured([70, 30]))).toMatchObject({ max: 90, maxLabel: "PSA 7", upside: -35 });
+    // 95/5 allows a 2; nothing is priced that low, so the best case is the mid case.
+    const floor = gradingOutlook(s, DEFAULT_SETTINGS, "9", measured([95, 5]))!;
+    expect(floor).toMatchObject({ max: 120, maxLabel: "PSA 8", likely: null, likelyLabel: null });
+    expect(floor.provenance?.centeringCap).toMatchObject({ grade: 2 });
+  });
+});
+
+describe("TAG and SGC in the outlook", () => {
+  it("takes a TAG 10 price as a best case when it is the only 10 priced, and prices a TAG or SGC expected grade", () => {
+    const tag = gradingOutlook(summary({ ungraded: 100, yourCopyValue: 100, graded: { "TAG 10": 700, "TAG 8": 150 }, estimatedGraded: {} }), DEFAULT_SETTINGS, "8")!;
+    expect(tag).toMatchObject({ max: 700, maxLabel: "TAG 10", likely: 150, likelyLabel: "TAG 8", min: 100, minLabel: "Ungraded" });
+    const sgc = gradingOutlook(summary({ ungraded: 100, yourCopyValue: 100, estimatedGraded: { "PSA 10": 300, "SGC 9": 120 } }), DEFAULT_SETTINGS, "9")!;
+    expect(sgc).toMatchObject({ likely: 120, likelyLabel: "SGC 9" });
+    // The defaults estimate TAG grades on a fresh install.
+    expect(DEFAULT_SETTINGS.gradeMultipliers["TAG 10"]).toBe(3);
+    expect(DEFAULT_SETTINGS.gradeMultipliers["TAG 9"]).toBe(1.3);
+  });
+});
+
 describe("expected grade from the photo", () => {
   it("prices the copy at the grade the photo suggests, real data before estimates", async () => {
     const { gradingOutlook } = await import("@/lib/analytics");

@@ -44,7 +44,74 @@ export function isCondition(value: unknown): value is Condition {
   return typeof value === "string" && Object.hasOwn(CONDITIONS, value);
 }
 
-export const GRADING_COMPANIES = ["PSA", "BGS", "CGC", "SGC", "TAG", "Other"] as const;
+export const GRADING_COMPANIES = ["PSA", "BGS", "CGC", "SGC", "TAG", "ACE", "AGS", "Other"] as const;
+
+/** The companies whose public report a cert number opens; "Other" has none. */
+export const GRADING_AGENCIES = ["PSA", "BGS", "CGC", "SGC", "TAG", "ACE", "AGS"] as const;
+export type GradingAgency = (typeof GRADING_AGENCIES)[number];
+
+/**
+ * A border ratio as a grader writes it, direction kept: [55, 45] is "55/45",
+ * the left (or top) border first. Integers that add up to 100.
+ */
+export type Ratio = [number, number];
+export interface CenteringSide {
+  lr: Ratio | null;
+  tb: Ratio | null;
+}
+/** How far a card's print sits from the middle, measured on each side. */
+export interface Centering {
+  front: CenteringSide;
+  back: CenteringSide;
+}
+/** What a client may send for centering: each axis as "55/45" text, a pair, or nothing. */
+export interface CenteringInput {
+  front?: { lr?: Ratio | string | number | null; tb?: Ratio | string | number | null } | string | null;
+  back?: { lr?: Ratio | string | number | null; tb?: Ratio | string | number | null } | string | null;
+}
+
+/** One of a grader's subgrades, for the front and the back when the grader scores both. */
+export interface Subgrade {
+  front: number | null;
+  back: number | null;
+}
+
+/**
+ * What a grading company's public report says about one slab, as PSA's API
+ * answered it or as the owner typed it off the report. Only the blocks a
+ * company publishes are filled: BGS and ACE score four subgrades, AGS eight,
+ * TAG a 1000-point score with its own breakdown, PSA none.
+ */
+export interface GradingReport {
+  company: GradingAgency;
+  cert: string;
+  source: "psa" | "manual";
+  /** When the report was fetched or entered. */
+  checkedAt: string;
+  /** The label variant: "Pristine", "Black Label", "Standard"… */
+  label: string | null;
+  /** The grade as a number string, "10" or "9.5"; "AUTHENTIC" for an ungraded slab. */
+  grade: string | null;
+  /** The grade as the report prints it, e.g. "GEM MT 10". */
+  gradeText: string | null;
+  gradedAt: string | null;
+  subgrades: { centering: Subgrade; corners: Subgrade; edges: Subgrade; surface: Subgrade } | null;
+  tag: {
+    /** TAG's score out of 1000, on its scored service. */
+    score: number | null;
+    rollups: { centering: number | null; corners: number | null; edges: number | null; surface: number | null };
+    composite: { front: number | null; back: number | null };
+    /** How many defects of note the report lists per side. */
+    dings: { cornersFront: number | null; cornersBack: number | null; edgesFront: number | null; edgesBack: number | null; surfaceFront: number | null; surfaceBack: number | null };
+  } | null;
+  population: { atGrade: number | null; total: number | null; higher: number | null } | null;
+  /** The agency's own scans, shown from its site; never stored here. */
+  images: { front: string | null; back: string | null } | null;
+  /** The public report this came from or links to. */
+  url: string | null;
+  /** What the agency says the card is, kept apart from the owner's own record. */
+  identity: { subject: string | null; brand: string | null; year: string | null; cardNumber: string | null; variety: string | null; category: string | null } | null;
+}
 
 /** Where a raw card stands in the owner's grading plans. */
 export type GradingStatus = "undecided" | "planned" | "submitted" | "keep_raw";
@@ -85,6 +152,8 @@ export interface Identification {
     estimated_grade_low: string | null;
     estimated_grade_high: string | null;
     caveat: string | null;
+    /** The same centering as border ratios, "55/45", when the photo lets them be read; absent on older identifications. */
+    centering_ratios?: { front_lr: string | null; front_tb: string | null; back_lr: string | null; back_tb: string | null } | null;
   } | null;
   confidence: number;
   alternatives: Array<{
@@ -114,6 +183,10 @@ export interface CardRecord {
   gradingCompany: string | null;
   grade: string | null;
   certNumber: string | null;
+  /** Measured border ratios, typed in, read off a report, or read from the photo. */
+  centering: Centering | null;
+  /** The grading company's report on this slab, when one has been fetched or entered. */
+  gradingReport: GradingReport | null;
   purchasePrice: number | null;
   notes: string | null;
   imagePath: string | null;
@@ -132,9 +205,32 @@ export interface CardRecord {
 }
 
 /** Fields a client may send when creating or updating a card. */
+/** What a client may send as a grading report: the four keys that name it, and any of the rest, numbers as text if it likes. */
+export interface GradingReportInput {
+  company: string;
+  cert: string;
+  source: string;
+  checkedAt: string;
+  label?: string | null;
+  grade?: string | null;
+  gradeText?: string | null;
+  gradedAt?: string | null;
+  subgrades?: Partial<Record<"centering" | "corners" | "edges" | "surface", Partial<Record<"front" | "back", number | string | null>> | null>> | null;
+  tag?: {
+    score?: number | string | null;
+    rollups?: Partial<Record<"centering" | "corners" | "edges" | "surface", number | string | null>> | null;
+    composite?: Partial<Record<"front" | "back", number | string | null>> | null;
+    dings?: Partial<Record<"cornersFront" | "cornersBack" | "edgesFront" | "edgesBack" | "surfaceFront" | "surfaceBack", number | string | null>> | null;
+  } | null;
+  population?: Partial<Record<"atGrade" | "total" | "higher", number | string | null>> | null;
+  images?: Partial<Record<"front" | "back", string | null>> | null;
+  url?: string | null;
+  identity?: Partial<Record<"subject" | "brand" | "year" | "cardNumber" | "variety" | "category", string | null>> | null;
+}
+
 export type CardInput = Partial<
-  Omit<CardRecord, "id" | "createdAt" | "updatedAt">
-> & { game: Game; name: string };
+  Omit<CardRecord, "id" | "createdAt" | "updatedAt" | "centering" | "gradingReport">
+> & { game: Game; name: string; centering?: CenteringInput | Centering | null; gradingReport?: GradingReportInput | GradingReport | null };
 
 export type PriceSource =
   | "pricecharting"
@@ -182,6 +278,8 @@ export interface PriceSummary {
   errors: Array<{ source: string; message: string }>;
   /** When the derived figures were last re-read from these quotes after an edit, if ever. */
   recomputedAt?: string;
+  /** Every source behind each graded price, so an average can show what it averaged; absent when nothing graded was reported. */
+  gradedSources?: Record<string, Array<{ source: string; price: number }>>;
 }
 
 export interface Sale {
@@ -304,6 +402,8 @@ export const DEFAULT_SETTINGS: Settings = {
     "CGC 9": 1.2,
     "SGC 10": 2.5,
     "SGC 9": 1.2,
+    "TAG 10": 3.0,
+    "TAG 9": 1.3,
   },
   conditionMultipliers: {
     NM: 1.0,
@@ -321,10 +421,12 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export interface ProviderStatus {
-  id: PriceSource | "claude";
+  id: PriceSource | "claude" | "psa";
   label: string;
   configured: boolean;
   optional: boolean;
   games: Game[];
   note: string;
+  /** Whether Settings offers a connection test; a source whose every call is spent against a daily budget has none. */
+  testable: boolean;
 }

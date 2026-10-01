@@ -143,6 +143,10 @@ const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   // When a refresh last found these same prices, so an unchanged price is a
   // note on the row rather than a copy of it.
   { table: "price_snapshots", column: "checked_at", ddl: "ALTER TABLE price_snapshots ADD COLUMN checked_at TEXT" },
+  // Measured border ratios and the grading company's report, both JSON, both
+  // read back through the same checks the API applies to them.
+  { table: "cards", column: "centering", ddl: "ALTER TABLE cards ADD COLUMN centering TEXT" },
+  { table: "cards", column: "grading_report", ddl: "ALTER TABLE cards ADD COLUMN grading_report TEXT" },
 ];
 
 /**

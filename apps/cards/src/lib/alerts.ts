@@ -70,7 +70,7 @@ export function deleteAlert(id: number): boolean {
  * Pure, so the thresholds can be tested without a database.
  */
 export function alertsForRefresh(
-  card: Pick<CardRecord, "id" | "name" | "grade" | "gradingCompany" | "identification" | "quantity">,
+  card: Pick<CardRecord, "id" | "name" | "grade" | "gradingCompany" | "identification" | "quantity"> & Partial<Pick<CardRecord, "centering" | "game">>,
   previous: PriceSummary | null,
   next: PriceSummary,
   history: PriceSnapshot[],
@@ -116,11 +116,11 @@ export function alertsForRefresh(
   if (!card.grade) {
     const assess = card.identification?.condition_assessment ?? null;
     const expected = assess?.estimated_grade_high ?? assess?.estimated_grade_low ?? null;
-    const before1 = outlookSeries(history, settings, expected);
+    const before1 = outlookSeries(history, settings, expected, card.centering, card.game);
     // The provisional snapshot is not stored yet; give it an id that sorts last
     // so it lands at the end even when its timestamp ties with the previous one.
     const provisional = { id: Number.MAX_SAFE_INTEGER, cardId: card.id, fetchedAt: next.fetchedAt, summary: next };
-    const after1 = outlookSeries([...history, provisional], settings, expected);
+    const after1 = outlookSeries([...history, provisional], settings, expected, card.centering, card.game);
     const wasReady = isReadyToGrade(before1, gradingVerdict(before1), settings);
     const isReady = isReadyToGrade(after1, gradingVerdict(after1), settings);
     const last = after1[after1.length - 1];

@@ -72,6 +72,18 @@ describe("wear from a grade", () => {
     expect(wearProfile({ seed: 7, grade: 5, finish: "foil" })).toEqual(wearProfile({ seed: 7, grade: 5, finish: "foil" }));
   });
 
+  it("shifts the print by the measured centering, the same way every time, even on a gem-mint slab", () => {
+    const measured = (lr: [number, number] | null, tb: [number, number] | null = null) => ({ front: { lr, tb }, back: { lr: null, tb: null } });
+    expect(wearProfile({ seed: 1, grade: 10, graded: true, centering: measured([60, 40]) }).centering).toEqual({ dx: 3, dy: 0 });
+    expect(wearProfile({ seed: 1, grade: 5, centering: measured([40, 60], [55, 45]) }).centering).toEqual({ dx: -3, dy: 1.5 });
+    expect(wearProfile({ seed: 1, grade: 5, centering: measured([90, 10]) }).centering).toEqual({ dx: 4, dy: 0 });
+    // Two seeds, one measurement, one place.
+    expect(wearProfile({ seed: 99, grade: 5, centering: measured([60, 40]) }).centering).toEqual(wearProfile({ seed: 1, grade: 5, centering: measured([60, 40]) }).centering);
+    // Nothing measured on the front: the seed places the print as before.
+    expect(wearProfile({ seed: 7, grade: 5, centering: { front: { lr: null, tb: null }, back: { lr: [60, 40], tb: null } } }).centering).toEqual(wearProfile({ seed: 7, grade: 5 }).centering);
+    expect(wearProfile({ seed: 7, grade: 5, centering: null }).centering).toEqual(wearProfile({ seed: 7, grade: 5 }).centering);
+  });
+
   it("spends the grade's budget in full, so a lower grade never has fewer marks", () => {
     for (const seed of [1, 99, 123456]) {
       let previous = wearProfile({ seed, grade: 10 });

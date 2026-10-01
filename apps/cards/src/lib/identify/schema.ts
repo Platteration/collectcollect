@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+/** Centering as border ratios, the way a grader writes them, when the photo lets them be read. */
+export const CenteringRatiosSchema = z.object({
+  front_lr: z.string().nullable().describe("Front left/right border ratio as a grader writes it, e.g. '55/45' (left border first). Null when it cannot be measured from the photo."),
+  front_tb: z.string().nullable().describe("Front top/bottom border ratio, e.g. '52/48' (top border first). Null when not measurable."),
+  back_lr: z.string().nullable().describe("Back left/right ratio, only when the back is in a photo. Else null."),
+  back_tb: z.string().nullable().describe("Back top/bottom ratio, only when the back is in a photo. Else null."),
+});
+
 export const IdentificationSchema = z.object({
   game: z.enum(["pokemon", "yugioh", "mtg", "sports", "other"]),
   sport: z
@@ -51,6 +59,7 @@ export const IdentificationSchema = z.object({
         .string()
         .nullable()
         .describe("Why the estimate could be wrong: glare, low resolution, only the front visible, sleeve or toploader in the way. Null if the photo is clear."),
+      centering_ratios: CenteringRatiosSchema.nullable().describe("The centering as numbers, each side and axis a ratio adding up to 100. Null when the borders cannot be measured."),
     })
     .describe("Condition read from the photo. Every field may be null; only judge what is actually visible."),
   confidence: z

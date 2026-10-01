@@ -12,7 +12,7 @@ import { realizedReturn } from "@/lib/analytics";
 import { latestSnapshotsByCard } from "@/lib/cards";
 import { parseCardMarkdown } from "@/lib/markdown/card";
 import { parseDocument, readSection, readTable, writeFrontMatter } from "@collectcollect/core/markdown/format";
-import type { PriceSummary } from "@/lib/types";
+import type { GradingReportInput, PriceSummary } from "@/lib/types";
 
 function at<T>(xs: readonly T[], i: number): T {
   const x = xs[i];
@@ -39,6 +39,34 @@ function fileFor(id: number): string {
   if (!name) throw new Error(`no file for card ${id}`);
   return fs.readFileSync(path.join(cardsDir(), name), "utf8");
 }
+
+/** A PSA report as its API answers it, with PSA's scans. */
+const psaReport = (over: Partial<GradingReportInput> = {}): GradingReportInput => ({
+  company: "PSA",
+  cert: "12345678",
+  source: "psa",
+  checkedAt: "2026-10-01T00:00:00.000Z",
+  grade: "8",
+  gradeText: "NM-MT 8",
+  label: "Standard",
+  population: { atGrade: 12, total: null, higher: 3 },
+  images: { front: "https://images.psacard.com/front.jpg", back: "https://images.psacard.com/back.jpg" },
+  url: "https://www.psacard.com/cert/12345678/psa",
+  identity: { subject: "Ken Griffey Jr.", brand: "Upper Deck", year: "1989", cardNumber: "1", variety: null, category: "Baseball" },
+  ...over,
+});
+
+/** A TAG report as the owner types it off the DIG page. */
+const tagReport = (): GradingReportInput => ({
+  company: "TAG",
+  cert: "A1234567",
+  source: "manual",
+  checkedAt: "2026-10-01T00:00:00.000Z",
+  grade: "10",
+  label: "Pristine",
+  tag: { score: 973, rollups: { centering: 990, corners: 960, edges: 970, surface: 980 }, composite: { front: 975, back: 970 }, dings: { cornersFront: 0, surfaceBack: 1 } },
+  url: "https://my.taggrading.com/card/A1234567",
+});
 
 describe("markdown encoding", () => {
   it("round-trips front matter through JSON values", () => {
@@ -140,7 +168,9 @@ describe("a card as a document", () => {
       condition: "LP",
       gradingCompany: "PSA",
       grade: "8",
-      certNumber: "1234",
+      certNumber: "12345678",
+      centering: { front: { lr: "60/40" } },
+      gradingReport: psaReport(),
       purchasePrice: 40,
       notes: "Off-centre.",
       imagePath: "11111111-1111-4111-8111-111111111111.jpg",
@@ -246,6 +276,63 @@ describe("files written by something other than this app", () => {
     expect(parsed.warnings.join(" ")).toMatch(/outside the usable range/);
   });
 
+  it("carries centering and a grading report through the file and back, and drops one it cannot read with a warning", () => {
+    const card = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", gradingCompany: "TAG", grade: "10", certNumber: "A1234567", centering: { front: { lr: "54L/46R 49T/51B" }, back: { lr: "45/55" } }, gradingReport: tagReport() });
+    const text = fileFor(card.id);
+    // Written for a person as well as for the app.
+    expect(text).toContain("## Grading report");
+    expect(text).toContain("TAG 10 Pristine · cert A1234567 · checked 2026-10-01 · entered by hand from the report");
+    expect(text).toContain("Report: <https://my.taggrading.com/card/A1234567>");
+    expect(text).toContain("TAG score 973 of 1000 (centering 990, corners 960, edges 970, surface 980).");
+    expect(text).toContain("## Centering");
+    expect(text).toContain("Front 54/46 left-right, 49/51 top-bottom; back 45/55 left-right.");
+    expect(text).toMatch(/allows up to PSA 10, BGS Pristine 10, CGC Gem Mint 10, SGC 10, TAG Gem Mint 10, ACE 10 \(approximate\)/);
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.input.centering).toEqual(card.centering);
+    expect(parsed.input.gradingReport).toEqual(card.gradingReport);
+    expect(parsed.warnings).toEqual([]);
+
+    const psa = createCard({ game: "sports", name: "Ken Griffey Jr.", gradingCompany: "PSA", grade: "8", certNumber: "12345678", gradingReport: psaReport() });
+    const psaText = fileFor(psa.id);
+    expect(psaText).toContain("PSA 8 Standard · cert 12345678 · checked 2026-10-01 · from PSA's records");
+    expect(psaText).toContain("Population 12 at this grade, 3 higher.");
+    expect(psaText).toContain("PSA lists it as: 1989 Upper Deck Ken Griffey Jr. #1 (Baseball).");
+    expect(psaText).toContain("Front scan: <https://images.psacard.com/front.jpg> · Back scan: <https://images.psacard.com/back.jpg>");
+    expect(parseCardMarkdown(psaText)!.input.gradingReport).toEqual(psa.gradingReport);
+
+    // A report edited by hand into something that is not one costs that
+    // field and a warning, never the card.
+    const broken = parseCardMarkdown(text.replace('"score":973', '"score":"lots"'))!;
+    expect(broken.input.name).toBe("Charizard");
+    expect(broken.input.gradingReport).toBeNull();
+    expect(broken.input.centering).toEqual(card.centering);
+    expect(broken.warnings.join(" ")).toMatch(/grading report was not readable/);
+    const brokenCentering = parseCardMarkdown(text.replace("[54,46]", "[60,45]"))!;
+    expect(brokenCentering.input.centering).toBeNull();
+    expect(brokenCentering.warnings.join(" ")).toMatch(/centering block was not readable/);
+
+    // A file from before either existed reads as it did.
+    const older = parseCardMarkdown(["---", 'name: "Charizard"', 'game: "pokemon"', "---", "", "# Charizard", ""].join("\n"))!;
+    expect(older.input).toMatchObject({ centering: null, gradingReport: null });
+    expect(older.warnings).toEqual([]);
+  });
+
+  it("matches a file to the slab with its cert, never to another cert", () => {
+    createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", gradingCompany: "PSA", grade: "10", certNumber: "11111111" });
+    flushCollection();
+    const file = at(readCardFiles(), 0);
+
+    setDb(openDatabase(":memory:"));
+    const other = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", gradingCompany: "PSA", grade: "10", certNumber: "22222222" });
+    addSnapshot(other.id, summary(5000, "2026-01-02T10:00:00.000Z"));
+    expect(importCardFiles([file])).toMatchObject({ created: 1, replaced: 0 });
+    expect(listCards()).toHaveLength(2);
+    expect(listSnapshots(other.id)).toHaveLength(1);
+    // The same cert is the same slab.
+    expect(importCardFiles([file])).toMatchObject({ created: 0 });
+    expect(listCards()).toHaveLength(2);
+  });
+
   it("carries a real identification back and refuses one that is not a card", () => {
     const identification = {
       game: "pokemon",
@@ -283,6 +370,11 @@ describe("files written by something other than this app", () => {
     const older = { ...identification, condition_assessment: undefined };
     const olderCard = createCard({ game: "pokemon", name: "Venusaur", identification: older as never });
     expect(parseCardMarkdown(fileFor(olderCard.id))!.input.identification).toMatchObject({ name: "Charizard" });
+
+    // So does one that carries the numeric centering ratios.
+    const measured = { ...identification, condition_assessment: { ...identification.condition_assessment, centering_ratios: { front_lr: "60/40", front_tb: "52/48", back_lr: null, back_tb: null } } };
+    const measuredCard = createCard({ game: "pokemon", name: "Blastoise", identification: measured as never });
+    expect(parseCardMarkdown(fileFor(measuredCard.id))!.input.identification).toEqual(measured);
 
     // Something that is only shaped like JSON is dropped, with a warning,
     // rather than reaching pages that do arithmetic on its fields.

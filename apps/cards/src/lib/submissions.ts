@@ -1,6 +1,7 @@
 import { discardDeferredMirror, flushDeferredMirror, getCard, latestSnapshot, updateCard } from "./cards";
 import { getDb } from "./db";
 import { gradeLookupKeys } from "./pricing";
+import { manualReport } from "./grading/report";
 import type { Game, Submission, SubmissionCard, SubmissionStatus } from "./types";
 import { SUBMISSION_STATUSES } from "./types";
 
@@ -231,6 +232,8 @@ export function markSent(submissionId: number, sentAt?: string): Submission {
 export interface GradeResult {
   cardId: number;
   grade: string;
+  /** The slab's cert number, when the owner has it to hand; the card then links to the company's report. */
+  certNumber?: string | null;
 }
 
 /**
@@ -255,14 +258,18 @@ export function recordReturn(submissionId: number, results: unknown, returnedAt?
   const graded: GradeResult[] = [];
   for (const r of results) {
     if (!r || typeof r !== "object") throw new Error("Each result has to name a card and a grade");
-    const { cardId, grade } = r as { cardId?: unknown; grade?: unknown };
+    const { cardId, grade, certNumber } = r as { cardId?: unknown; grade?: unknown; certNumber?: unknown };
     if (typeof cardId !== "number" || !Number.isInteger(cardId)) throw new Error("Each result has to name a card by its id");
     if (!inBatch.has(cardId)) throw new Error(`Card ${cardId} is not in this submission`);
     if (grade !== undefined && grade !== null && typeof grade !== "string" && typeof grade !== "number") {
       throw new Error(`The grade for card ${cardId} has to be text`);
     }
+    if (certNumber !== undefined && certNumber !== null && typeof certNumber !== "string" && typeof certNumber !== "number") {
+      throw new Error(`The cert number for card ${cardId} has to be text`);
+    }
     const text = String(grade ?? "").trim();
-    if (text) graded.push({ cardId, grade: text });
+    const cert = String(certNumber ?? "").trim() || null;
+    if (text) graded.push({ cardId, grade: text, certNumber: cert });
   }
 
   const db = getDb();
@@ -283,7 +290,14 @@ export function recordReturn(submissionId: number, results: unknown, returnedAt?
         submissionId,
         r.cardId,
       );
-      updateCard(r.cardId, { gradingCompany: sub.company, grade: r.grade, gradingStatus: "undecided" });
+      // A cert makes the slab findable: the card links to the company's public
+      // report from here on, and a lookup can fill the rest in.
+      updateCard(r.cardId, {
+        gradingCompany: sub.company,
+        grade: r.grade,
+        gradingStatus: "undecided",
+        ...(r.certNumber ? { certNumber: r.certNumber, gradingReport: manualReport(sub.company, r.certNumber, r.grade) } : {}),
+      });
     }
     const after = getSubmission(submissionId)!;
     const complete = after.cards.length > 0 && after.cards.every((c) => c.returnedGrade);

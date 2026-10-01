@@ -1,0 +1,29 @@
+{
+  "PSACert": {
+    "CertNumber": "12345678",
+    "SpecID": 1234567,
+    "SpecNumber": "1234567",
+    "LabelType": "Standard",
+    "ReverseBarCode": true,
+    "Year": "1999",
+    "Brand": "POKEMON GAME",
+    "Category": "TCG Cards",
+    "CardNumber": "4",
+    "Subject": "CHARIZARD-HOLO",
+    "Variety": "1ST EDITION",
+    "IsPSADNA": false,
+    "IsDualCert": false,
+    "GradeDescription": "GEM MT",
+    "CardGrade": "GEM MT 10",
+    "PrimarySigners": [],
+    "OtherSigners": [],
+    "AutographGrade": null,
+    "TotalPopulation": 123,
+    "TotalPopulationWithQualifier": 0,
+    "PopulationHigher": 0,
+    "T206PopulationAllBacks": 0,
+    "T206PopulationHigherAllBacks": 0,
+    "ItemStatus": "Active"
+  },
+  "DNACert": null
+}
