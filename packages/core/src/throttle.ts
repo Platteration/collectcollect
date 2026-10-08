@@ -1,0 +1,77 @@
+import { jsonError } from "./http";
+import { forwardedClient } from "./forwarded";
+import { trustProxy } from "./net";
+
+export { trustProxy };
+
+/**
+ * Who is asking, for anything that counts requests per client.
+ *
+ * `X-Forwarded-For` is only believed when `TRUST_PROXY` (or
+ * `TRUSTED_PROXY_HOPS`) says there is a proxy in front to have set it, and
+ * then only the entry that proxy wrote, counted from the right, and only when
+ * it is an address (forwarded.ts). Anyone can send that header: a limiter keyed
+ * on it without a proxy, or on the leftmost entry with one, is a limiter every
+ * client can reset by changing one string — and can aim at someone else's
+ * address. Without a proxy every request is "local", which for an app that runs
+ * on one machine for one person is the truth.
+ */
+export function clientKey(request: Request): string {
+  return forwardedClient(request) ?? "local";
+}
+
+export interface Throttle {
+  /** A 429 for this request, or null when it may go ahead. */
+  check(request: Request, now?: number): Response | null;
+  /** Forget everything, for tests. */
+  reset(): void;
+}
+
+/**
+ * At most `max` requests per client in any `windowMs`, for the routes that
+ * cost something: an image sent to a vision model, a whole-inventory refresh
+ * against rate-limited markets, a restore that swaps the database out.
+ *
+ * In memory and per process, which is the right size here — it is protection
+ * against a runaway client or a double-clicked button, not a public API's
+ * defence. Entries are pruned as they expire, so a long-running server does
+ * not hold a row for every client it ever saw.
+ */
+export function createThrottle(max: number, windowMs: number, what = "requests"): Throttle {
+  const seen = new Map<string, number[]>();
+  const CAP = 10_000;
+
+  const prune = (now: number) => {
+    for (const [key, stamps] of seen) {
+      for (let oldest = stamps[0]; oldest !== undefined && now - oldest >= windowMs; oldest = stamps[0]) stamps.shift();
+      if (!stamps.length) seen.delete(key);
+    }
+  };
+
+  return {
+    check(request, now = Date.now()) {
+      prune(now);
+      const key = clientKey(request);
+      let stamps = seen.get(key);
+      if (!stamps) {
+        // A flood of distinct keys cannot grow this without bound.
+        if (seen.size >= CAP) seen.clear();
+        stamps = [];
+        seen.set(key, stamps);
+      }
+      const oldest = stamps[0];
+      if (stamps.length >= max) {
+        // With `max` zero there is no oldest stamp and the answer is simply "a whole window".
+        const retryAfter = Math.max(1, Math.ceil((windowMs - (now - (oldest ?? now))) / 1000));
+        const response = jsonError(`Too many ${what}; try again in ${retryAfter}s`, 429);
+        response.headers.set("Retry-After", String(retryAfter));
+        return response;
+      }
+      stamps.push(now);
+      return null;
+    },
+    reset() {
+      seen.clear();
+    },
+  };
+}

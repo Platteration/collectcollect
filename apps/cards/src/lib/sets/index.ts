@@ -1,0 +1,166 @@
+import { listCards } from "../cards";
+import { getDb } from "../db";
+import { nameKey } from "../name-key";
+import { normalizeNumber } from "../pricing/match";
+import type { CardRecord, Game } from "../types";
+import { setProviderFor } from "./providers";
+import { hintFromCards, type Checklist } from "./types";
+
+interface ChecklistRow {
+  game: string;
+  set_id: string;
+  set_name: string;
+  cards: string;
+  fetched_at: string;
+}
+
+/** A set the owner has at least one card from, and how complete it is. */
+export interface SetProgress {
+  game: Game;
+  /** The set name as the owner's cards spell it, which is how they are grouped. */
+  key: string;
+  setName: string;
+  owned: number;
+  copies: number;
+  /** Cards in the published checklist, once one has been fetched. */
+  total: number | null;
+  missing: number | null;
+  fetchedAt: string | null;
+  /** Whether a checklist can be fetched for this game at all. */
+  supported: boolean;
+}
+
+const groupKey = (game: Game, setName: string) => `${game}:${setName.trim().toLowerCase()}`;
+
+/**
+ * A stored checklist, or null when its card list is not readable. The rows are
+ * not necessarily ones this app wrote — a restore installs a whole database —
+ * and a bare `JSON.parse` here throws out of a server component with nothing
+ * to catch it.
+ */
+function rowToChecklist(row: ChecklistRow): (Checklist & { fetchedAt: string }) | null {
+  let cards: unknown;
+  try {
+    cards = JSON.parse(row.cards);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(cards)) return null;
+  return { game: row.game as Game, setId: row.set_id, setName: row.set_name, cards: cards as Checklist["cards"], fetchedAt: row.fetched_at };
+}
+
+export function saveChecklist(list: Checklist): void {
+  getDb()
+    .prepare(
+      `INSERT INTO set_checklists (game, set_id, set_name, cards, fetched_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (game, set_id) DO UPDATE SET set_name = excluded.set_name, cards = excluded.cards, fetched_at = excluded.fetched_at`,
+    )
+    .run(list.game, list.setId, list.setName, JSON.stringify(list.cards), new Date().toISOString());
+}
+
+export function getChecklist(game: Game, setId: string): (Checklist & { fetchedAt: string }) | null {
+  const row = getDb().prepare("SELECT * FROM set_checklists WHERE game = ? AND set_id = ?").get(game, setId) as ChecklistRow | undefined;
+  if (!row) return null;
+  return rowToChecklist(row);
+}
+
+/**
+ * Any stored checklist whose name matches how the owner spells the set.
+ *
+ * Matched in JavaScript rather than with SQLite's `lower(trim(...))`, because
+ * the two fold differently: SQLite's lower() is ASCII-only, so a set whose name
+ * carries an accent in another case never matched. One checklist is stored per
+ * set fetched, so there is nothing here worth an index.
+ */
+function checklistForName(game: Game, setName: string): (Checklist & { fetchedAt: string }) | null {
+  const wanted = nameKey(setName);
+  const rows = getDb().prepare("SELECT * FROM set_checklists WHERE game = ?").all(game) as ChecklistRow[];
+  const row = rows.find((r) => nameKey(r.set_name) === wanted);
+  return row ? rowToChecklist(row) : null;
+}
+
+/** Which cards of a checklist the owner has, matched on collector number then name. */
+export function ownedFromChecklist(checklist: Checklist, owned: CardRecord[]): Set<string> {
+  const byNumber = new Map<string, CardRecord>();
+  const byName = new Map<string, CardRecord[]>();
+  const nameCounts = new Map<string, number>();
+  for (const entry of checklist.cards) {
+    const name = entry.name.trim().toLowerCase();
+    nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+  }
+  for (const card of owned) {
+    if (card.quantity <= 0) continue;
+    const n = normalizeNumber(card.cardNumber);
+    if (n) byNumber.set(n, card);
+    const name = card.name.trim().toLowerCase();
+    byName.set(name, [...(byName.get(name) ?? []), card]);
+  }
+  const have = new Set<string>();
+  for (const entry of checklist.cards) {
+    const n = normalizeNumber(entry.number);
+    const name = entry.name.trim().toLowerCase();
+    const nameMatches = byName.get(name) ?? [];
+    // A known different number is a different printing. Name fallback is
+    // reserved for missing numbers and names unique in this checklist.
+    const uniqueName = nameCounts.get(name) === 1;
+    if ((n && byNumber.has(n)) || (uniqueName && nameMatches.some((card) => !n || !normalizeNumber(card.cardNumber)))) have.add(entry.number);
+  }
+  return have;
+}
+
+/** Every set the collection touches, with completion where a checklist is known. */
+export function setProgress(): SetProgress[] {
+  const groups = new Map<string, { game: Game; setName: string; cards: CardRecord[] }>();
+  for (const card of listCards()) {
+    if (!card.setName?.trim() || card.quantity <= 0) continue;
+    const key = groupKey(card.game, card.setName);
+    const group = groups.get(key) ?? { game: card.game, setName: card.setName.trim(), cards: [] };
+    group.cards.push(card);
+    groups.set(key, group);
+  }
+
+  // Fetched sets remain visible before the first purchase and after a sale.
+  for (const row of getDb().prepare("SELECT game, set_name FROM set_checklists").all() as Array<{ game: Game; set_name: string }>) {
+    const key = groupKey(row.game, row.set_name);
+    if (!groups.has(key)) groups.set(key, { game: row.game, setName: row.set_name, cards: [] });
+  }
+
+  return [...groups.entries()]
+    .map(([key, group]) => {
+      const checklist = checklistForName(group.game, group.setName);
+      const have = checklist ? ownedFromChecklist(checklist, group.cards) : null;
+      return {
+        game: group.game,
+        key,
+        setName: group.setName,
+        owned: have?.size ?? group.cards.length,
+        copies: group.cards.reduce((n, c) => n + c.quantity, 0),
+        total: checklist ? checklist.cards.length : null,
+        missing: checklist && have ? checklist.cards.length - have.size : null,
+        fetchedAt: checklist?.fetchedAt ?? null,
+        supported: setProviderFor(group.game) !== null,
+      };
+    })
+    .sort((a, b) => a.setName.localeCompare(b.setName));
+}
+
+/** Fetch and store the checklist for one of the owner's sets. */
+export async function refreshChecklist(game: Game, setName: string, fetchImpl: typeof fetch = fetch, setCode?: string): Promise<Checklist | null> {
+  const provider = setProviderFor(game);
+  if (!provider) return null;
+  const cards = listCards({ game }).filter((c) => (c.setName ?? "").trim().toLowerCase() === setName.trim().toLowerCase());
+  const cached = checklistForName(game, setName);
+  const hint = hintFromCards(cards) ?? { game, setName, setCode: setCode ?? (game === "mtg" ? cached?.setId ?? null : null), externalIds: {} };
+  if (setCode) hint.setCode = setCode;
+  const checklist = await provider.checklist({ ...hint, setName }, fetchImpl);
+  if (checklist) saveChecklist(checklist);
+  return checklist;
+}
+
+/** The owner's cards from one set, alongside its checklist. */
+export function setDetail(game: Game, setName: string) {
+  const owned = listCards({ game }).filter((c) => (c.setName ?? "").trim().toLowerCase() === setName.trim().toLowerCase() && c.quantity > 0);
+  const checklist = checklistForName(game, setName);
+  const have = checklist ? ownedFromChecklist(checklist, owned) : new Set<string>();
+  return { owned, checklist, have };
+}

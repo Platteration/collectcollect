@@ -1,0 +1,50 @@
+import { NextResponse } from "next/server";
+import { identifyCard, IdentifyError } from "@/lib/identify/claude";
+import { isValidUploadName, readUpload } from "@/lib/images";
+import { errorMessage, jsonError } from "@/lib/http";
+import { BodyLimitError, logError, readJsonLimited } from "@collectcollect/core/http";
+import { identificationThrottle } from "@/lib/identify/throttle";
+
+/**
+ * POST { uploads: string[], hint?: string } — identify a single card from one
+ * or more previously stored uploads (front / back / slab label).
+ */
+/** Each call sends photos to a paid vision model; ten a minute is a person, more is a loop. */
+export const throttle = identificationThrottle;
+
+const HINT_MAX = 2000;
+
+export async function POST(request: Request) {
+  const refused = throttle.check(request);
+  if (refused) return refused;
+  let body: { uploads?: unknown; hint?: unknown };
+  // Four upload names and a hint are well under 16 KB; a runaway client cannot buffer more.
+  try {
+    body = (await readJsonLimited(request, 16 * 1024)) as typeof body;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
+    return jsonError("Expected a JSON body");
+  }
+  const names = Array.isArray(body.uploads) ? body.uploads.filter((n): n is string => typeof n === "string") : [];
+  if (names.length === 0 || names.length > 4) return jsonError("Provide between 1 and 4 upload names");
+  // A hint is a nudge, not a document: the body allows sixteen kilobytes of it,
+  // which is the prompt being used as free tokens. The same ceiling a scan's
+  // stored hint has.
+  if (typeof body.hint === "string" && body.hint.length > HINT_MAX) return jsonError(`A hint may be at most ${HINT_MAX} characters`);
+  if (!names.every(isValidUploadName)) return jsonError("Invalid upload name");
+
+  const images = [];
+  for (const name of names) {
+    const buffer = await readUpload(name);
+    if (!buffer) return jsonError(`Upload not found: ${name}`, 404);
+    images.push({ buffer });
+  }
+  try {
+    const identification = await identifyCard(images, typeof body.hint === "string" ? body.hint : undefined);
+    return NextResponse.json({ identification });
+  } catch (e) {
+    if (e instanceof IdentifyError) return jsonError(e.message, e.status);
+    logError("identify", e);
+    return jsonError(`Identification failed: ${errorMessage(e)}`, 500);
+  }
+}

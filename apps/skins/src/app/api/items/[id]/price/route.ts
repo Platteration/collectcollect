@@ -1,0 +1,66 @@
+import { NextResponse } from "next/server";
+import { getItem, updateItem } from "@/lib/items";
+import { BodyLimitError, errorMessage, jsonError, logError, parseId, readJsonLimited } from "@collectcollect/core/http";
+import { refreshItem } from "@/lib/pricing/refresh";
+import { proceedsByMarket } from "@/lib/pricing/index";
+import { getSettings } from "@/lib/settings";
+import { createThrottle } from "@collectcollect/core/throttle";
+
+/**
+ * Each one asks every market about an item. A bulk refresh sends one per item,
+ * so the ceiling has to clear an inventory of a hundred; the markets' own
+ * limiters pace the real work, and this only stops a loop.
+ */
+export const throttle = createThrottle(120, 60_000, "price lookups");
+
+/** POST — ask every source about this item again and record what they say. */
+export async function POST(request: Request, ctx: RouteContext<"/api/items/[id]/price">) {
+  const refused = throttle.check(request);
+  if (refused) return refused;
+  const id = parseId((await ctx.params).id);
+  const item = id ? getItem(id) : null;
+  if (!item) return jsonError("Item not found", 404);
+  try {
+    const outcome = await refreshItem(item);
+    return NextResponse.json({
+      summary: outcome.snapshot.summary,
+      stored: outcome.stored,
+      // The same prices as before: nothing stored, the latest row marked as checked now.
+      unchanged: outcome.unchanged ?? false,
+      checkedAt: outcome.snapshot.checkedAt ?? null,
+      proceeds: proceedsByMarket(outcome.snapshot.summary.quotes, getSettings()),
+    });
+  } catch (e) {
+    logError("items/price", e);
+    return jsonError(`Could not price that: ${errorMessage(e)}`, 502);
+  }
+}
+
+/**
+ * PUT — set or clear a price of your own, which overrides every source.
+ *
+ * Sending null clears it and hands the item back to the market. Nothing else
+ * about the item is touched.
+ */
+export async function PUT(request: Request, ctx: RouteContext<"/api/items/[id]/price">) {
+  const id = parseId((await ctx.params).id);
+  if (!id || !getItem(id)) return jsonError("Item not found", 404);
+  let body: { manualPrice?: unknown };
+  try {
+    // A record the form sends is far under 4 KB; a runaway client cannot buffer more.
+    body = (await readJsonLimited(request, 4 * 1024)) as { manualPrice?: unknown };
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
+    return jsonError("Expected a JSON body");
+  }
+  const raw = body.manualPrice;
+  if (raw !== null && raw !== undefined) {
+    // A box the browser could not turn into a number arrives as null, which is
+    // also how "clear this" arrives — so an unusable value is refused by name
+    // rather than quietly clearing the price.
+    const n = typeof raw === "number" ? raw : Number(raw);
+    if (!Number.isFinite(n) || n < 0) return jsonError("A price has to be a number, or null to clear it");
+  }
+  const item = updateItem(id, { manualPrice: raw === null || raw === undefined ? null : Number(raw) });
+  return NextResponse.json({ item });
+}

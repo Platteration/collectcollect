@@ -1,0 +1,59 @@
+import Link from "next/link";
+import { imageSrc, money } from "@/lib/format";
+import { GAMES, type CardRecord, type PriceSummary } from "@/lib/types";
+import { Card3D } from "./Card3D";
+
+/** What a tile shows of a card: the record's identity and look, not its notes, identification or ids. */
+export type TileCard = Pick<
+  CardRecord,
+  "id" | "name" | "game" | "setName" | "cardNumber" | "year" | "quantity" | "grade" | "gradingCompany" | "condition" | "variant" | "rarity" | "accentColor" | "imagePath" | "referenceImageUrl"
+>;
+export type TilePrice = Pick<PriceSummary, "yourCopyValue" | "ungraded">;
+
+export function tileCard(card: CardRecord): TileCard {
+  const { id, name, game, setName, cardNumber, year, quantity, grade, gradingCompany, condition, variant, rarity, accentColor, imagePath, referenceImageUrl } = card;
+  return { id, name, game, setName, cardNumber, year, quantity, grade, gradingCompany, condition, variant, rarity, accentColor, imagePath, referenceImageUrl };
+}
+
+export function CardTile({ card, price, selected = false }: { card: TileCard; price: TilePrice | null; selected?: boolean }) {
+  const src = imageSrc(card, "thumb");
+  const graded = Boolean(card.grade);
+  return (
+    <Link href={`/cards/${card.id}`} className={`card-surface group flex flex-col overflow-hidden hover:shadow-md ${card.quantity === 0 ? "opacity-60" : ""} ${selected ? "ring-2 ring-amber-500" : ""}`}>
+      <div
+        className={`relative aspect-[3/4] well p-2 ${card.accentColor ? "accent-wash" : ""}`}
+        style={card.accentColor ? ({ "--accent": card.accentColor } as React.CSSProperties) : undefined}
+      >
+        <Card3D compact src={src} name={card.name} seed={card.id} grade={card.grade} condition={card.condition} gradingCompany={card.gradingCompany} variant={card.variant} rarity={card.rarity} />
+        <span className="badge absolute left-11 top-2 bg-black/70 text-white">{GAMES[card.game]}</span>
+        {card.quantity > 1 && (
+          <span className="badge absolute right-2 top-2 bg-amber-600 text-white">×{card.quantity}</span>
+        )}
+        {card.quantity === 0 && (
+          <span className="badge absolute right-2 top-2 bg-neutral-900 text-white dark:bg-white dark:text-neutral-900">Sold</span>
+        )}
+      </div>
+      <div className="flex flex-1 flex-col gap-1 p-3">
+        <div className="truncate font-display text-lg font-semibold leading-tight" title={card.name}>
+          {card.name}
+        </div>
+        <div className="truncate text-xs text-neutral-500">
+          {[card.setName, card.cardNumber ? `#${card.cardNumber}` : null, card.year].filter(Boolean).join(" · ") || "—"}
+        </div>
+        <div className="mt-auto flex items-end justify-between pt-2">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-neutral-500">
+              {graded ? `${card.gradingCompany ?? "Graded"} ${card.grade}` : `Raw · ${card.condition}`}
+            </div>
+            <div className="hero-figure text-xl">{money(price?.yourCopyValue ?? null)}</div>
+          </div>
+          {price?.ungraded && graded && (
+            <div className="text-right text-xs text-neutral-500">
+              raw {money(price.ungraded)}
+            </div>
+          )}
+        </div>
+      </div>
+    </Link>
+  );
+}

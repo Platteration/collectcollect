@@ -1,0 +1,305 @@
+@import "tailwindcss";
+
+/*
+ * Classes used by shared components live outside this app's own tree, and
+ * Tailwind only scans what it is pointed at. Without this they would be
+ * tree-shaken out of this app's stylesheet and the components would render
+ * unstyled here while looking fine next door.
+ */
+@source "../../../../packages/core/src";
+
+/*
+ * The theme is always resolved to an explicit data-theme by the inline script
+ * in the layout, so "system" never has to be expressed in CSS: one attribute
+ * decides everything, including Tailwind's dark: utilities.
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --background: #f5f0e6;
+  --foreground: #24333e;
+  --line: #c9c2b3;
+  --line-strong: #8e978f;
+  --surface: #fffaf0;
+  --surface-raised: #e9e2d3;
+  --muted: #5b6b72;
+  --tabletop-edge: #c9c2b3;
+  --tabletop-shine: rgba(255,255,255,0.7);
+}
+
+[data-theme="dark"] {
+  --background: #19232d;
+  --foreground: #f7f1e5;
+  --line: #526674;
+  --line-strong: #82949c;
+  --surface: #24323e;
+  --surface-raised: #30424f;
+  --muted: #b7c2c7;
+  --tabletop-edge: #101820;
+  --tabletop-shine: rgba(255,255,255,0.12);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-display: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.card-surface {
+  border-radius: 0.75rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: inset 0 1px 0 var(--tabletop-shine), 0 3px 0 var(--tabletop-edge);
+  /* A chart drawn inside a panel cuts its hover halo from the panel, not the ground. */
+  --chart-surface: var(--surface);
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+}
+.btn-primary {
+  @apply btn;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.btn-secondary {
+  @apply btn;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--foreground);
+}
+.btn-secondary:hover {
+  background: var(--surface-raised);
+}
+.btn-danger {
+  @apply btn;
+  border: 1px solid color-mix(in srgb, var(--chart-bad) 45%, transparent);
+  color: var(--chart-bad-text);
+  background: transparent;
+}
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--chart-bad) 12%, transparent);
+}
+.input {
+  @apply w-full rounded-lg px-3 py-2 text-sm outline-none;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--foreground);
+}
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-solid) 25%, transparent);
+}
+.label {
+  @apply mb-1 block text-xs font-medium uppercase tracking-wide;
+  color: var(--muted);
+}
+.badge {
+  @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+}
+
+:root {
+  --accent: #296f69;
+  --accent-ink: #fffaf0;
+  --accent-solid: #296f69;
+  /* What a chart sits on; a panel overrides it below, so a hover halo is always cut from its own surface. */
+  --chart-surface: var(--background);
+  --chart-grid: #e2e4e9;
+  --chart-axis: #c2c5cc;
+  --chart-muted: #83868e;
+  --chart-good: #0ca30c;
+  --chart-good-text: #006300;
+  --chart-bad: #d03b3b;
+  --chart-bad-text: #b32b2b;
+  --chart-raw: #2a78d6;
+  --chart-series-1: #2a78d6;
+  --chart-series-2: #eb6834;
+  --chart-series-3: #1baf7a;
+  --chart-series-4: #eda100;
+  --chart-series-5: #e87ba4;
+}
+
+[data-theme="dark"] {
+  --accent: #88c9c0;
+  --accent-ink: #19232d;
+  --accent-solid: #88c9c0;
+  --chart-surface: var(--background);
+  --chart-grid: rgba(255, 255, 255, 0.09);
+  --chart-axis: rgba(255, 255, 255, 0.3);
+  --chart-muted: rgba(238, 241, 245, 0.55);
+  --chart-good: #2fe08a;
+  --chart-good-text: #4ff0a1;
+  --chart-bad: #ff5f6d;
+  --chart-bad-text: #ff8189;
+  --chart-raw: #ffffff;
+  --chart-series-1: #3987e5;
+  --chart-series-2: #d95926;
+  --chart-series-3: #199e70;
+  --chart-series-4: #c98500;
+  --chart-series-5: #d55181;
+}
+
+.delta-up { color: var(--chart-good-text); }
+.delta-down { color: var(--chart-bad-text); }
+
+/*
+ * Color schemes: each picks a fresh --accent/--accent-ink/--accent-solid,
+ * nothing else — never the good/bad or categorical chart tokens above, so a
+ * gain is always green and a loss always red, whatever scheme is chosen.
+ * "teal" (above) is the default and needs no [data-scheme] rule of its own.
+ */
+[data-scheme="amber"] { --accent: #a85c04; --accent-ink: #fffaf0; --accent-solid: #a85c04; }
+[data-scheme="amber"][data-theme="dark"] { --accent: #f5b862; --accent-ink: #241300; --accent-solid: #f5b862; }
+[data-scheme="sky"] { --accent: #2f6feb; --accent-ink: #ffffff; --accent-solid: #2f6feb; }
+[data-scheme="sky"][data-theme="dark"] { --accent: #8ab4f8; --accent-ink: #0b1d33; --accent-solid: #8ab4f8; }
+[data-scheme="indigo"] { --accent: #4f46e5; --accent-ink: #ffffff; --accent-solid: #4f46e5; }
+[data-scheme="indigo"][data-theme="dark"] { --accent: #a5b4fc; --accent-ink: #1e1b3a; --accent-solid: #a5b4fc; }
+[data-scheme="violet"] { --accent: #7c3aed; --accent-ink: #ffffff; --accent-solid: #7c3aed; }
+[data-scheme="violet"][data-theme="dark"] { --accent: #c4b5fd; --accent-ink: #2e1065; --accent-solid: #c4b5fd; }
+[data-scheme="plum"] { --accent: #b23a72; --accent-ink: #ffffff; --accent-solid: #b23a72; }
+[data-scheme="plum"][data-theme="dark"] { --accent: #f0a8cf; --accent-ink: #3a0620; --accent-solid: #f0a8cf; }
+[data-scheme="copper"] { --accent: #b4552c; --accent-ink: #ffffff; --accent-solid: #b4552c; }
+[data-scheme="copper"][data-theme="dark"] { --accent: #e2946b; --accent-ink: #2a1206; --accent-solid: #e2946b; }
+[data-scheme="slate"] { --accent: #334155; --accent-ink: #ffffff; --accent-solid: #334155; }
+[data-scheme="slate"][data-theme="dark"] { --accent: #cbd5e1; --accent-ink: #0f172a; --accent-solid: #cbd5e1; }
+
+.font-display {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+}
+.hero-figure {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: proportional-nums;
+}
+
+/*
+ * Rarity is CS2's own language and it is a colour before it is a word: every
+ * item in the game sits on a coloured bar. Tiles carry the same bar, and the
+ * word is always printed too, so nothing here rests on colour alone.
+ */
+.rarity-bar {
+  background: linear-gradient(to top, var(--rarity, var(--line-strong)), color-mix(in srgb, var(--rarity, var(--line-strong)) 30%, transparent));
+}
+.rarity-wash {
+  background-image: linear-gradient(160deg, color-mix(in srgb, var(--rarity, transparent) 22%, transparent), transparent 62%);
+}
+
+/*
+ * The float bar: 0 to 1 across the five wear bands, with a marker at this
+ * item's own float. The bands are the game's, so the widths are not arbitrary
+ * — they are the ranges themselves.
+ */
+.float-track {
+  background: linear-gradient(
+    to right,
+    #4b9f4b 0% 7%,
+    #7cb342 7% 15%,
+    #e0b040 15% 38%,
+    #dd7d33 38% 45%,
+    #c0392b 45% 100%
+  );
+}
+
+/* Wells: image placeholders and progress tracks. */
+.well {
+  background-color: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.tooltip-surface {
+  background: color-mix(in srgb, var(--background) 92%, var(--foreground) 8%);
+  border: 1px solid var(--line-strong);
+  color: var(--foreground);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+@keyframes reveal-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.reveal {
+  animation: reveal-rise 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal { animation: none; }
+}
+
+/* Shared illustrated tabletop controls; chart colors and card art retain their semantics. */
+@media screen {
+  .btn-primary, .btn-secondary {
+    border-radius: 0.75rem;
+    box-shadow: 0 3px 0 var(--tabletop-edge);
+  }
+  .btn-primary:active:not(:disabled), .btn-secondary:active:not(:disabled) {
+    box-shadow: 0 1px 0 var(--tabletop-edge);
+    transform: translateY(2px);
+  }
+  .btn-primary:focus-visible, .btn-secondary:focus-visible {
+    outline: 2px solid var(--accent-solid);
+    outline-offset: 3px;
+  }
+}
+
+/* Printing the valuation: drop the app chrome, force ink on paper. */
+@media print {
+  /* Only the site chrome goes; the report's own header must print. */
+  body > header,
+  body > footer,
+  nav[aria-label="Sections"],
+  .print\:hidden {
+    display: none !important;
+  }
+  :root {
+    --background: #fff;
+    --foreground: #000;
+    --muted: #444;
+    --line: #ccc;
+    --line-strong: #888;
+    --surface: #fff;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+  main {
+    max-width: none;
+    padding: 0 0.25in;
+  }
+  .report table {
+    font-size: 11px;
+  }
+  .report tr {
+    break-inside: avoid;
+  }
+  .report thead {
+    display: table-header-group;
+  }
+}
+
+.tabbar {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.safe-x {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}

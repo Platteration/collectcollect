@@ -1,8 +1,10 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Paths are deliberately unanchored: this is a workspace, so the same artefacts
+# appear at the root and again inside every app under apps/.
 
 # dependencies
-/node_modules
-/.pnp
+node_modules/
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -11,14 +13,14 @@
 !.yarn/versions
 
 # testing
-/coverage
+coverage/
 
 # next.js
-/.next/
-/out/
+.next/
+out/
 
 # production
-/build
+build/
 
 # misc
 .DS_Store
@@ -37,11 +39,14 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# project: app data (SQLite database + uploaded photos) and Playwright output
-/data/
-/test-results/
-/playwright-report/
-/blob-report/
+# project: app data (SQLite database, uploaded photos, Markdown copy of the
+# collection) and Playwright output, at the root and inside every app
+data/
+test-results/
+playwright-report/
+blob-report/
+# what scripts/release-candidate.sh packages
+release/
 
 # editors
 .vscode/

@@ -1,43 +1,65 @@
-# Build a self-contained image; data (SQLite + photos) lives in the /data volume.
+# Build a self-contained image for one of the apps in this workspace.
+#
+#   docker build -t collectcollect .                          # the card app
+#   docker build -t collectcollect-skins --build-arg APP=skins .
+#
+# Data (SQLite, photos, and the Markdown copy) lives in the /data volume.
+ARG APP=cards
+
 FROM node:22-bookworm-slim AS build
+ARG APP
 WORKDIR /app
+# Native dependencies such as better-sqlite3 compile during npm ci.
+# Keep the compiler toolchain in this stage, out of the runtime image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+# Every workspace manifest has to be present before `npm ci`, or the install
+# resolves against a lockfile describing a tree it cannot see.
 COPY package.json package-lock.json ./
-# Install scripts are off because the one that fails here has nothing to do.
-# better-sqlite3 ships compiled Node-API binaries inside the package
-# (prebuilds/: glibc and musl, x64 and arm64), loads the one for this platform
-# when a database is opened, and sets "gypfile": false to say no build step is
-# needed. The lockfile does not record that field, so `npm ci` runs
-# `node-gyp rebuild` for it anyway: with a prebuild for this platform its
-# binding.gyp builds nothing, but gyp is Python and this image has none. The
-# only other install script on Linux is unrs-resolver's postinstall, which
-# makes sure eslint's import resolver has its platform binary, and the image
-# never lints; sharp has no install script (its binaries are optional
-# dependencies). With scripts off, a platform with no prebuild installs without
-# a binding, and the health check never opens the database, so a database is
-# opened here and a missing binding fails the build. (`next build` also happens
-# to open one today, prerendering the layout's unread-alert count; this check
-# does not depend on that.)
-RUN npm ci --ignore-scripts \
+COPY apps/cards/package.json ./apps/cards/
+COPY apps/skins/package.json ./apps/skins/
+COPY packages/core/package.json ./packages/core/
+# Then open a database, so a missing native binding fails the build: the
+# container's health check answers 200 whether or not a database opens (it
+# reports that as `database: false`), so a broken image would otherwise start.
+RUN npm ci \
   && node -e "new (require('better-sqlite3'))(':memory:').close()"
+# .dockerignore keeps every `data` directory out of the context, which is
+# load-bearing rather than tidiness: the file tracer resolves the database path
+# statically, so a data directory present at build time is packaged into the
+# standalone output and from there into this image.
 COPY . .
-# The app ships no static assets, so there is no public/ to copy in, but the
-# runtime stage copies it and COPY refuses a path that does not exist.
-RUN mkdir -p public
 ENV NEXT_TELEMETRY_DISABLED=1 BUILD_STANDALONE=1
-RUN npm run build
+RUN npm run build -w @collectcollect/${APP}
+# Not every app has static files of its own, and a COPY of a directory that is
+# not there fails the build. One that is empty costs nothing.
+RUN mkdir -p apps/${APP}/public
 
 FROM node:22-bookworm-slim AS runtime
+ARG APP
 WORKDIR /app
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 DATA_DIR=/data PORT=3000 HOSTNAME=0.0.0.0
+# Each app reads its own data directory variable, so both are set to the volume
+# and each image uses the one that is its own.
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 DATA_DIR=/data SKINS_DATA_DIR=/data PORT=3000 HOSTNAME=0.0.0.0
+ENV APP_DIR=apps/${APP}
 RUN mkdir -p /data && chown node:node /data
-COPY --from=build --chown=node:node /app/.next/standalone ./
-COPY --from=build --chown=node:node /app/.next/static ./.next/static
-COPY --from=build --chown=node:node /app/public ./public
+# Standalone output mirrors the workspace layout: shared node_modules at the
+# root, the server under the app's own path.
+COPY --from=build --chown=node:node /app/apps/${APP}/.next/standalone ./
+COPY --from=build --chown=node:node /app/apps/${APP}/.next/static ./apps/${APP}/.next/static
+COPY --from=build --chown=node:node /app/apps/${APP}/public ./apps/${APP}/public
+COPY --from=build --chown=node:node /app/packages/core/fonts/OFL.txt ./licenses/BarlowCondensed-OFL.txt
 USER node
 VOLUME ["/data"]
 EXPOSE 3000
-# No curl in the image: node can make the one request itself. The check goes
-# by address and needs no session; the proxy allows that for this path alone.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "server.js"]
+# The image has no curl; node asks the health route itself. A container that
+# stops answering is reported as unhealthy rather than merely running.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+# The app chosen at build time is read from the environment, since CMD cannot
+# see a build argument directly — but through `exec`, so node replaces the
+# shell and is what receives SIGTERM. Under a plain shell form the signal
+# stopped at the shell, and every `docker stop` waited out the full grace
+# period before killing a server that never heard it was being stopped.
+CMD ["sh", "-c", "exec node ${APP_DIR}/server.js"]

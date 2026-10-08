@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0ea5e9"/>
+      <stop offset="1" stop-color="#4f46e5"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#g)"/>
+  <!-- A float bar: the wear scale, with the tier marker where a good copy sits. -->
+  <rect x="96" y="232" width="320" height="48" rx="24" fill="rgba(255,255,255,0.28)"/>
+  <rect x="96" y="232" width="118" height="48" rx="24" fill="#ffffff"/>
+  <circle cx="214" cy="256" r="40" fill="#ffffff" stroke="#312e81" stroke-width="10"/>
+  <text x="256" y="376" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="700" font-size="88" fill="#ffffff" letter-spacing="4">CC</text>
+</svg>

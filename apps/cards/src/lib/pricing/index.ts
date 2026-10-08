@@ -1,0 +1,292 @@
+import type { CardRecord, PriceQuote, PriceSource, PriceSummary, Settings } from "../types";
+import type { CardQuery, PriceProvider } from "./types";
+import { ProviderError } from "./types";
+import { priceChartingProvider } from "./providers/pricecharting";
+import { pokemonTcgProvider } from "./providers/pokemontcg";
+import { ygoprodeckProvider } from "./providers/ygoprodeck";
+import { scryfallProvider } from "./providers/scryfall";
+import { round2 } from "./match";
+
+/** Priority order: sources listed first win when several report an ungraded price. */
+export const PROVIDERS: PriceProvider[] = [
+  priceChartingProvider,
+  pokemonTcgProvider,
+  scryfallProvider,
+  ygoprodeckProvider,
+];
+
+export function providersFor(game: CardQuery["game"]): PriceProvider[] {
+  return PROVIDERS.filter((p) => p.games.includes(game) && p.isConfigured());
+}
+
+export interface ManualPrices {
+  ungraded?: number | null;
+  graded?: Record<string, number>;
+}
+
+/** How long one source gets to answer about one card before it is given up on. */
+export const PROVIDER_TIMEOUT_MS = 20_000;
+
+/**
+ * Run every applicable provider; a failing provider becomes an error entry,
+ * never a thrown exception. Each source gets its own deadline, and a source
+ * that misses it has its request abandoned, not merely ignored: a race that
+ * left the request running kept the connection, and its timer, alive.
+ */
+export async function fetchQuotes(
+  query: CardQuery,
+  fetchImpl: typeof fetch = fetch,
+  opts: { timeoutMs?: number } = {},
+): Promise<{ quotes: PriceQuote[]; errors: PriceSummary["errors"] }> {
+  const timeoutMs = opts.timeoutMs ?? PROVIDER_TIMEOUT_MS;
+  // Each outcome carries its own provider, so a failure is attributed without
+  // lining results up against the provider list by position.
+  type Outcome = { quotes: PriceQuote[] } | { error: PriceSummary["errors"][number] };
+  const outcomes = await Promise.all(
+    providersFor(query.game).map(async (p): Promise<Outcome> => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(new ProviderError(p.id, `${p.label} did not answer within ${Math.round(timeoutMs / 1000)} seconds`)), timeoutMs);
+      try {
+        return { quotes: await p.lookup(query, fetchImpl, controller.signal) };
+      } catch (err) {
+        const cause = controller.signal.aborted ? controller.signal.reason : err;
+        return {
+          error: {
+            source: cause instanceof ProviderError ? cause.source : p.id,
+            message: cause instanceof Error ? cause.message : String(cause),
+          },
+        };
+      } finally {
+        clearTimeout(timer);
+      }
+    }),
+  );
+  const quotes: PriceQuote[] = [];
+  const errors: PriceSummary["errors"] = [];
+  for (const o of outcomes) {
+    if ("quotes" in o) quotes.push(...o.quotes);
+    else errors.push(o.error);
+  }
+  return { quotes, errors };
+}
+
+const SOURCE_PRIORITY: PriceSource[] = ["manual", "pricecharting", "pokemontcg", "scryfall", "ygoprodeck"];
+
+function manualQuote(manual: ManualPrices | undefined, fetchedAt: string): PriceQuote | null {
+  const graded = Object.fromEntries(
+    Object.entries(manual?.graded ?? {}).filter(([, v]) => Number.isFinite(v) && v > 0),
+  );
+  const ungraded = manual?.ungraded && manual.ungraded > 0 ? manual.ungraded : null;
+  if (!ungraded && Object.keys(graded).length === 0) return null;
+  return {
+    source: "manual",
+    sourceLabel: "Manual entry",
+    currency: "USD",
+    url: null,
+    matchedName: "Your own price",
+    matchedDetail: null,
+    ungraded,
+    ungradedVariants: {},
+    graded,
+    fetchedAt,
+  };
+}
+
+/** Normalize grade labels: "psa 10", "PSA10" -> "PSA 10"; "9.5" alone -> "Grade 9.5". */
+export function gradeKey(company: string | null | undefined, grade: string | null | undefined): string | null {
+  const g = (grade ?? "").trim().replace(/^grade\s*/i, "");
+  if (!g) return null;
+  const c = (company ?? "").trim().toUpperCase();
+  const digits = g.replace(/[^0-9.]/g, "");
+  // "10.0" and "9.50" are the same grades as "10" and "9.5"; a trailing zero
+  // would otherwise miss every price a source publishes.
+  const gnum = digits && Number.isFinite(Number(digits)) ? String(Number(digits)) : digits || g;
+  return c && c !== "OTHER" ? `${c} ${gnum}` : `Grade ${gnum}`;
+}
+
+/** Which keys to try, in order, when looking up a graded price for the owner's copy. */
+export function gradeLookupKeys(company: string | null | undefined, grade: string | null | undefined): string[] {
+  const primary = gradeKey(company, grade);
+  if (!primary) return [];
+  const gnum = primary.split(" ").slice(1).join(" ");
+  const keys = [primary];
+  if (!primary.startsWith("Grade ")) keys.push(`Grade ${gnum}`);
+  // PriceCharting reports grade 9 / 9.5 generically; treat a 10 from any company as comparable to PSA 10 last.
+  if (gnum === "10" && primary !== "PSA 10") keys.push("PSA 10");
+  return keys;
+}
+
+export interface OwnerCopy {
+  condition: CardRecord["condition"];
+  gradingCompany: string | null;
+  grade: string | null;
+}
+
+/** Combine quotes into the summary the UI displays. Pure: no network. */
+export function summarize(
+  quotes: PriceQuote[],
+  errors: PriceSummary["errors"],
+  settings: Settings,
+  owner: OwnerCopy,
+  manual?: ManualPrices,
+  fetchedAt = new Date().toISOString(),
+): PriceSummary {
+  const all = [...quotes];
+  const m = manualQuote(manual, fetchedAt);
+  if (m) all.unshift(m);
+
+  const byPriority = [...all].sort(
+    (a, b) => SOURCE_PRIORITY.indexOf(a.source) - SOURCE_PRIORITY.indexOf(b.source),
+  );
+  const ungradedQuote = byPriority.find((q) => q.currency === "USD" && q.ungraded);
+  const ungraded = ungradedQuote?.ungraded ?? null;
+
+  // Graded prices: a manual price wins its key outright; otherwise a key that
+  // several sources report is their average, and every source is kept so the
+  // page can show what was averaged. One source reporting a key is that source.
+  const sources = new Map<string, Array<{ source: string; price: number }>>();
+  const manualKeys = new Set<string>();
+  const contributors: string[] = [];
+  for (const q of byPriority) {
+    if (q.currency !== "USD") continue;
+    const entries = Object.entries(q.graded).filter(([, v]) => Number.isFinite(v) && v > 0);
+    if (entries.length === 0) continue;
+    if (!contributors.includes(q.sourceLabel)) contributors.push(q.sourceLabel);
+    for (const [k, v] of entries) {
+      if (!sources.has(k)) sources.set(k, []);
+      sources.get(k)!.push({ source: q.sourceLabel, price: v });
+      if (q.source === "manual") manualKeys.add(k);
+    }
+  }
+  const graded: Record<string, number> = {};
+  const gradedSources: Record<string, Array<{ source: string; price: number }>> = {};
+  for (const [k, list] of sources) {
+    // The manual quote comes first by priority, so it heads its key's list.
+    graded[k] = manualKeys.has(k) ? list[0]!.price : round2(list.reduce((sum, e) => sum + e.price, 0) / list.length);
+    gradedSources[k] = list;
+  }
+  const gradedSource = contributors.length ? contributors.join(" + ") : null;
+
+  const estimatedGraded: Record<string, number> = {};
+  if (ungraded) {
+    for (const [k, mult] of Object.entries(settings.gradeMultipliers)) {
+      if (!Object.hasOwn(graded, k)) estimatedGraded[k] = round2(ungraded * mult);
+    }
+  }
+
+  let yourCopyValue: number | null = null;
+  let yourCopyBasis = "No price available yet.";
+  const gradedOwner = Boolean(owner.grade);
+  if (gradedOwner) {
+    const keys = gradeLookupKeys(owner.gradingCompany, owner.grade);
+    const hit = keys.find((k) => k in graded);
+    if (hit) {
+      yourCopyValue = graded[hit] ?? null;
+      const behind = gradedSources[hit] ?? [];
+      yourCopyBasis =
+        behind.length > 1 && !manualKeys.has(hit)
+          ? `${hit} price, average of ${behind.length} sources (${behind.map((e) => e.source).join(" + ")}).`
+          : `${hit} price from ${gradedSource}.`;
+    } else {
+      const est = keys.find((k) => k in estimatedGraded);
+      if (est) {
+        yourCopyValue = estimatedGraded[est] ?? null;
+        yourCopyBasis = `Estimated: ungraded price × ${settings.gradeMultipliers[est]} (${est} multiplier from Settings).`;
+      } else if (ungraded) {
+        yourCopyValue = ungraded;
+        yourCopyBasis = `No graded data or multiplier for ${keys[0] ?? "this grade"}; showing the ungraded price.`;
+      }
+    }
+  } else if (ungraded) {
+    const mult = settings.conditionMultipliers[owner.condition] ?? 1;
+    yourCopyValue = round2(ungraded * mult);
+    yourCopyBasis =
+      mult === 1
+        ? `Ungraded market price from ${ungradedQuote?.sourceLabel}.`
+        : `Ungraded price × ${mult} for ${owner.condition} condition (from Settings).`;
+  }
+
+  return {
+    currency: "USD",
+    fetchedAt,
+    ungraded,
+    ungradedSource: ungradedQuote?.sourceLabel ?? null,
+    graded,
+    gradedSource,
+    estimatedGraded,
+    yourCopyValue,
+    yourCopyBasis,
+    quotes: all,
+    errors,
+    // Only when something graded was reported, so a summary with none is
+    // byte for byte what it was before the sources were kept.
+    ...(Object.keys(gradedSources).length ? { gradedSources } : {}),
+  };
+}
+
+/**
+ * What a refresh compares to decide whether it learned anything: every figure
+ * the app shows or sums, and what each source matched, but not when it was
+ * asked. Two summaries the same by this measure are the same price, and the
+ * second is a check, not a snapshot. The sources behind each graded price are
+ * not compared on their own: they are derived from the quotes, which are.
+ */
+export function sameSummary(a: PriceSummary, b: PriceSummary): boolean {
+  const project = (s: PriceSummary) =>
+    JSON.stringify({
+      ungraded: s.ungraded,
+      ungradedSource: s.ungradedSource,
+      graded: s.graded,
+      gradedSource: s.gradedSource,
+      estimatedGraded: s.estimatedGraded,
+      yourCopyValue: s.yourCopyValue,
+      yourCopyBasis: s.yourCopyBasis,
+      quotes: s.quotes.map((q) => ({ source: q.source, currency: q.currency, ungraded: q.ungraded, ungradedVariants: q.ungradedVariants, graded: q.graded, externalId: q.externalId ?? null })),
+      // A source that failed last time and answered this time is worth a row,
+      // or the page would go on showing an error that has cleared.
+      errors: s.errors,
+    });
+  return project(a) === project(b);
+}
+
+export function cardToQuery(card: Pick<CardRecord, "game" | "name" | "sport" | "setName" | "setCode" | "cardNumber" | "year" | "variant" | "manufacturer" | "externalIds">): CardQuery {
+  return {
+    game: card.game,
+    name: card.name,
+    sport: card.sport,
+    setName: card.setName,
+    setCode: card.setCode,
+    cardNumber: card.cardNumber,
+    year: card.year,
+    variant: card.variant,
+    manufacturer: card.manufacturer,
+    externalIds: card.externalIds,
+  };
+}
+
+/** Full pipeline for one card: providers -> summary. */
+export async function priceCard(
+  card: CardRecord,
+  settings: Settings,
+  fetchImpl: typeof fetch = fetch,
+): Promise<PriceSummary> {
+  const { quotes, errors } = await fetchQuotes(cardToQuery(card), fetchImpl);
+  return summarize(
+    quotes,
+    errors,
+    settings,
+    { condition: card.condition, gradingCompany: card.gradingCompany, grade: card.grade },
+    { ungraded: card.manualUngraded, graded: card.manualGraded },
+  );
+}
+
+/** External ids and reference images learned from quotes, to persist on the card. */
+export function learnFromQuotes(quotes: PriceQuote[]): { externalIds: Record<string, string>; referenceImageUrl: string | null } {
+  const externalIds: Record<string, string> = {};
+  let referenceImageUrl: string | null = null;
+  for (const q of quotes) {
+    if (q.externalId && q.source !== "manual") externalIds[q.source] = q.externalId;
+    if (!referenceImageUrl && q.referenceImageUrl) referenceImageUrl = q.referenceImageUrl;
+  }
+  return { externalIds, referenceImageUrl };
+}

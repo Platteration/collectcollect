@@ -1,0 +1,516 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fetchQuotes, gradeKey, gradeLookupKeys, learnFromQuotes, sameSummary, summarize } from "@/lib/pricing";
+import { priceChartingProvider } from "@/lib/pricing/providers/pricecharting";
+import { refreshAll, resetRefreshThrottle } from "@/lib/pricing/refresh";
+import { addSnapshot, createCard, listSnapshots, updateCard } from "@/lib/cards";
+import { openDatabase, setDb } from "@/lib/db";
+import { DEFAULT_SETTINGS, type PriceQuote, type PriceSummary } from "@/lib/types";
+
+const blank: PriceSummary = {
+  currency: "USD",
+  fetchedAt: new Date().toISOString(),
+  ungraded: null,
+  ungradedSource: null,
+  graded: {},
+  gradedSource: null,
+  estimatedGraded: {},
+  yourCopyValue: null,
+  yourCopyBasis: "",
+  quotes: [],
+  errors: [],
+};
+import { fakeFetch } from "./helpers";
+
+const quote = (over: Partial<PriceQuote>): PriceQuote => ({
+  source: "pokemontcg",
+  sourceLabel: "TCGplayer",
+  currency: "USD",
+  url: null,
+  matchedName: "x",
+  matchedDetail: null,
+  ungraded: null,
+  ungradedVariants: {},
+  graded: {},
+  fetchedAt: "2026-01-01T00:00:00.000Z",
+  ...over,
+});
+
+describe("grade keys", () => {
+  it("normalizes company + grade", () => {
+    expect(gradeKey("psa", "10")).toBe("PSA 10");
+    expect(gradeKey("BGS", "Grade 9.5")).toBe("BGS 9.5");
+    expect(gradeKey(null, "9")).toBe("Grade 9");
+    expect(gradeKey("PSA", "")).toBeNull();
+  });
+  it("lists fallbacks for lookups", () => {
+    expect(gradeLookupKeys("CGC", "10")).toEqual(["CGC 10", "Grade 10", "PSA 10"]);
+    expect(gradeLookupKeys("PSA", "9")).toEqual(["PSA 9", "Grade 9"]);
+  });
+});
+
+describe("summarize", () => {
+  it("values a raw copy from the highest-priority USD source, adjusted for condition", () => {
+    const s = summarize(
+      [quote({ source: "ygoprodeck", sourceLabel: "YGO", ungraded: 50 }), quote({ currency: "EUR", ungraded: 999 }), quote({ ungraded: 100 })],
+      [],
+      DEFAULT_SETTINGS,
+      { condition: "LP", gradingCompany: null, grade: null },
+    );
+    expect(s.ungraded).toBe(100);
+    expect(s.ungradedSource).toBe("TCGplayer");
+    expect(s.yourCopyValue).toBe(85);
+    expect(s.estimatedGraded["PSA 10"]).toBe(300);
+    expect(s.gradedSource).toBeNull();
+  });
+  it("uses real graded prices and does not estimate those grades", () => {
+    const s = summarize(
+      [quote({ source: "pricecharting", sourceLabel: "PriceCharting", ungraded: 100, graded: { "PSA 10": 900, "Grade 9": 200 } })],
+      [],
+      DEFAULT_SETTINGS,
+      { condition: "NM", gradingCompany: "PSA", grade: "9" },
+    );
+    expect(s.gradedSource).toBe("PriceCharting");
+    expect(s.yourCopyValue).toBe(200);
+    expect(s.yourCopyBasis).toContain("Grade 9");
+    expect(s.estimatedGraded).not.toHaveProperty("PSA 10");
+    expect(s.estimatedGraded["BGS 10"]).toBe(500);
+  });
+  it("falls back to an estimate for a graded copy with no graded source", () => {
+    const s = summarize([quote({ ungraded: 100 })], [], DEFAULT_SETTINGS, { condition: "NM", gradingCompany: "PSA", grade: "10" });
+    expect(s.yourCopyValue).toBe(300);
+    expect(s.yourCopyBasis).toMatch(/Estimated/);
+  });
+  it("lets manual prices override providers", () => {
+    const s = summarize(
+      [quote({ source: "pricecharting", sourceLabel: "PriceCharting", ungraded: 100, graded: { "PSA 10": 900 } })],
+      [],
+      DEFAULT_SETTINGS,
+      { condition: "NM", gradingCompany: "PSA", grade: "10" },
+      { ungraded: 120, graded: { "PSA 10": 1000 } },
+    );
+    expect(s.ungraded).toBe(120);
+    expect(s.ungradedSource).toBe("Manual entry");
+    expect(s.graded["PSA 10"]).toBe(1000);
+    expect(s.yourCopyValue).toBe(1000);
+    expect(s.quotes[0]?.source).toBe("manual");
+  });
+  it("averages a grade that two sources report, lists both behind it, and lets a manual price win its key", () => {
+    const two = [
+      quote({ source: "pricecharting", sourceLabel: "PriceCharting", ungraded: 100, graded: { "PSA 10": 900, "PSA 9": 200 } }),
+      quote({ source: "pokemontcg", sourceLabel: "TCGplayer", ungraded: 110, graded: { "PSA 10": 1000 } }),
+    ];
+    const owner = { condition: "NM" as const, gradingCompany: "PSA", grade: "10" };
+    const s = summarize(two, [], DEFAULT_SETTINGS, owner);
+    expect(s.graded).toEqual({ "PSA 10": 950, "PSA 9": 200 });
+    expect(s.gradedSources).toEqual({
+      "PSA 10": [{ source: "PriceCharting", price: 900 }, { source: "TCGplayer", price: 1000 }],
+      "PSA 9": [{ source: "PriceCharting", price: 200 }],
+    });
+    expect(s.gradedSource).toBe("PriceCharting + TCGplayer");
+    expect(s.yourCopyValue).toBe(950);
+    expect(s.yourCopyBasis).toBe("PSA 10 price, average of 2 sources (PriceCharting + TCGplayer).");
+    const manual = summarize(two, [], DEFAULT_SETTINGS, owner, { graded: { "PSA 10": 1200 } });
+    expect(manual.graded["PSA 10"]).toBe(1200);
+    expect(manual.yourCopyBasis).toBe("PSA 10 price from Manual entry + PriceCharting + TCGplayer.");
+    expect(manual.gradedSources?.["PSA 10"]?.[0]).toEqual({ source: "Manual entry", price: 1200 });
+    // Nothing graded reported: no sources field at all, so the summary is byte for byte what it was.
+    expect(summarize([quote({ ungraded: 50 })], [], DEFAULT_SETTINGS, { condition: "NM", gradingCompany: null, grade: null })).not.toHaveProperty("gradedSources");
+  });
+  it("reports nothing gracefully", () => {
+    const s = summarize([], [{ source: "pokemontcg", message: "down" }], DEFAULT_SETTINGS, { condition: "NM", gradingCompany: null, grade: null });
+    expect(s.yourCopyValue).toBeNull();
+    expect(s.errors).toHaveLength(1);
+  });
+});
+
+describe("fetchQuotes", () => {
+  it("collects provider failures as errors instead of throwing", async () => {
+    const fetchImpl = fakeFetch([["api.pokemontcg.io", { error: "boom" }, 500]]);
+    const { quotes, errors } = await fetchQuotes({ game: "pokemon", name: "Pikachu" }, fetchImpl);
+    expect(quotes).toEqual([]);
+    expect(errors[0]).toMatchObject({ source: "pokemontcg" });
+    expect(errors[0]?.message).toMatch(/HTTP 500/);
+  });
+  it("only runs providers for the card's game", async () => {
+    const fetchImpl = fakeFetch([["ygoprodeck", { data: [{ id: 1, name: "Kuriboh", card_prices: [{ tcgplayer_price: "0.50" }] }] }]]);
+    const { quotes } = await fetchQuotes({ game: "yugioh", name: "Kuriboh" }, fetchImpl);
+    expect(quotes.map((q) => q.source)).toEqual(["ygoprodeck"]);
+  });
+});
+
+describe("a source that does not answer", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("is given up on at the deadline, and its request abandoned with it", async () => {
+    vi.useFakeTimers();
+    let aborted = false;
+    const hanging = ((_url: unknown, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => { aborted = true; reject(init.signal!.reason); }))) as unknown as typeof fetch;
+    const pending = fetchQuotes({ game: "pokemon", name: "Pikachu" }, hanging);
+    await vi.advanceTimersByTimeAsync(20_000);
+    const { quotes, errors } = await pending;
+    expect(quotes).toEqual([]);
+    expect(errors).toEqual([{ source: "pokemontcg", message: expect.stringMatching(/did not answer within 20 seconds/) }]);
+    expect(aborted).toBe(true);
+    // Nothing left ticking for a request that is over.
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("clears its deadline as soon as the source answers", async () => {
+    vi.useFakeTimers();
+    await fetchQuotes({ game: "pokemon", name: "Pikachu" }, fakeFetch([["api.pokemontcg.io", { data: [] }]]));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("what makes two summaries the same price", () => {
+  it("ignores when the sources were asked, and nothing else the app shows", () => {
+    const a: PriceSummary = { ...blank, fetchedAt: "2026-01-01T00:00:00.000Z", ungraded: 5, ungradedSource: "TCGplayer", yourCopyValue: 5, yourCopyBasis: "Ungraded market price from TCGplayer.", quotes: [quote({ ungraded: 5, externalId: "base1-58", url: "https://a.example" })] };
+    const later: PriceSummary = { ...a, fetchedAt: "2026-02-01T00:00:00.000Z", recomputedAt: "2026-02-02T00:00:00.000Z", quotes: [{ ...a.quotes[0]!, fetchedAt: "2026-02-01T00:00:00.000Z", url: "https://b.example" }] };
+    expect(sameSummary(a, later)).toBe(true);
+    expect(sameSummary(a, { ...later, ungraded: 6, yourCopyValue: 6 })).toBe(false);
+    expect(sameSummary(a, { ...later, graded: { "PSA 10": 50 } })).toBe(false);
+    expect(sameSummary(a, { ...later, quotes: [{ ...later.quotes[0]!, externalId: "base1-59" }] })).toBe(false);
+    expect(sameSummary(a, { ...later, quotes: [] })).toBe(false);
+    expect(sameSummary(a, { ...later, errors: [{ source: "pricecharting", message: "down" }] })).toBe(false);
+  });
+});
+
+describe("learnFromQuotes", () => {
+  it("collects external ids and the first reference image", () => {
+    const learned = learnFromQuotes([
+      quote({ source: "manual", externalId: "ignored" }),
+      quote({ source: "pokemontcg", externalId: "base1-4", referenceImageUrl: "https://img/1" }),
+      quote({ source: "pricecharting", externalId: "99", referenceImageUrl: "https://img/2" }),
+    ]);
+    expect(learned).toEqual({ externalIds: { pokemontcg: "base1-4", pricecharting: "99" }, referenceImageUrl: "https://img/1" });
+  });
+});
+
+describe("refreshCard", () => {
+  it("does not overwrite a card's last known price when every source fails", async () => {
+    const { openDatabase, setDb } = await import("@/lib/db");
+    const { createCard, addSnapshot, listSnapshots } = await import("@/lib/cards");
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    setDb(openDatabase(":memory:"));
+    const card = createCard({ game: "pokemon", name: "Pikachu" });
+    addSnapshot(card.id, summarizeFixture(50));
+    const original = globalThis.fetch;
+    globalThis.fetch = fakeFetch([["api.pokemontcg.io", { error: "down" }, 503]]);
+    try {
+      const r = await refreshCard(card);
+      expect(r.stored).toBe(false);
+      expect(r.snapshot.summary.errors).toHaveLength(1);
+      expect(listSnapshots(card.id)).toHaveLength(1);
+      expect(listSnapshots(card.id)[0]?.summary.ungraded).toBe(50);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+describe("refreshCard without a configured source", () => {
+  it("keeps the last snapshot for a game with no price provider", async () => {
+    const { openDatabase, setDb } = await import("@/lib/db");
+    const { createCard, addSnapshot, listSnapshots } = await import("@/lib/cards");
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    setDb(openDatabase(":memory:"));
+    const card = createCard({ game: "sports", name: "Mike Trout" });
+    addSnapshot(card.id, summarizeFixture(800));
+    const r = await refreshCard(card);
+    expect(r.stored).toBe(false);
+    expect(r.snapshot.summary.errors).toEqual([]);
+    expect(listSnapshots(card.id)).toHaveLength(1);
+  });
+  it("stores the first snapshot even when it has no price", async () => {
+    const { openDatabase, setDb } = await import("@/lib/db");
+    const { createCard, listSnapshots } = await import("@/lib/cards");
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    setDb(openDatabase(":memory:"));
+    const card = createCard({ game: "sports", name: "Mike Trout" });
+    expect((await refreshCard(card)).stored).toBe(true);
+    expect(listSnapshots(card.id)).toHaveLength(1);
+  });
+});
+
+function summarizeFixture(v: number) {
+  return summarize([quote({ ungraded: v })], [], DEFAULT_SETTINGS, { condition: "NM", gradingCompany: null, grade: null });
+}
+
+describe("grade labels", () => {
+  it("reads a trailing zero as the same grade", () => {
+    expect(gradeKey("PSA", "10.0")).toBe("PSA 10");
+    expect(gradeKey("BGS", "9.50")).toBe("BGS 9.5");
+    expect(gradeKey("psa", "10")).toBe("PSA 10");
+    expect(gradeKey("Other", "9")).toBe("Grade 9");
+    expect(gradeKey(null, " ")).toBeNull();
+    // and so a "10.0" copy still finds the price sources publish as "PSA 10"
+    expect(gradeLookupKeys("CGC", "10.0")).toEqual(["CGC 10", "Grade 10", "PSA 10"]);
+  });
+});
+
+describe("refreshing a whole collection", () => {
+  beforeEach(() => {
+    setDb(openDatabase(":memory:"));
+    resetRefreshThrottle();
+  });
+
+  it("prices only the cards that have gone stale", async () => {
+    // "other" has no configured source here, so a manual price is the only
+    // price, and nothing in this test reaches the network.
+    const fresh = createCard({ game: "other", name: "Freshly priced", manualUngraded: 10 });
+    const stale = createCard({ game: "other", name: "Long forgotten", manualUngraded: 20 });
+    addSnapshot(fresh.id, { ...blank, fetchedAt: new Date().toISOString(), ungraded: 10, yourCopyValue: 10 });
+    addSnapshot(stale.id, { ...blank, fetchedAt: new Date(Date.now() - 72 * 3600e3).toISOString(), ungraded: 20, yourCopyValue: 20 });
+
+    const result = await refreshAll({ staleHours: 24 });
+    expect(result).toMatchObject({ refreshed: 1, skipped: 1, unpriced: 0 });
+    expect(result.failed).toEqual([]);
+    expect(listSnapshots(stale.id)).toHaveLength(2);
+    expect(listSnapshots(fresh.id)).toHaveLength(1);
+
+    // Everything is fresh now, so a second pass has nothing to do.
+    expect(await refreshAll({ staleHours: 24 })).toMatchObject({ refreshed: 0, skipped: 2 });
+    // With no cutoff, everything is asked about again: the card whose stored
+    // row predates manual quotes gets a new one, the card priced a moment ago
+    // finds the same prices and is only marked as checked.
+    expect(await refreshAll()).toMatchObject({ refreshed: 1, unchanged: 1, skipped: 0 });
+    expect(listSnapshots(stale.id)).toHaveLength(2);
+    expect(listSnapshots(fresh.id)).toHaveLength(2);
+  });
+
+  it("notes a check that found the same prices on the row it has, rather than storing it again", async () => {
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    const { getCard } = await import("@/lib/cards");
+    // Once the card carries the id it learned, the lookup is by id, which answers with one card rather than a list.
+    const pikachu = (market: number) => {
+      const found = { id: "base1-58", name: "Pikachu", number: "58", set: { id: "base1", name: "Base" }, tcgplayer: { prices: { normal: { market } } } };
+      return fakeFetch([["v2/cards/base1-58", { data: found }], ["api.pokemontcg.io", { data: [found] }]]);
+    };
+    const card = createCard({ game: "pokemon", name: "Pikachu", cardNumber: "58" });
+    const original = globalThis.fetch;
+    try {
+      globalThis.fetch = pikachu(5);
+      const first = await refreshCard(getCard(card.id)!);
+      expect(first.stored).toBe(true);
+      const again = await refreshCard(getCard(card.id)!);
+      expect(again).toMatchObject({ stored: false, unchanged: true });
+      const rows = listSnapshots(card.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ id: first.snapshot.id, fetchedAt: first.snapshot.fetchedAt, checkedAt: again.snapshot.checkedAt });
+      expect(Date.parse(rows[0]!.checkedAt!)).toBeGreaterThanOrEqual(Date.parse(rows[0]!.fetchedAt));
+      // A whole-collection pass counts it as a check, and treats the card as
+      // fresh from then: the check is what decides staleness, not the row's date.
+      expect(await refreshAll()).toMatchObject({ refreshed: 0, unchanged: 1, unpriced: 0, skipped: 0 });
+      const { getDb } = await import("@/lib/db");
+      getDb().prepare("UPDATE price_snapshots SET fetched_at = ? WHERE id = ?").run(new Date(Date.now() - 72 * 3600e3).toISOString(), first.snapshot.id);
+      resetRefreshThrottle();
+      expect(await refreshAll({ staleHours: 24 })).toMatchObject({ refreshed: 0, unchanged: 0, skipped: 1 });
+      // A move is a new fact, and gets a row of its own; the checked one keeps
+      // its note, which the whole-collection pass above brought forward.
+      const checked = listSnapshots(card.id)[0]?.checkedAt;
+      expect(Date.parse(checked!)).toBeGreaterThanOrEqual(Date.parse(rows[0]!.checkedAt!));
+      globalThis.fetch = pikachu(6);
+      expect((await refreshCard(getCard(card.id)!)).stored).toBe(true);
+      const after = listSnapshots(card.id);
+      expect(after).toHaveLength(2);
+      expect(after[0]?.checkedAt).toBeUndefined();
+      expect(after[1]?.checkedAt).toBe(checked);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("stores the first lookup after an edit revalued the latest snapshot in place, then checks", async () => {
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    const { getCard } = await import("@/lib/cards");
+    // No source prices "other", so the manual price is the whole answer and nothing reaches the network.
+    const card = createCard({ game: "other", name: "Edited by hand", manualUngraded: 100 });
+    expect((await refreshCard(getCard(card.id)!)).stored).toBe(true);
+    // The edit revalues the stored row at once (its recomputedAt says so)...
+    updateCard(card.id, { manualUngraded: 250 });
+    expect(listSnapshots(card.id)).toHaveLength(1);
+    expect(listSnapshots(card.id)[0]?.summary).toMatchObject({ yourCopyValue: 250, recomputedAt: expect.any(String) });
+    // ...and the next lookup is a fetch of its own, not a check of a derived row.
+    expect(await refreshCard(getCard(card.id)!)).toMatchObject({ stored: true });
+    expect(listSnapshots(card.id).map((s) => s.summary.yourCopyValue)).toEqual([250, 250]);
+    // From then on the same price is a check again.
+    expect(await refreshCard(getCard(card.id)!)).toMatchObject({ stored: false, unchanged: true });
+    expect(listSnapshots(card.id)).toHaveLength(2);
+  });
+
+  it("runs one whole-collection pass at a time", async () => {
+    createCard({ game: "other", name: "Only one at once", manualUngraded: 10 });
+    const { BusyError } = await import("@collectcollect/core/gate");
+    const first = refreshAll();
+    // The second caller is told, not queued: the pass it wants is the one running.
+    await expect(refreshAll()).rejects.toBeInstanceOf(BusyError);
+    expect(await first).toMatchObject({ refreshed: 1 });
+    // And the gate opens again once the first is done: the pass runs, and
+    // finds the same manual price it stored a moment ago.
+    expect(await refreshAll()).toMatchObject({ refreshed: 0, unchanged: 1 });
+  });
+
+  it("records the first look even when nothing has a price for the card", async () => {
+    const card = createCard({ game: "other", name: "Nothing knows this card" });
+    expect(await refreshAll({ staleHours: 24 })).toMatchObject({ refreshed: 1, unpriced: 0 });
+    // A card with no history at all gets its "we looked, and found nothing"
+    // snapshot, which is what the card page explains.
+    expect(listSnapshots(card.id)).toHaveLength(1);
+    expect(listSnapshots(card.id)[0]?.summary.yourCopyValue).toBeNull();
+  });
+
+  it("waits out the window before trying a card that came back empty", async () => {
+    const card = createCard({ game: "other", name: "Was priced once", manualUngraded: 30 });
+    addSnapshot(card.id, { ...blank, fetchedAt: new Date(Date.now() - 72 * 3600e3).toISOString(), ungraded: 30, yourCopyValue: 30 });
+    // The manual price goes away, so the next look finds nothing.
+    updateCard(card.id, { manualUngraded: null });
+
+    const first = await refreshAll({ staleHours: 24 });
+    expect(first).toMatchObject({ refreshed: 0, unpriced: 1, skipped: 0 });
+    // The card keeps its last known value rather than being zeroed out.
+    expect(listSnapshots(card.id)).toHaveLength(1);
+    expect(listSnapshots(card.id)[0]?.summary.yourCopyValue).toBe(30);
+    // Its stored snapshot is still stale, but it was just tried, so it waits.
+    expect(await refreshAll({ staleHours: 24 })).toMatchObject({ refreshed: 0, unpriced: 0, skipped: 1 });
+  });
+});
+
+describe("prices in another currency", () => {
+  const quote = (over: Partial<PriceQuote>): PriceQuote => ({
+    source: "scryfall",
+    sourceLabel: "Scryfall",
+    currency: "USD",
+    url: null,
+    matchedName: "Card",
+    matchedDetail: null,
+    ungraded: null,
+    ungradedVariants: {},
+    graded: {},
+    fetchedAt: "2026-01-01T00:00:00.000Z",
+    ...over,
+  });
+
+  it("are left out of both halves of the summary", () => {
+    const owner = { condition: "NM" as const, gradingCompany: null, grade: null };
+    const summary = summarize(
+      [
+        quote({ currency: "EUR", ungraded: 90, graded: { "PSA 10": 900 }, sourceLabel: "Cardmarket" }),
+        quote({ currency: "USD", ungraded: 100, sourceLabel: "TCGplayer" }),
+      ],
+      [],
+      DEFAULT_SETTINGS,
+      owner,
+    );
+    expect(summary.ungraded).toBe(100);
+    expect(summary.ungradedSource).toBe("TCGplayer");
+    // The euro graded price is not folded into a dollar summary.
+    expect(summary.graded).toEqual({});
+    expect(summary.gradedSource).toBeNull();
+    // ...so the PSA 10 figure shown is an estimate off the dollar price.
+    expect(summary.estimatedGraded["PSA 10"]).toBe(300);
+  });
+
+  it("still says so when every source quoted another currency", () => {
+    const owner = { condition: "NM" as const, gradingCompany: null, grade: null };
+    const summary = summarize([quote({ currency: "EUR", ungraded: 90 })], [], DEFAULT_SETTINGS, owner);
+    expect(summary.ungraded).toBeNull();
+    expect(summary.yourCopyValue).toBeNull();
+    expect(summary.quotes).toHaveLength(1);
+  });
+});
+
+describe("what PriceCharting refuses to answer with", () => {
+  it("passes its own error message through", async () => {
+    process.env.PRICECHARTING_TOKEN = "t";
+    try {
+      const fetchImpl = fakeFetch([["pricecharting.com", { status: "error", "error-message": "invalid token" }]]);
+      await expect(priceChartingProvider.lookup({ game: "pokemon", name: "Charizard" }, fetchImpl)).rejects.toThrow(/invalid token/);
+    } finally {
+      delete process.env.PRICECHARTING_TOKEN;
+    }
+  });
+
+  it("refuses a best match that is not plausibly the card", async () => {
+    process.env.PRICECHARTING_TOKEN = "t";
+    try {
+      const fetchImpl = fakeFetch([
+        [
+          "pricecharting.com",
+          { status: "success", products: [{ id: "1", "product-name": "Garden Hose", "console-name": "Hardware", "loose-price": 1200 }] },
+        ],
+      ]);
+      expect(await priceChartingProvider.lookup({ game: "pokemon", name: "Charizard", setName: "Base Set" }, fetchImpl)).toEqual([]);
+    } finally {
+      delete process.env.PRICECHARTING_TOKEN;
+    }
+  });
+});
+
+describe("what a refresh leaves alone", () => {
+  it("learns a provider id without counting it as an edit, so the collection keeps its order", async () => {
+    setDb(openDatabase(":memory:"));
+    const { getDb } = await import("@/lib/db");
+    const { getCard, listCards } = await import("@/lib/cards");
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    const a = createCard({ game: "pokemon", name: "Pikachu", cardNumber: "58" });
+    const b = createCard({ game: "pokemon", name: "Bulbasaur", cardNumber: "44" });
+    getDb().prepare("UPDATE cards SET updated_at = ? WHERE id = ?").run("2026-01-01T00:00:00.000Z", a.id);
+    getDb().prepare("UPDATE cards SET updated_at = ? WHERE id = ?").run("2026-01-02T00:00:00.000Z", b.id);
+    const original = globalThis.fetch;
+    globalThis.fetch = fakeFetch([
+      ["api.pokemontcg.io", { data: [{ id: "base1-58", name: "Pikachu", number: "58", set: { id: "base1", name: "Base" }, images: { large: "https://img.example/58.png" }, tcgplayer: { prices: { normal: { market: 5 } } } }] }],
+    ]);
+    try {
+      const first = await refreshCard(getCard(a.id)!);
+      expect(first.stored).toBe(true);
+      expect(first.card.externalIds).toEqual({ pokemontcg: "base1-58" });
+      expect(first.card.referenceImageUrl).toBe("https://img.example/58.png");
+      expect(getCard(a.id)?.updatedAt).toBe("2026-01-01T00:00:00.000Z");
+      expect(listCards().map((c) => c.id)).toEqual([b.id, a.id]);
+      const again = await refreshCard(getCard(a.id)!);
+      expect(again.card.externalIds).toEqual({ pokemontcg: "base1-58" });
+      expect(getCard(a.id)?.updatedAt).toBe("2026-01-01T00:00:00.000Z");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("stores nothing over a card's last price when the best answer is not plausibly the card", async () => {
+    setDb(openDatabase(":memory:"));
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    const card = createCard({ game: "pokemon", name: "Pikachu", cardNumber: "58", setName: "Base" });
+    addSnapshot(card.id, summarizeFixture(50));
+    const original = globalThis.fetch;
+    globalThis.fetch = fakeFetch([
+      ["api.pokemontcg.io", { data: [{ id: "swsh4-44", name: "Pikachu VMAX", number: "44", set: { id: "swsh4", name: "Vivid Voltage" }, tcgplayer: { prices: { holofoil: { market: 30 } } } }] }],
+    ]);
+    try {
+      const r = await refreshCard(card);
+      expect(r.stored).toBe(false);
+      expect(listSnapshots(card.id)).toHaveLength(1);
+      expect(listSnapshots(card.id)[0]?.summary.ungraded).toBe(50);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("stores nothing over a Magic card's last price when Scryfall's closest card is not the one asked about", async () => {
+    setDb(openDatabase(":memory:"));
+    const { refreshCard } = await import("@/lib/pricing/refresh");
+    const card = createCard({ game: "mtg", name: "Lightning Bolt" });
+    addSnapshot(card.id, { ...summarizeFixture(3), fetchedAt: new Date(Date.now() - 72 * 3600e3).toISOString() });
+    const original = globalThis.fetch;
+    globalThis.fetch = fakeFetch([
+      [/cards\/named/, { id: "h", name: "Lightning Helix", set: "rav", set_name: "Ravnica: City of Guilds", collector_number: "213", prices: { usd: "1.00" } }],
+    ]);
+    try {
+      const r = await refreshCard(card);
+      expect(r.stored).toBe(false);
+      expect(listSnapshots(card.id)).toHaveLength(1);
+      expect(listSnapshots(card.id)[0]?.summary.ungraded).toBe(3);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});

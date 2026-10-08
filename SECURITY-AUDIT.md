@@ -8,6 +8,8 @@ A dedicated security pass, separate from and later than the review in `REVIEW.md
 
 Every finding below was fixed on `claude/repo-review-security-baiyud` in c82d8f5, each with a regression test that was checked by reverting the fix and confirming the test fails. The findings are kept as written so the reasoning behind each change stays with it.
 
+**Since the merge into the workspace (2026-10-08).** The code now lives in `apps/cards` and `packages/core`, so the paths below are as they were. Each fix was carried over or met by the workspace's own, with one decision taken the other way: **L2-2**. This branch let the right password through any lockout and charged each wrong guess a doubling delay instead; but the delay is per request, so guesses sent in parallel each wait out their own, and the guessing rate is bounded only by concurrency. The workspace's limiter reserves every attempt before the password is checked and refuses all of them past eight a minute per client, right password included, which bounds guessing at eight a minute. With no proxy declared every caller is one client, so a stranger on the network can keep the owner out for a minute at a time; with `TRUST_PROXY` the client is the entry the proxy wrote (L2-1's fix, kept), and strangers have buckets of their own. **L3-2**: an archive may inflate to four times the 64 MB upload ceiling, rather than to the ceiling itself, so a real collection at the ceiling still restores; the restore is rate limited, six a minute.
+
 ## Findings
 
 ### L1-1 · high — Every enum whitelist is an `in`/bare-index lookup, so `__proto__` passes validation and one POST permanently 500s every page

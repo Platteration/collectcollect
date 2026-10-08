@@ -1,0 +1,190 @@
+import fs from "node:fs";
+import pkg from "../package.json";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { closeDatabase, databaseFile, openDatabase, setDb } from "@/lib/db";
+import { seedRedline } from "./helpers";
+
+async function read<T>(res: Response): Promise<T> {
+  return (await res.json()) as T;
+}
+
+describe("refreshing prices over HTTP", () => {
+  beforeEach(async () => {
+    setDb(openDatabase(":memory:"));
+    (await import("@/app/api/prices/refresh/route")).throttle.reset();
+  });
+
+  it("refuses a stale window that is not a number of hours", async () => {
+    const { POST } = await import("@/app/api/prices/refresh/route");
+    for (const stale of ["", "abc", "-1"]) {
+      const res = await POST(new Request(`http://localhost/api/prices/refresh?stale=${encodeURIComponent(stale)}`, { method: "POST" }));
+      expect(res.status, JSON.stringify(stale)).toBe(400);
+    }
+  });
+
+  it("says a refresh is already running rather than starting another", async () => {
+    const { POST } = await import("@/app/api/prices/refresh/route");
+    const { refreshAll } = await import("@/lib/pricing/refresh");
+    seedRedline();
+    // Whatever the first pass does against the network, the second caller is
+    // answered before it, with a 409.
+    const first = refreshAll({ fetchImpl: (async () => new Response("{}", { status: 503 })) as unknown as typeof fetch });
+    const second = await POST(new Request("http://localhost/api/prices/refresh", { method: "POST" }));
+    expect(second.status).toBe(409);
+    await first;
+  });
+
+  it("stops a runaway client after six in a minute", async () => {
+    const { POST } = await import("@/app/api/prices/refresh/route");
+    for (let i = 0; i < 6; i++) await POST(new Request("http://localhost/api/prices/refresh?stale=-1", { method: "POST" }));
+    const seventh = await POST(new Request("http://localhost/api/prices/refresh?stale=-1", { method: "POST" }));
+    expect(seventh.status).toBe(429);
+  });
+});
+
+describe("the routes the README documents and nothing in the app calls", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("lists every sale with what they realised", async () => {
+    const { recordSale } = await import("@/lib/sales");
+    const { seedCase } = await import("./helpers");
+    const item = seedCase({ quantity: 3, purchasePrice: 1 });
+    recordSale(item.id, { quantity: 2, unitPrice: 4, fees: 0.5 });
+    const { GET } = await import("@/app/api/sales/route");
+    const body = await read<{ sales: Array<{ quantity: number }>; realized: { sales: number; gain: number } }>(await GET());
+    expect(body.sales).toHaveLength(1);
+    // 2 × $4 less $0.50 of fees, against $2 of cost.
+    expect(body.realized).toMatchObject({ sales: 1, gain: 5.5 });
+  });
+
+  it("hands back an item's price history, newest first, and a 404 for an item that is not there", async () => {
+    const { addSnapshot } = await import("@/lib/items");
+    const item = seedRedline();
+    const summary = { currency: "USD" as const, market: 10, marketSource: "Skinport", yourCopyValue: 10, yourCopyBasis: "x", quotes: [], errors: [] };
+    addSnapshot(item.id, { ...summary, fetchedAt: "2026-01-01T00:00:00.000Z" });
+    addSnapshot(item.id, { ...summary, market: 12, yourCopyValue: 12, fetchedAt: "2026-02-01T00:00:00.000Z" });
+    const { GET } = await import("@/app/api/items/[id]/prices/route");
+    const ctx = (id: string) => ({ params: Promise.resolve({ id }) }) as never;
+    const body = await read<{ snapshots: Array<{ summary: { yourCopyValue: number } }> }>(await GET(new Request("http://localhost/x"), ctx(String(item.id))));
+    expect(body.snapshots.map((s) => s.summary.yourCopyValue)).toEqual([12, 10]);
+    expect((await GET(new Request("http://localhost/x"), ctx("999"))).status).toBe(404);
+    expect((await GET(new Request("http://localhost/x"), ctx("abc"))).status).toBe(404);
+  });
+
+  it("takes an item in, deciding for itself whether it joins a stack", async () => {
+    const { POST } = await import("@/app/api/items/intake/route");
+    const post = (body: unknown) => POST(new Request("http://localhost/api/items/intake", { method: "POST", body: JSON.stringify(body) }));
+    const first = await post({ marketHashName: "Clutch Case", category: "case", quantity: 2, purchasePrice: 1 });
+    expect(first.status).toBe(201);
+    expect((await read<{ result: string }>(first)).result).toBe("created");
+    const second = await post({ marketHashName: "Clutch Case", category: "case", quantity: 3, purchasePrice: 1.5 });
+    expect(second.status).toBe(200);
+    expect(await read<{ result: string; item: { quantity: number } }>(second)).toMatchObject({ result: "merged", item: { quantity: 5 } });
+    expect((await post({ category: "case" })).status).toBe(400);
+    expect((await POST(new Request("http://localhost/api/items/intake", { method: "POST", body: "{" }))).status).toBe(400);
+  });
+});
+
+describe("the health check", () => {
+  it("answers without opening an inventory", async () => {
+    const { GET } = await import("@/app/api/health/route");
+    const body = await read<{ ok: boolean; app: string; database: boolean; scheduler: { running: boolean } }>(await GET());
+    expect(body.ok).toBe(true);
+    expect(body.app).toBe("collectcollect-skins");
+    // Exactly these keys: the route answers without a session and from any
+    // Host, so a data path, an environment value or a count added here would
+    // be handed to anyone who can reach the port.
+    expect(Object.keys(body).sort()).toEqual(["app", "database", "ok", "scheduler", "version"]);
+    expect((body as unknown as { version: string }).version).toBe(pkg.version);
+    expect(typeof body.database).toBe("boolean");
+    expect(body.scheduler.running).toBe(false);
+    // It answers anyone, so it says nothing about where the inventory lives
+    // or what last went wrong.
+    expect(body).not.toHaveProperty("dataDir");
+    expect(body.scheduler).not.toHaveProperty("lastError");
+  });
+
+  it("says the database is not ok when it is there but cannot be opened, and ok once it can", async () => {
+    const { GET } = await import("@/app/api/health/route");
+    const health = async () => (await read<{ ok: boolean; database: boolean }>(await GET())).database;
+    fs.mkdirSync(process.env.SKINS_DATA_DIR!, { recursive: true });
+    setDb(openDatabase(databaseFile()));
+    expect(await health()).toBe(true);
+    // A restore journal nothing can replay: the file exists, and every
+    // request against it fails. "Database ok" has to mean a query ran.
+    closeDatabase();
+    const journal = `${databaseFile()}.restore-journal.json`;
+    fs.writeFileSync(journal, JSON.stringify({ version: 2 }));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await health()).toBe(false);
+    expect(error).toHaveBeenCalledWith("[health]", expect.stringMatching(/recovery journal is invalid/));
+    error.mockRestore();
+    fs.rmSync(journal);
+    expect(await health()).toBe(true);
+    closeDatabase();
+  });
+});
+
+describe("pricing one item over HTTP", () => {
+  it("is throttled like any other expensive route", async () => {
+    setDb(openDatabase(":memory:"));
+    const { POST, throttle } = await import("@/app/api/items/[id]/price/route");
+    throttle.reset();
+    const ask = () => POST(new Request("http://localhost/x", { method: "POST" }), { params: Promise.resolve({ id: "999" }) } as never);
+    for (let i = 0; i < 120; i++) expect((await ask()).status).toBe(404);
+    const refused = await ask();
+    expect(refused.status).toBe(429);
+    expect(refused.headers.get("Retry-After")).toBeTruthy();
+    throttle.reset();
+  });
+});
+
+describe("reading a Steam inventory over HTTP", () => {
+  beforeEach(async () => {
+    setDb(openDatabase(":memory:"));
+    (await import("@/app/api/steam/import/route")).throttle.reset();
+  });
+
+  it("stops a runaway client after six reads in a minute, before asking Steam", async () => {
+    const { POST } = await import("@/app/api/steam/import/route");
+    const ask = () => POST(new Request("http://localhost/api/steam/import", { method: "POST", body: JSON.stringify({ steamId: "" }) }));
+    for (let i = 0; i < 6; i++) expect((await ask()).status).toBe(400);
+    expect((await ask()).status).toBe(429);
+  });
+});
+
+describe("bodies a runaway client could grow without limit", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  /** One byte over is enough: the limit is on bytes read, not on what the JSON means. */
+  const oversized = (limit: number) => JSON.stringify({ pad: "x".repeat(limit) });
+  const send = (url: string, body: string, method = "POST") => new Request(url, { method, headers: { "content-type": "application/json" }, body });
+
+  it("refuses a body over the route's limit with a 413 that names the limit, on every JSON route", async () => {
+    const item = seedRedline();
+    const ctx = { params: Promise.resolve({ id: String(item.id) }) } as never;
+    (await import("@/app/api/steam/import/route")).throttle.reset();
+    (await import("@/app/api/items/[id]/price/route")).throttle.reset();
+    (await import("@/lib/backup")).restoreThrottle.reset();
+    const routes: Array<{ name: string; limit: number; run: (body: string) => Promise<Response> }> = [
+      { name: "items", limit: 64 * 1024, run: async (b) => (await import("@/app/api/items/route")).POST(send("http://localhost/api/items", b)) },
+      { name: "items/intake", limit: 64 * 1024, run: async (b) => (await import("@/app/api/items/intake/route")).POST(send("http://localhost/api/items/intake", b)) },
+      { name: "items/[id]", limit: 64 * 1024, run: async (b) => (await import("@/app/api/items/[id]/route")).PATCH(send(`http://localhost/api/items/${item.id}`, b, "PATCH"), ctx) },
+      { name: "items/[id]/price", limit: 4 * 1024, run: async (b) => (await import("@/app/api/items/[id]/price/route")).PUT(send(`http://localhost/api/items/${item.id}/price`, b, "PUT"), ctx) },
+      { name: "items/[id]/sales", limit: 16 * 1024, run: async (b) => (await import("@/app/api/items/[id]/sales/route")).POST(send(`http://localhost/api/items/${item.id}/sales`, b), ctx) },
+      { name: "items/[id]/acquisitions", limit: 16 * 1024, run: async (b) => (await import("@/app/api/items/[id]/acquisitions/route")).POST(send(`http://localhost/api/items/${item.id}/acquisitions`, b), ctx) },
+      { name: "settings", limit: 64 * 1024, run: async (b) => (await import("@/app/api/settings/route")).PUT(send("http://localhost/api/settings", b, "PUT")) },
+      { name: "backup/replaced", limit: 4 * 1024, run: async (b) => (await import("@/app/api/backup/replaced/route")).POST(send("http://localhost/api/backup/replaced", b)) },
+      { name: "steam/import", limit: 4 * 1024, run: async (b) => (await import("@/app/api/steam/import/route")).POST(send("http://localhost/api/steam/import", b)) },
+    ];
+    for (const route of routes) {
+      const res = await route.run(oversized(route.limit));
+      expect(res.status, route.name).toBe(413);
+      expect((await read<{ error: string }>(res)).error, route.name).toBe(`Request body exceeds the ${route.limit} byte limit`);
+    }
+    // Under the limit, the body is read as before.
+    const { POST } = await import("@/app/api/items/intake/route");
+    const fine = await POST(send("http://localhost/api/items/intake", JSON.stringify({ marketHashName: "Chroma Case", category: "case", quantity: 1 })));
+    expect(fine.status).toBe(201);
+  });
+});

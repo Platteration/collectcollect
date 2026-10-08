@@ -4,7 +4,7 @@ A personal cataloging app for trading cards: Pokémon, Yu-Gi-Oh!, Magic: The Gat
 
 Snap a photo of a card and CollectCollect:
 
-1. **Identifies it** with Claude's vision model: game, name, set, collector number, year, rarity, printing variant (holo, 1st edition, refractor, autograph…) and, if it's in a slab, the grading company, grade and cert number.
+1. **Identifies it** with Claude's vision model: game, name, set, collector number, year, rarity, printing variant (holo, 1st edition, refractor, autograph…) and, if it's in a slab, the grading company, grade and cert number; it also reads the centering as border ratios when the photo shows them.
 2. **Looks up the going rate** for an **ungraded (raw)** copy and for **graded** copies (PSA / BGS / CGC / SGC) from live price sources.
 3. **Keeps it in your collection** with quantity, condition or grade, purchase price, notes and a price history, and totals up what your collection is worth.
 4. **Shows your portfolio** the way a brokerage app would: one headline number for the whole collection (valued at the grade or condition you recorded for each copy), the change over 1W / 1M / 3M / 1Y / all time, a value-over-time chart you can scrub, your total return against what you paid, the split by game, and your top holdings. Each card page has its own value chart and return.
@@ -14,7 +14,8 @@ Snap a photo of a card and CollectCollect:
 
 | Source | Games | Key | What it provides |
 | --- | --- | --- | --- |
-| [PriceCharting](https://www.pricecharting.com/api-documentation) | all | `PRICECHARTING_TOKEN` (paid) | Ungraded **and graded** prices (PSA 10, Grade 9/9.5, BGS 10, CGC 10, SGC 10) |
+| [PriceCharting](https://www.pricecharting.com/api-documentation) | all | `PRICECHARTING_TOKEN` (paid) | Ungraded **and graded** prices (PSA 10, Grade 7–9.5, BGS 10 and BGS 10 Black Label, CGC 10 and CGC 10 Pristine, SGC 10, TAG 10), asked one call a second |
+| [PSA Public API](https://www.psacard.com/publicapi) | all | `PSA_API_TOKEN` (free account; PSA approves API access) | A graded card's grade, label, population and PSA's own scans from its cert number; no prices |
 | [Pokémon TCG API](https://pokemontcg.io) | Pokémon | optional `POKEMONTCG_API_KEY` | TCGplayer market price per printing (normal / holo / reverse / 1st ed.), Cardmarket EUR |
 | [Scryfall](https://scryfall.com/docs/api) | Magic | none | USD / EUR, foil and non-foil |
 | [YGOPRODeck](https://ygoprodeck.com/api-guide/) | Yu-Gi-Oh! | none | TCGplayer, eBay, Cardmarket, per-set price |
@@ -25,44 +26,64 @@ The first four also supply set checklists for completion tracking, except PriceC
 For each card the app shows:
 
 - **Ungraded (raw NM)** market price and where it came from.
-- **Graded copies**: real graded prices when a source has them (PriceCharting or your manual entry). Grades with no real data are shown as **estimates** (`est.`) computed as *ungraded price × multiplier*; the multipliers live in Settings and default to conservative round numbers, so tune them per your experience.
+- **Graded copies**: real graded prices when a source has them (PriceCharting or your manual entry). Grades with no real data are shown as **estimates** (`est.`) computed as *ungraded price × multiplier*; the multipliers live in Settings and default to conservative round numbers, so tune them per your experience (TAG 10 and TAG 9 are in the defaults for a new install; an existing Settings keeps its own rows, so add them there to estimate TAG grades). When more than one source reports the same grade, the figure shown is their average and the card page lists each source behind it; a price you enter yourself still wins its grade outright. Today PriceCharting is the only source of graded prices, so the average appears once a second one is wired in.
 - **Your copy**: the value of the specific copy you own. A PSA 9 uses the PSA 9 / Grade 9 price; a raw Lightly Played copy uses the ungraded price × the LP condition multiplier.
 
-Every refresh stores a snapshot, so a card's detail page shows how its price has moved and the portfolio chart fills in. A refresh that returns no price (source down, no source configured for that game, no match) is reported but never stored over a card's last known value.
+A refresh stores a snapshot when anything about the price changed, so a card's detail page shows how its price has moved and the portfolio chart fills in; one that finds the same prices only notes when it checked, so a card refreshed daily for a year does not carry a year of identical rows. A refresh that returns no price (source down, no source configured for that game, no match) is reported but never stored over a card's last known value.
 
 **Keeping history flowing.** The server re-prices any card whose latest snapshot is older than `AUTO_REFRESH_HOURS` (default 24, set 0 to disable) once an hour while it is running, and the Portfolio page has a *Refresh all prices* button. The min/max curves need a few refreshes before the timing verdict says anything stronger than "not enough history yet".
 
-**Condition from the photo.** Identification also reports centering, corners, edges and surface, plus a conservative-to-optimistic estimate of the 10-point grade a raw card would likely receive and a caveat naming what the photo could not show. That estimate seeds the card's raw condition when you save it, and prices a "likely outcome" line in the grading outlook. It is a first look, not a prediction of what a grader would return.
+**Condition from the photo.** Identification also reports centering, corners, edges and surface, plus a conservative-to-optimistic estimate of the 10-point grade a raw card would likely receive and a caveat naming what the photo could not show. That estimate seeds the card's raw condition when you save it, and prices a "likely outcome" line in the grading outlook. The centering is also read as border ratios (left/right and top/bottom, front and back when visible) and seeds the card's centering fields. It is a first look, not a prediction of what a grader would return.
 
-**Grading plans.** Each raw card carries a plan: undecided, plan to grade, at the grader, or keeping raw. A card is flagged **Ready** when the timing verdict is good and its upside after the fee clears the thresholds in Settings (default $40 and 50% of the raw price). The portfolio page counts ready cards, totals their upside, and lets you filter by plan; when a card comes back from the grader, edit it and enter the grade.
+**Grading plans.** Each raw card carries a plan: undecided, plan to grade, at the grader, or keeping raw. A card is flagged **Ready** when the timing verdict is good and its upside after the fee clears the thresholds in Settings (default $40 and 50% of the raw price). The portfolio page counts ready cards, totals their upside, and lets you filter by plan; when a card comes back from the grader, edit it and enter the grade, or record it on the submission page with its cert number.
 
 **Submissions.** `/submissions` groups raw cards into a grading batch. Adding a card captures what it is worth raw and what gem mint would fetch at that moment; marking the batch sent moves those cards to "at the grader"; entering the grades that came back applies each grade to its card, so it is valued as a graded copy from then on, and books the batch's net outcome (value returned less raw value in less fees). Per-card lines show which cards paid for themselves and which did not, which is the feedback that makes the timing verdict worth trusting.
 
+**Grading reports and centering.** A graded card's page links to the grading company's public report for its cert number: PSA, CGC, TAG, ACE and AGS by the cert itself, Beckett and SGC to their lookup pages. With `PSA_API_TOKEN` set, *Look up on PSA* fills the grade, label, population and PSA's own front and back scans from PSA's record (shown from PSA's site, never stored here), and can fill the card's blank set, number and year. For every other company, and for PSA without a token, *Enter the report by hand* takes what the report prints: the subgrades (four for Beckett, CGC and ACE, eight for AGS), TAG's 1000-point score with its centering, corners, edges and surface breakdown, the population, and the centering as the report writes it ("54L/46R 49T/51B"). Nothing is fetched from any company's website; TAG's terms forbid it, and the others offer no API. The report and the centering are kept with the card, written to its Markdown file, and come back from a restore.
+
+Centering is recorded on every card, raw or graded, as border ratios: front and back, left/right and top/bottom, typed in the way a grader writes them, taken from a report, or read from the photo. Each company publishes how far off a card may be at each grade, and the card page says how far the measured centering lets it grade with each ("Centering allows up to PSA 9 · BGS 9 · …"). Those limits were taken from guides quoting the published standards and are marked approximate; check the company's page before sending a card in. The 3D view shifts the print by the measured centering.
+
 **Scan mode.** `/scan` is for working through a binder or a stack. Shoot one card at a time with the camera, or drop in a batch of photos. Each shot runs through upload, identification and saving on its own, two at a time, and a card that matches something you already own is merged as an extra copy automatically. Anything the model was less than 80% sure of, or that matches more than one card you own, is set aside for review instead of being saved unattended.
 
-**Duplicates.** Saving a card that matches one you already have (same game and name, with the same number or set) offers to add it as another copy instead.
+**Duplicates.** Saving a card that matches one you already have (same game and name, with the same number or set) offers to add it as another copy instead. A copy only joins a row it is interchangeable with: the same grade, grading company and cert number (two slabs are two objects), and the same variant, language and condition, since each of those is valued differently. Anything else is set aside for a decision rather than merged.
 
-**Grading outlook math.** *max* is the PSA 10 price (real if a source reports it, otherwise ungraded × the PSA 10 multiplier); *min* is the PSA 8 / Grade 8 price on the same basis, falling back to the raw price; *upside* is max − raw − grading fee (Settings). "Good time to grade" means today's upside is within 10% of the highest upside in the card's history and positive.
+**When a value changes.** Recording a grade, a condition or a price of your own, or changing the multipliers in Settings, revalues the card at once from the prices already fetched; nothing waits for the next refresh. A refresh that learns which product a source matched remembers it without counting as an edit, so refreshing the whole collection does not reorder it. If a source matched the wrong product, *Not this card* on the card page forgets the match and searches again by name, set and number; editing those fields does the same. A source is only believed when its best answer plausibly is the card: every word of the name (Magic included: a misspelt name is for you to correct, not for Scryfall's closest match to price), and the number or the set agreeing when you gave one.
+
+**Grading outlook math.** *max* is the PSA 10 price (real if a source reports it, otherwise ungraded × the PSA 10 multiplier); *min* is the PSA 8 / Grade 8 price on the same basis, falling back to the raw price; *upside* is max − raw − grading fee (Settings). A measured centering caps *max* at the best grade the company's centering limits allow (a 60/40 front can be a PSA 9 at most), priced at that grade or the next one down that has a price, and holds the photo's likely grade there too; the verdict, the Ready flag and the ready-to-grade alert follow. "Good time to grade" means today's upside is within 10% of the highest upside in the card's history and positive.
 
 Sports cards have no free price API; without a PriceCharting token you can still enter prices manually.
 
 **Sales.** Log a sale from a card's page: copies leave the collection, the cost basis is captured at sale time so later edits don't rewrite history, and the portfolio shows realized gains (proceeds less fees less cost) beside unrealized ones. A sale can be undone, which puts the copies back. Fully sold cards stay in the collection greyed out with a "Sold" badge so their history survives.
 
-**Alerts.** Every price refresh checks whether anything is worth mentioning: a card crossing your ready-to-grade thresholds, a move bigger than the percentage set in Settings, or real graded sales appearing where the app previously had only a multiplier estimate. Alerts collect in `/alerts` with an unread count in the nav. Setting a webhook URL POSTs each alert as JSON so you can forward them to email, push or chat through a service you control; a failing webhook is logged and never breaks a refresh. It has to be an outside address — the server refuses to POST to loopback or a private network, and will not follow a redirect into one — so the setting cannot be turned into a way to reach whatever else the machine can see.
+**Alerts.** Every price refresh checks whether anything is worth mentioning: a card crossing your ready-to-grade thresholds, a move bigger than the percentage set in Settings, or real graded sales appearing where the app previously had only a multiplier estimate. A price of your own that you change past that percentage raises the same alert the moment you save it. Alerts collect in `/alerts` with an unread count in the nav. Setting a webhook URL POSTs each alert as JSON so you can forward them to email, push or chat through a service you control; a failing webhook is logged and never breaks a refresh.
 
 **Appraisal report.** `/report` is a printable valuation of everything you own, with photos, identifications, grades, per-copy and total values, and the source and date behind each price. Print to PDF from the browser. Set the owner name in Settings.
 
-**Import.** `/import` reads a CSV, whether it is this app's own export or a spreadsheet from another collection tool. Columns are matched by name, so headers like “Card Name”, “Edition”, “Qty” or “Price Paid” usually need no editing, and game and condition names are understood in the forms people actually write them ("Yu-Gi-Oh!", "Lightly Played", "VG"). A preview shows the matched columns, which columns were ignored, and any row it could not use, before anything is written. Rows matching a card you already own merge into it rather than duplicating.
+**Import.** `/import` reads a CSV, whether it is this app's own export or a spreadsheet from another collection tool. Columns are matched by name, so headers like “Card Name”, “Edition”, “Qty” or “Price Paid” usually need no editing, and game and condition names are understood in the forms people actually write them ("Yu-Gi-Oh!", "Lightly Played", "VG"). A preview shows the matched columns, which columns were ignored, and any row it could not use, before anything is written. Rows matching a card you already own merge into it rather than duplicating; names are matched however their accents are cased ("ÉLECTRODE" and "électrode" are one card). One import reads at most 5,000 rows, and the preview says how many it left for another file.
 
 **Set completion.** `/sets` lists every set your collection touches. Fetch a set's published checklist and it shows how complete the set is, which cards are still missing, and which you already have. Ownership is matched on collector number however it is written ("4/102" against "4"), falling back to the card name. Checklists come from the same sources as the prices: the Pokémon TCG API, Scryfall for Magic, and YGOPRODeck for Yu-Gi-Oh!. Sports cards have no checklist source, and the page says so rather than offering a button that cannot work.
 
 **Where a card is.** Each card can record where it is physically kept ("Binder 2, page 4", "Slab box"). The Collection page filters by location, including a "no location recorded" option for what still needs putting away, locations already in use are offered as you type, and several cards can be filed at once. The location is searchable, exported, imported, and printed on the appraisal report, which is what makes the report useful for actually locating an insured card.
 
-**Photos you did not keep.** A card stores one photo, but working through a stack writes a file per shot: the back and slab-label photos, the scans that ended in review, the frames you re-took. Once a day the app deletes uploaded photos that no card points at and that are more than 24 hours old, so the data directory — and every backup taken from it — does not grow forever.
+**Photos you did not keep.** A card stores one photo, but the add screen writes a file for every photo it is given: the back and slab-label photos, the frames you re-took. Once a day the app deletes uploaded photos that no card and no scan points at and that are more than 24 hours old, so the data directory — and every backup taken from it — does not grow forever. It never touches a file the app did not write, and it waits while a backup or a restore is running.
 
 **Bulk actions.** Tick several cards on the Collection page to refresh their prices, set a grading plan, add them to a draft submission, or delete them in one go.
 
-**Backup and restore.** Settings offers a single zip holding a consistent copy of the database (taken through SQLite's own backup, so it is safe while the app is running) and every photo, and takes one back to restore it. A restore validates the whole archive and opens its database before touching anything, refuses names that would escape the data directory or files the app did not write, and moves the collection being replaced into a dated folder rather than deleting it, so restoring the wrong file can be undone by hand. It also checks the database it is about to install — every row against the same rules the app applies to a card you add by hand, and the schema against the one this app creates — and refuses the archive rather than installing something it could not have written. A SQLite file can carry code: a trigger in it would run on every later edit of your collection, so an archive holding one (or a view, or a table this app never makes) is refused, and the file is only ever read, never written to, while it is being looked at. It holds the archive in memory, so it is capped at 64 MB — which is also the largest request body the app accepts, and the memory to allow for per upload in flight — and a larger collection is restored by unpacking the zip into the data directory with the app stopped. Restores are rate limited, but only once one is actually being unpacked: a file that is not an archive at all costs nothing, and a restore that works clears the count, so the recovery path cannot be closed off by a handful of bad files. Those `replaced-…` folders are kept until you delete them; Settings says how many there are and how much they hold.
+**Backup and restore.** Settings offers a single zip holding a consistent copy of the database (taken through SQLite's own backup, so it is safe while the app is running) and every photo, and takes one back to restore it. A restore validates the whole archive and opens its database before touching anything, refuses names that would escape the data directory or files the app did not write, and moves the collection being replaced into a dated folder rather than deleting it. Those folders are listed in Settings, and any of them can be put back with one click — which moves the collection that is live aside in its turn, so that is undoable too. The swap itself is ordered so the app is never left with no database: the incoming one is brought beside the live one first, where a full disk can still fail harmlessly, and the exchange is two renames. It holds the archive in memory, so it is capped at 64 MB, which is also the largest request body the app accepts; a larger collection is restored by unpacking the zip into the data directory with the app stopped. It also checks what the database carries besides rows: a SQLite file can hold code, and a trigger in a restored database would run on every later edit of your collection, so an archive carrying a view or a trigger this app does not create is refused, and every trigger and index in it is replaced by the app's own before anything is written to it. A price snapshot whose summary is not JSON is refused too, since the price history reads every one.
+
+The small copies of photos that the collection grid shows (`*.thumb.jpg` beside each photo) are not carried; they are made again from the photos as they are first shown. A photo the collection points at that is not in `uploads/` is never a reason to refuse. A backup leaves it out and names the card — in the archive's manifest, in the log, and on Settings before the button is pressed. A restore or put-back of a collection that names a photo it does not carry clears that reference on its private staging copy, so the card comes back without a photo and a scan draft without that upload (a draft with no upload left is discarded), and lists what it cleared in the result. A restore is refused while a whole-collection price refresh is running, and waits up to ten seconds for the single-card lookups a scan or a save fires in the background before refusing with that reason. If the rollback of an interrupted restore finds a file at both ends of a move it recorded, it leaves both, writes the pair to `<database>.restore-conflicts.json`, starts the app on the collection the journal identifies, and says so at boot and on Settings until a later restore or put-back completes; when the two copies are of the database file itself it refuses to start and names both paths.
+
+**What each copy cost.** Cards get bought more than once, rarely at the same price. Every purchase is recorded as its own lot — when, how many, what each one cost, and where from — so a second copy never overwrites what the first one cost. Adding a copy of a card you already own asks for that copy's price rather than just bumping a number. Selling takes the copies you have held longest first, and the gain is measured against what *those* copies cost, not against an average and not against the newest price. Undoing a sale puts the copies back in the lots they came from.
+
+A cost that was never recorded stays unrecorded rather than becoming zero: a card out of a bulk lot or a childhood shoebox is counted separately and left out of the return, because pricing it at nothing would report it as pure profit. `purchase_price` is now the average across the copies you still hold, worked out from the lots. Editing the quantity directly is treated as a correction to the count, not a purchase — the copies it adds have no price attached, and the app says so.
+
+Collections from before this existed get one lot per card from what was already known, and the same rule applies to Markdown files written by an older version.
+
+**Your collection is also plain text.** Every card is written to a Markdown file under `data/collection/cards/`, rewritten whenever that card changes: front matter holding the record (name, set, number, grade, copies, what you paid, where it is kept) and, below it, the same card written for a person — its photo, your notes, its prices as recorded (the newest thousand; the database holds the rest), and any sales. `index.md` lists the whole collection in one table, `README.md` in that folder explains the format to whoever finds it.
+
+This exists so the collection outlives the app. If CollectCollect is never updated again, or you would rather keep your catalogue somewhere else, the folder is already a complete, readable record that any text editor, spreadsheet, git repository or notes tool can open — no database, no export step, nothing to run. Settings has *Download the Markdown* for a zip of it, *Rewrite the files* to bring them up to date from the database, and *Rebuild from these files* to read a collection back in. Reading files back matches each file to the card it describes — by the id in the file, or, when that id belongs to something else, by the card itself — so importing the same folder twice changes nothing the second time, and a folder from somewhere else can only add to a collection, never overwrite a card it has nothing to do with. Rewriting never deletes: a file describing a card the database does not have is counted and left alone, since the likeliest reason for one is that the folder is the copy that survived. Writing is best-effort by design: a full or read-only disk degrades the plain-text copy and is reported in Settings, but never stops a card being saved. Set `MARKDOWN_MIRROR=off` to switch it off.
+
+The files hold every purchase and the newest thousand recorded prices per card or item — including which purchase each sale drew from, and for skins the best quote from each market — but not the listing URLs or volumes behind each quote, nor the note of when an unchanged price was last checked. Photos stay in `data/uploads/`, which the card files link to, so keep the two together — the Markdown download is text only, while the full backup carries both.
 
 The archive is written and read by a small built-in zip writer and reader rather than a dependency. Tests check the writer against the system `unzip` and Python's `zipfile`, read back archives made by the system `zip` in both stored and deflated form, and confirm that a corrupted payload, a doctored entry name, a path that escapes, an oversized expansion and a database that will not open are each refused with the collection left untouched.
 
@@ -70,13 +91,176 @@ The archive is written and read by a small built-in zip writer and reader rather
 
 ## Card identification
 
+**Collecting goals.** `/goals` holds wishlists, target quantities, priorities,
+optional dates and a budget for remaining cards. Each price ceiling is your
+shopping limit; unknown ceilings remain unknown. Progress follows current
+holdings, assigning each copy once within a goal and preferring specific
+printings. A copy can count toward independent goals. Fetch a set before buying
+its first card and choose *Complete this set*, or enter a manual wishlist for
+any game. *Add acquired card* prefills the normal card form without recording a
+purchase until you save. Goals are included in database backups and the
+Markdown folder, and can be archived without removing their history.
+
+Steam imports use a reviewed server snapshot tied to the selected account.
+Changing the SteamID clears the preview. Apply consumes that exact snapshot
+once within ten minutes; a restart or expiry requires another preview. The
+result lists every missing item, lower stack count and failed row without
+silently removing anything.
+
 Identification runs on Claude (`claude-opus-5` by default; override with `CLAUDE_MODEL`). Photos are downscaled server-side before being sent. The model returns a structured identification with a confidence score and alternative matches when the card is ambiguous; you can add a back or slab-label photo, give it a hint ("it's Japanese"), and re-identify. Without an Anthropic key the app still works for manual entry and pricing.
 
 ## Look and feel
 
-Graded cards render in a slab frame with the grading company's label colour, so a PSA 9 in the grid reads as a slab rather than a photo. Each uploaded photo's average colour is sampled at save time and tints that card's tile and page. The hero value and card names use a condensed display face. Everything is theme-aware; dark mode is a designed palette, not an inverted one.
+Dark is a **wireline** theme on the illustrated tabletop's deep-ink ground (`#19232d`, with panels at `#24323e`): the interface is drawn in white hairlines, so almost nothing is filled. That leaves saturation to mean something, and the only colours that carry are the ones that should — green when the collection is up, red when it is down. The portfolio line takes that colour and its area is a gradient of it, fading out towards the baseline so the line stays the loudest mark. Light mode keeps the validated chart palette and reads as an ordinary document.
+
+The theme follows your system by default; the switch in the header pins it to light or dark and remembers the choice. An inline script resolves the preference to a single `data-theme` attribute before the first paint, so there is no flash of the wrong theme, and both the CSS variables and Tailwind's `dark:` utilities key off that one attribute rather than duplicating the condition. Pinning a theme also updates the browser chrome colour, so a light page never sits under black chrome.
+
+Chart colours are not chosen by eye. `--chart-surface` follows what a chart sits on — the panel inside a `card-surface`, the ground elsewhere — so a hover halo is always cut from its own surface rather than from a darker colour the palette no longer uses, and the categorical slots are checked with the dataviz palette validator against both dark surfaces (`#19232d` and `#24323e`, re-run when the tabletop palette replaced the near-black ground) and pass its lightness band, chroma floor, colourblind separation and contrast checks; lighter values that looked better sat outside the band and were rejected. The green and red are deliberately brighter than that band, because they are a status pair rather than a categorical one, and direction is always carried by an arrow and the sign of the number as well as the colour.
+
+Each card is drawn as the object it is. On its own page the card tilts towards the pointer and catches the light; in the grid it lifts a little on hover. Its surface shows the wear its grade implies: a 10 is pristine and glossy, a 9 has a soft corner and a speck of dust, and as the grade falls it gains whitened edges, a fingerprint, a print line, scratches, dents, an off-centre print (placed by the measured centering where there is one), yellowing, and finally stains and a crease — The grade sets how much wear there is and how likely each kind is; a hash of the card's id decides which kinds this card actually has, leaning one card towards scuffs and dents and another towards stains, so two cards of one grade differ in kind and not only in place, and a card always looks the same (and only some cards yellow), with everything but dust and print lines kept out of the middle of the art. A holo, reverse holo, foil or refractor — read from the card's printing variant or its rarity, so nothing new is recorded — carries a rainbow that slides as the light moves: across the art box of a holo, around it on a reverse holo, over the whole of a foil or refractor, dimmer as the card wears. Its pattern — plain sheen, stripes, cosmos, cracked ice or starlight — is drawn from the card's id too, the fancier ones likelier on a better-graded card. A worn foil's edges show silver rather than white, and from a 4 down the foil lifts at a corner. A raw card curls as it wears, a foil one sooner; a slabbed card is held flat. A raw card is read from its condition (NM through DMG); a graded one from its grade, and when the photo was identified, what the model said about corners, edges, surface and centering decides where the wear concentrates. Graded cards sit inside a three-plane acrylic slab with the grading company's label colour, so a PSA 9 in the grid reads as a slab rather than a photo. It is CSS and one inline SVG, no library, and it stays flat for people who ask for reduced motion and when printing. Each uploaded photo's average colour is sampled at save time and tints that card's tile and page. The hero value and card names use a condensed display face.
+
+## On a phone
+
+The app is installable. Add it to a home screen and it opens without browser chrome, with its own icon, in portrait, respecting the notch and home indicator. Phones get a fixed tab bar within thumb reach instead of the header row, and jump straight to scanning or adding a card from a long-press on the icon.
+
+A small service worker makes that work and lets the shell open without a network, showing a plain "no connection" page. It deliberately never caches API responses or page HTML: prices, grades and the collection itself change, and a stale answer about what something is worth would be worse than no answer.
+
+Five destinations fit on the tab bar; the last one is labelled *More* and leads to Settings, where the rest are listed. The skins app is installable in the same way, with its own icon and its own service worker. Because a service worker's scope is an origin and each app's worker clears every cache it does not own, the two apps have to be served from different origins — which two ports are, and which two paths on one host are not.
+
+A page that is not there — a deleted card's, or a mistyped address — is a 404 drawn inside the app, with the header still there to leave by. A page that fails to render says so on the page, with the error, rather than going blank.
+
+## The skins app
+
+`apps/skins` is the same engine — value over time, purchase lots, sales, the
+plain-text mirror — pointed at CS2 items instead of cards. Run it with
+`npm run dev -w @collectcollect/skins`.
+
+The two apps share code but nothing else. The skins app keeps its own database
+in its own directory (`SKINS_DATA_DIR`, defaulting to `apps/skins/data`), so
+the two can run side by side from one shell without either seeing the other's
+collection.
+
+One thing about CS2 inverts a card-app assumption, and it shapes the schema:
+
+- **A weapon, knife or glove is a unique object.** Its float — the 0-to-1 wear
+  value — and its pattern seed are its identity. Two Field-Tested AK Redlines
+  are different things worth different money, so they never merge into a
+  quantity, and one row is one object.
+- **A case, capsule or sticker is fungible.** Forty-seven Clutch Cases bought
+  over two years at a dozen prices stack into one row, and the purchase lots
+  matter there more than anywhere in the card app.
+
+The float also decides the wear tier rather than sitting beside it: Factory New
+through Battle-Scarred are just bands on the float scale, so where an import
+claims a tier the float contradicts, the float wins.
+
+**Getting an inventory in.** Three ways, and none of them writes anything until
+you have seen what would arrive:
+
+- **From Steam**, by SteamID64, for any inventory set to Public. An import is a
+  statement of what you hold *now* rather than a pile of new purchases, so
+  running it again on an unchanged inventory changes nothing; a stack that has
+  grown gains a purchase of unknown cost, one Steam shows fewer of is named
+  rather than shrunk (the rest are as likely in a storage unit, which Steam does
+  not show, as gone), and an object Steam stopped listing is named rather than
+  deleted. Nothing an import does can lose what a copy cost.
+  What a re-read does not mention, it does not forget: a public read carries no
+  trade lock and a bare description carries no stickers, and neither wipes the
+  lock, the stickers, the name tag, or the notes and price you filled in.
+- **From a spreadsheet**, which is the one that knows what you paid. Steam does
+  not, so a file of your own purchases is what turns an inventory into a record.
+- **One at a time**, where pasting the market hash name fills in the kind, the
+  gun, the finish, the wear tier and the StatTrak flag.
+
+Steam sends neither the float nor the pattern seed — those need an item's
+inspect link resolved by a float service — so both stay blank rather than
+showing a zero, which would read as a pristine Factory New.
+
+**Where to sell** is the app's reason to exist. For each item it works out what
+you would actually receive on each market, after that market's cut, and ranks
+them — with one rule it never breaks:
+
+> Steam is never compared against the others. It is where most CS2 trading
+> happens and it usually shows the highest number, but what it pays is wallet
+> funds that cannot be withdrawn. Ranking it against markets that pay money on
+> net price alone would point you somewhere you would not be paid, so the two
+> are listed apart and stay apart.
+
+Trade locks are the other half of it. A difference you cannot act on for six
+days is not a difference, so a locked item says so and its money is left out of
+the total the page says you could realise today. And an item only one market
+lists is reported as "nothing to compare" rather than being given a spread of
+zero, which would read as a measurement.
+
+The amount threshold in Settings is measured against the whole holding rather
+than one copy: nine cents each across thirty-five cases is three dollars, and
+it is one listing either way. The percentage stays per copy, where it means
+something.
+
+An item's value is what the best market that pays out in money would hand you
+after its cut, and the inventory total is the sum of those. When only Steam
+lists an item, its wallet figure stands in, labelled as wallet funds and never
+compared with money. The highest listing anywhere is still recorded beside it,
+and each market's proceeds after fees are on the item's page.
+
+**Prices** come from Skinport and Steam, with CSFloat if you give it a key —
+and from you, if you type one in, which overrides all of them on that item. The
+two shapes are quite different, which the code is built around: Skinport
+publishes its whole catalogue in one response, so a refresh loads it once and
+every lookup reads from that; Steam answers one item at a time, about twenty
+times a minute, behind a rate limit shared across the process. Nothing
+estimates a price from a similar item or a neighbouring wear tier, so an item
+nobody is listing reads as "not priced" rather than as a number that looks
+measured and is not — and a refresh that found nothing is never written over an
+item's last known value. A refresh that finds the same prices as last time only
+notes when it checked, which the item page shows beside the price, so an item
+refreshed every hour for a year does not carry a year of identical rows.
+
+**The inventory page** sorts by name, value or date and shows 120 tiles a
+page; the count and total at the top are over everything the filters match,
+whichever page is showing.
+
+**Password.** Set `SKINS_APP_PASSWORD` — its own variable, and its own cookie.
+Cookies are scoped to a host and not to a port, so two of these apps served from
+localhost would otherwise hand each other their sessions.
+
+**Keeping history flowing.** The server re-prices anything whose latest price
+is older than `SKINS_AUTO_REFRESH_HOURS` (default 24, set 0 to disable) once an
+hour while it is running, and `/spread` has a button that does the whole
+inventory now. Only one pass runs at a time, whoever starts it — a refresh
+still working through four hundred items must not have another started on top
+of it, so the button answers 409 while the hourly pass is running, and the
+hourly pass simply waits for the next hour while the button's is.
+
+**Selling.** Purchases and sales share one panel on an item's page, because
+they are one ledger read from two ends: a sale takes copies out of the oldest
+purchase still holding any, and undoing it puts them back where they came from.
+A purchase that has been sold from cannot be removed — that would rewrite money
+that has already changed hands.
+
+**Taking it elsewhere.** The plain-text mirror works exactly like the card
+app's, under `<data>/collection/items/`, and carries the float, the pattern
+seed, the applied stickers and their wear, every purchase lot and which lots
+each sale took. Its switch is `SKINS_MARKDOWN_MIRROR=off` — its own, so the
+card app's `MARKDOWN_MIRROR` never reaches it. There is also a CSV export in
+the columns the importer reads back, and a printable valuation at `/report`
+that lists an unpriced item as unpriced rather than counting it as worth
+nothing.
+
+**Backup and restore** work as in the card app, minus the photos: one zip of
+the database and its plain-text copy, a restore that moves what it replaces
+into a dated folder, and a list of those folders in Settings from which any can
+be put back. An archive from the card app is refused by name rather than
+unpacked into the wrong place. The same waits apply — a restore tells a running
+whole-inventory refresh to stop and gives it ten seconds, and waits up to ten
+seconds for a single-item lookup — and an interrupted restore's rollback
+records, rather than refuses over, two copies of a folder.
 
 ## Running it
+
+For a persistent cards-only installation, see [Self-hosting](docs/SELF_HOSTING.md).
+Manual entry and CSV import work without API keys. The first-run checklist links
+to setup, provider connection tests, and backups.
 
 ```bash
 npm install
@@ -84,29 +268,68 @@ cp .env.example .env      # add ANTHROPIC_API_KEY (and optional price-source key
 npm run dev               # http://localhost:3000
 ```
 
-Production: `npm run build && npm start`. Everything is stored locally in `./data` (SQLite database plus uploaded photos); set `DATA_DIR` to move it.
+Production: `npm run build && npm start`. Everything is stored locally in `apps/cards/data` (SQLite database, uploaded photos, and a Markdown copy of the collection); set `DATA_DIR` to move it.
 
-Docker: `docker compose up --build` (reads `.env`, keeps data in a named volume at `/data`). The image declares a health check against `/api/health`, which answers `{ "ok": true, "version": "…" }` without a session and whatever `ALLOWED_HOSTS` names, and nothing else.
+> Upgrading from a version before the app moved into `apps/cards`? Your collection is still where it was. On start the app looks for a `data` folder above itself and uses the one it finds, saying so in the log. Move it to `apps/cards/data`, or set `DATA_DIR`, to settle it permanently.
 
-**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach (the app says so at startup). Signing out ends that session for good, not just in the browser holding it — and if that cannot be written down, the app says so rather than reporting success, because a session it cannot record as retired is one it still honours. Wrong guesses cost wall clock that doubles with each one, including the ones that have already run past the limit: a refusal is added to the cost, never swapped for it, or the cheapest answer would be the one an attacker wants. The cookie is signed with a random key kept in the data directory, so the cookie is no help to anyone guessing the password; `APP_SECRET` replaces that key if you would rather set one. Behind a reverse proxy that terminates TLS the app cannot see that the connection was secure on its own — set `TRUST_PROXY=1` (or `TRUSTED_PROXY_HOPS`) so it believes the forwarded scheme, or `COOKIE_SECURE=1` to settle it outright, and the session cookie is marked `Secure`.
+### Deploy
 
-**Host names and other sites.** Whether or not a password is set, the app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`. Requests that a browser sends from another site are refused for anything but `GET`, so a page you happen to visit cannot restore a backup over your collection or spend your API budget; `curl` and scripts, which send no browser origin headers, are unaffected. Every response carries a content security policy, `nosniff`, `no-referrer`, a refusal to be framed and a permissions policy that keeps the camera for the scan screens and gives up the rest; set `APP_BASE_URL=https://cards.example.com` when the app is reached over https and it also sends `Strict-Transport-Security` — with `includeSubDomains`, so every name under that host is held to https for a year too; give the app a leaf name, or a host whose subdomains are all https. The headers are decided by the running server, not at build time, so the Docker image picks them up from the `.env` it is started with.
+Docker: `docker compose up -d --build cards` starts the card app on 3000 with its
+own named volume at `/data`. Add skins with `docker compose up -d --build skins`
+on port 3001. `docker compose up --build` still starts both apps. To build an image
+directly, pick the app with a build argument:
+
+```bash
+docker build -t collectcollect .                            # the card app
+docker build -t collectcollect-skins --build-arg APP=skins .
+```
+
+Compose gives each app a 2 GB memory limit: a request body is buffered whole, up to 64 MB, so a few uploads or restores at once are the high-water mark. `bash scripts/release-candidate.sh <version>` validates a release candidate of the card image on this machine — the whole gate, a container boot, a goal surviving a restart — and packages the image with the candidate Compose file into `release/`, publishing nothing ([Self-hosting](docs/SELF_HOSTING.md) says how to try one).
+
+**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach (each app says so in its log at startup). Failed attempts are rate limited — eight a minute per client, reserved before the password is checked, so firing guesses in parallel buys nothing — and changing the password invalidates existing sessions. Each session carries an id: signing out ends that one, wherever a copy of its cookie went, and *Sign out everywhere* on the Settings page ends every session issued so far — for the phone that was lost or the browser left signed in. The record lives in `sessions.json` in the data directory, and a sign-out that cannot be written there says so rather than reporting success. The login page shows nothing of the app — no navigation, no unread-alert count — to someone who is not signed in. The cookie is signed with a random key kept beside it in `session-secret`, so a stolen cookie is no help to anyone guessing the password; `APP_SECRET` replaces that key if you would rather set one. Neither file is in a backup: a restore onto a new machine asks for the password once more. So does upgrading past the point either was introduced, since older sessions are not recognised.
 
 > Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
+
+**Behind a proxy.** The login limiter and the per-route limits count attempts per client. Without a proxy every client is one client, and the `X-Forwarded-For` header is ignored — anyone can send one. Set `TRUST_PROXY=1` only when a reverse proxy in front of the app sets that header, and it will be read — as will `X-Forwarded-Proto`, which is what lets the session cookie be marked `Secure` and the response carry HSTS when the proxy terminates TLS. Both are read from the right: proxies append to these headers, so the rightmost entry is what your proxy saw and anything left of it is whatever the client typed; behind more than one proxy, `TRUSTED_PROXY_HOPS` says how many. `COOKIE_SECURE=1` (or `0`) settles the cookie's `Secure` flag outright, for a proxy the app cannot be told about. Compose binds both apps to `127.0.0.1`; put the proxy in front and change the bind address there, since neither app speaks TLS.
+
+**Host names and other sites.** Whether or not a password is set, each app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` / `.home.arpa` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`, and the proxy has to pass the original `Host` header through. Requests that a browser sends from another site are refused for anything but a read, so a page you happen to visit cannot restore a backup over your collection or spend your API budget; `curl` and scripts, which send no browser origin headers, are unaffected. The health route ignores the host list, since a container checks itself by address.
+
+**Webhooks.** The alert webhook is posted to by the server itself, so it has to be an address on the public internet: `localhost`, `*.local`, and any private, loopback, link-local or reserved address (carrier-grade NAT, benchmarking, multicast and the like) are refused when saved, a name that resolves to one is refused at delivery, and the request does not follow redirects.
+
+**What every response carries.** A content security policy that allows scripts only from the app itself, plus the one inline script that applies the theme before first paint, which is let through by a nonce minted per request; images from the app, `data:`/`blob:` and (for cards) any https host a price source's reference image might come from; nothing framed, nothing embedded, no `<base>`. Alongside it: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` (a page's address names a card), `Cross-Origin-Opener-Policy: same-origin`, a permissions policy that refuses the camera except where scan mode uses it, and no `X-Powered-By`. `Strict-Transport-Security` (a year, `includeSubDomains`) is sent when the request came over TLS, directly or through a trusted proxy, or when `APP_BASE_URL` starts with `https://`; `includeSubDomains` holds every name under that host to https too, so give the app a leaf name or a host whose subdomains are all https. Next's static files carry the same headers but the policy and HSTS, which a browser takes from the page. `GET /api/health` answers without a session — `{ ok, app, version, database, scheduler: { enabled, running, lastRunAt } }`, and nothing more, since it answers anyone — for a container health check or a proxy. `database` is true only when a query has just run through the live connection: a database file whose restore journal cannot be replayed reports false, with the reason in the log rather than the response, and an install with no database yet reports false without one being created. `ok` means the process answers.
+
+**Limits on the expensive routes.** Identifying a photo (10 a minute), uploading (30), refreshing every price (6), pricing one card (120, since a scan or a bulk refresh sends one per card), reading a folder or a Steam inventory back in (6), importing a spreadsheet (30), downloading a backup or the folder (6), and restoring a backup or putting one back (6) each refuse with a 429 and a `Retry-After` past their limit. They are in memory and per process — protection against a runaway client or a double-clicked button, not a public API's defence. No request body is accepted past 64 MB: each app's proxy makes Next buffer every body, and past its buffer Next would hand a route a body cut short rather than refuse it, so the buffer is set to that and every route's ceiling sits under it. Only one whole-collection price refresh runs at a time, whoever asks: a second is told so with a 409, since the answer it wants is already being produced.
 
 ## Development
 
 ```bash
-npm run dev               # development server
+npm run dev               # the card app's development server (npm run skins for the other)
 npm run check             # lint, typecheck, unit tests and the conventions test: the gate before a push
-npm test                  # unit tests (vitest)
-npm run test:e2e          # end-to-end tests (playwright: builds the app, then boots its own servers)
-npm run e2e:ui            # the same suite in Playwright's UI mode, against the last build
-npm run test:all          # unit tests, then the end-to-end suite
-npm run build             # production build
-npm run typecheck         # tsc (after generating Next route types)
-npm run lint
+npm run build             # production build of every workspace
+npm start                 # the card app from its build; npm run start:skins for the other
+npm test                  # unit tests (vitest), every workspace
+npm run test:e2e          # builds both apps, then both end-to-end suites (playwright; each boots its own servers and cleans up after)
+npm run test:all          # unit tests, then the end-to-end suites
+npm run test:conventions  # the repository's shape against CONVENTIONS.md
+npm run typecheck         # tsc in every workspace, after generating Next route types
+npm run lint              # eslint in every workspace, the shared package included
 ```
+
+`npm run e2e` is kept as another name for `npm run test:e2e`, which builds first.
+
+Every script above runs from the repository root and covers every workspace.
+To drive one app on its own, add `-w @collectcollect/cards` — which is how you
+reach the app-only scripts, such as `npm run e2e:ui -w @collectcollect/cards`
+for the Playwright suite in UI mode, or `npm run icons -w @collectcollect/skins`
+to re-render that app's icons from its SVG.
+
+Node 22 or later; `.nvmrc` says so for version managers and `engines` for npm,
+which warns under an older one. `CONTRIBUTING.md` has the checks a change is
+expected to pass. CI runs on every push, on pull requests, by hand and weekly:
+one `check` job runs lint, typecheck, the unit tests, the conventions test,
+both builds and both end-to-end suites; a `docker` job builds both images,
+boots each and asks it how it is; and an `audit` job runs
+`npm audit --omit=dev --audit-level=high` against the lockfile.
 
 Unit tests cover the pieces where a mistake is silent: price matching and the
 provider adapters (against recorded responses, never the network), the
@@ -114,18 +337,58 @@ valuation and grading-outlook maths, the repository and its migrations, sales,
 submissions, alert rules, and the password gate.
 
 The end-to-end suite drives a real production build in Chromium against a
-throwaway data directory. Identification and price lookups are intercepted in
-the browser, and the servers the suite starts can reach no host but their own
-(`e2e/offline.mjs`), so the price refresh a saved card triggers on the server
-fails at once, and the tests never call Anthropic or a price API; everything
-else, including the database, runs for real. It covers adding a card by hand, duplicate
+throwaway data directory. Identification is intercepted in the browser, and the
+servers under test are started with no network at all (`scripts/e2e-offline.mjs`),
+so a price lookup made on the server fails at once and says so; the tests never
+call Anthropic or a price API, but everything else, including the database,
+runs for real. It covers adding a card by hand, duplicate
 merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
-grading submission from draft to booked outcome, and the password gate. Both
-suites, lint, typecheck, the conventions test and the build run in CI on every
-push, a second job builds the Docker image, and a third, `audit`, runs
-`npm audit --omit=dev --audit-level=high` against the lockfile.
+grading submission from draft to booked outcome, and the password gate.
+
+The type checker runs strict, with `noUncheckedIndexedAccess` on in every
+workspace: an element read out of an array or a table is `undefined` until the
+code has said what happens when it is not there. Every such read is narrowed
+rather than asserted — a `!` that turned out to be wrong is exactly the kind
+of silent wrong number this app exists to avoid.
 
 ## Project layout
+
+The repository is an npm workspace, so a second collectible can get its own app
+without either one inheriting the other's assumptions. Root scripts fan out
+across all of them.
+
+```
+apps/cards/              this app
+apps/skins/              the same idea for CS2 items — see its own section below
+packages/core/           code with no opinion about what is being collected
+```
+
+Inside `packages/core/src`:
+
+```
+markdown/                The Markdown codec: front matter, tables, money, slugs
+zip.ts, csv.ts           Dependency-free streaming zip writer and reader; RFC 4180 CSV reader
+auth.ts, auth-route.ts   The optional password gate, its sign-in routes, and revoking a session
+sessions.ts              Ended sessions, kept in one small file beside the data
+proxy.ts                 The per-request gate: session check, CSP nonce, security headers
+forwarded.ts             Which X-Forwarded-* entry may be believed: the one a trusted proxy wrote
+limits.ts                The largest request body either app accepts, and the proxy buffer set from it
+restore-validation.ts    What a restored database may carry: no foreign triggers or views, the app's own indexes
+net.ts, http.ts          What may be a webhook, whether a request came over TLS; route helpers
+webhook.ts               Resolves a webhook's host before posting to it
+throttle.ts, limiter.ts  Per-route request ceilings; per-source pacing for the price APIs
+gate.ts                  One-at-a-time for a refresh, a backup or a restore
+scheduler.ts             The hourly auto-refresh, one instance per app
+collection-swap.ts       Moving a database aside and another into place without a gap
+atomic-write.ts          Write-then-rename with fsync, for every file the mirror writes
+lookup.ts, series.ts     Prototype-safe table lookup; extent and thinning for long series
+manifest.ts, service-worker.ts
+                         The installable app shell both apps share; each app only names itself
+charts/, components/     Chart geometry and the components both apps draw with, including the
+                         not-found, error and offline pages and the service worker registration
+```
+
+Inside `apps/cards`:
 
 ```
 src/app/                 Next.js App Router pages and API routes
@@ -143,26 +406,42 @@ src/app/                 Next.js App Router pages and API routes
   api/submissions[/id]   Grading batches; PATCH adds/removes cards, marks sent, records grades
   api/alerts[/id]        GET the feed, POST marks all read, DELETE dismisses one
   api/cards/intake       POST — atomic add-or-merge used by scan mode
-  api/backup             GET — the database and photos as one zip; /restore puts one back
+  api/backup             GET — the database and photos as one zip; /restore puts one back;
+                         /replaced lists what restores moved aside and POST puts one back
+  api/cards/[id]/acquisitions
+                         GET/POST — what each copy cost; POST records another purchase
+  api/cards/[id]/cert    POST — fill a card from PSA's record of its cert number
+  api/collection         GET — the collection as Markdown; /rebuild rewrites it, /import reads it back
   api/import             POST — preview a CSV, or apply it with `apply: true`
   api/locations          GET — storage locations in use, for autocomplete
   api/sets/refresh       POST — fetch and store a set's published checklist
-  api/auth               POST signs in, DELETE signs out (only when APP_PASSWORD is set)
+  api/auth               POST signs in, DELETE signs out this session; /revoke ends every
+                         session at once (only when APP_PASSWORD is set)
+  api/health             GET — is the server up, which version, what is it reading; needs no session
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema
+src/lib/grading/         Agency report links, centering limits and the PSA cert client
 src/lib/pricing/         Providers, matching heuristics, summary/valuation, refresh pipeline
 src/lib/analytics.ts     Portfolio value series, grading outlook (min/max/upside) and timing verdict
-src/lib/scheduler.ts     Hourly auto-refresh of stale prices and the daily photo sweep
-src/lib/uploads.ts       Deletes uploaded photos no card points at
-src/lib/net.ts           Which addresses the server may send an outgoing request to
+src/lib/scheduler.ts     Hourly auto-refresh of stale prices (started from src/instrumentation.ts)
+src/lib/uploads.ts       The daily sweep of uploaded photos nothing points at
+src/lib/version.ts       The version the About section and the health route report
+src/lib/name-key.ts      The normalised name duplicate detection looks a card up by
 src/components/charts/   Inline-SVG portfolio line and min/max outlook band charts
-src/lib/zip.ts           Dependency-free streaming zip writer used by the backup
-src/lib/csv.ts           RFC 4180 reader; src/lib/import.ts maps columns to cards
+src/lib/acquisitions.ts  Purchase lots: what each copy cost, consumed oldest first on a sale
+src/lib/markdown/        The plain-text copy: format, one card as a document, the
+                         on-disk mirror, and reading a collection back out of it
+src/lib/import.ts        Maps a spreadsheet's columns to cards, previews, then applies in one transaction
+src/lib/backup.ts        The zip of everything, and the restore that swaps it in
 src/lib/sets/            Set checklist providers, caching and completion matching
-src/lib/auth.ts          Optional password gate (Web Crypto, shared by proxy and routes)
-src/proxy.ts             Host allowlist, cross-site write guard, and the password gate
+src/lib/auth.ts          This app's cookie name and variables for the shared password gate
+src/proxy.ts             Guards every route when APP_PASSWORD is set
 e2e/                     Playwright suite driving a real build
 src/lib/cards.ts, db.ts  SQLite (better-sqlite3) repository and schema
 src/components/          UI (add flow, card detail, price panel, settings)
 tests/                   Vitest suites (providers with mocked fetch, valuation, repository)
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE). The display font is bundled under its own licence, the SIL Open Font License, in `packages/core/fonts/OFL.txt`.

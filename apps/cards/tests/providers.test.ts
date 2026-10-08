@@ -1,0 +1,303 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fakeFetch } from "./helpers";
+import { buildQuery, pickVariantKey, pokemonTcgProvider } from "@/lib/pricing/providers/pokemontcg";
+import { ygoprodeckProvider } from "@/lib/pricing/providers/ygoprodeck";
+import { scryfallProvider } from "@/lib/pricing/providers/scryfall";
+import { buildSearch, priceChartingProvider, productToQuote, scoreProduct, setPriceChartingLimit, type PcProduct } from "@/lib/pricing/providers/pricecharting";
+import { NO_LIMIT, rateLimit } from "@collectcollect/core/limiter";
+
+describe("Pokémon TCG provider", () => {
+  it("builds a name+number query", () => {
+    expect(buildQuery({ game: "pokemon", name: "Charizard", cardNumber: "4/102" })).toBe('name:"Charizard" number:4');
+  });
+  it("prefers the variant matching the card", () => {
+    expect(pickVariantKey("reverse holo", ["normal", "reverseHolofoil"])).toBe("reverseHolofoil");
+    expect(pickVariantKey("1st edition holo", ["holofoil", "1stEditionHolofoil"])).toBe("1stEditionHolofoil");
+    expect(pickVariantKey(null, ["holofoil"])).toBe("holofoil");
+  });
+  it("picks the best set match and returns TCGplayer + Cardmarket quotes", async () => {
+    const fetchImpl = fakeFetch([
+      [
+        "api.pokemontcg.io/v2/cards?q=",
+        {
+          data: [
+            {
+              id: "base4-4",
+              name: "Charizard",
+              number: "4",
+              rarity: "Rare Holo",
+              set: { id: "base4", name: "Base Set 2", releaseDate: "2000/02/24" },
+              tcgplayer: { url: "https://tcgplayer.example/base2", prices: { holofoil: { market: 250 } } },
+            },
+            {
+              id: "base1-4",
+              name: "Charizard",
+              number: "4",
+              rarity: "Rare Holo",
+              set: { id: "base1", name: "Base", series: "Base", releaseDate: "1999/01/09" },
+              images: { large: "https://img.example/base1-4.png" },
+              tcgplayer: { url: "https://tcgplayer.example/base1", prices: { holofoil: { market: 400 }, "1stEditionHolofoil": { market: 5000 } } },
+              cardmarket: { url: "https://cardmarket.example", prices: { trendPrice: 380.5, avg30: 370 } },
+            },
+          ],
+        },
+      ],
+    ]);
+    const quotes = await pokemonTcgProvider.lookup(
+      { game: "pokemon", name: "Charizard", cardNumber: "4/102", setName: "Base Set", year: 1999, variant: "holo" },
+      fetchImpl,
+    );
+    expect(quotes).toHaveLength(2);
+    expect(quotes[0]).toMatchObject({ source: "pokemontcg", currency: "USD", ungraded: 400, externalId: "base1-4", referenceImageUrl: "https://img.example/base1-4.png" });
+    expect(quotes[0]?.ungradedVariants).toEqual({ Holofoil: 400, "1st Edition Holofoil": 5000 });
+    expect(quotes[1]).toMatchObject({ currency: "EUR", ungraded: 380.5 });
+  });
+  it("falls back to searching when a stored id answers with nothing", async () => {
+    // A 200 with no `data` used to put `undefined` straight into the results.
+    const fetchImpl = fakeFetch([
+      ["v2/cards/base1-4", {}],
+      [
+        "api.pokemontcg.io/v2/cards?q=",
+        { data: [{ id: "base1-4", name: "Charizard", number: "4", set: { id: "base1", name: "Base" }, tcgplayer: { prices: { holofoil: { market: 415 } } } }] },
+      ],
+    ]);
+    const quotes = await pokemonTcgProvider.lookup(
+      { game: "pokemon", name: "Charizard", externalIds: { pokemontcg: "base1-4" } },
+      fetchImpl,
+    );
+    expect(quotes[0]?.ungraded).toBe(415);
+  });
+  it("uses a stored id directly", async () => {
+    const fetchImpl = fakeFetch([
+      ["v2/cards/base1-4", { data: { id: "base1-4", name: "Charizard", number: "4", set: { id: "base1", name: "Base" }, tcgplayer: { prices: { holofoil: { market: 410 } } } } }],
+    ]);
+    const quotes = await pokemonTcgProvider.lookup({ game: "pokemon", name: "Charizard", externalIds: { pokemontcg: "base1-4" } }, fetchImpl);
+    expect(quotes[0]?.ungraded).toBe(410);
+  });
+  it("returns nothing when there is no match", async () => {
+    const quotes = await pokemonTcgProvider.lookup({ game: "pokemon", name: "Nope" }, fakeFetch([["v2/cards?q=", { data: [] }]]));
+    expect(quotes).toEqual([]);
+  });
+});
+
+describe("YGOPRODeck provider", () => {
+  it("uses the set-specific price when the set code matches", async () => {
+    const fetchImpl = fakeFetch([
+      [
+        "cardinfo.php?name=",
+        {
+          data: [
+            {
+              id: 46986414,
+              name: "Dark Magician",
+              type: "Normal Monster",
+              card_sets: [
+                { set_name: "Legend of Blue Eyes White Dragon", set_code: "LOB-005", set_rarity: "Ultra Rare", set_price: "120.00" },
+                { set_name: "Starter Deck: Yugi", set_code: "SDY-006", set_rarity: "Ultra Rare", set_price: "15.00" },
+              ],
+              card_images: [{ image_url: "https://img.example/dm.jpg" }],
+              card_prices: [{ cardmarket_price: "3.50", tcgplayer_price: "4.20", ebay_price: "9.99", amazon_price: "0.00" }],
+              ygoprodeck_url: "https://ygoprodeck.com/card/dark-magician",
+            },
+          ],
+        },
+      ],
+    ]);
+    const quotes = await ygoprodeckProvider.lookup({ game: "yugioh", name: "Dark Magician", setCode: "LOB-005" }, fetchImpl);
+    expect(quotes[0]).toMatchObject({ source: "ygoprodeck", ungraded: 120, matchedDetail: "Legend of Blue Eyes White Dragon · LOB-005 · Ultra Rare" });
+    expect(quotes[0]?.ungradedVariants).toMatchObject({ TCGplayer: 4.2, eBay: 9.99, "This set (LOB-005)": 120 });
+    expect(quotes[0]?.ungradedVariants).not.toHaveProperty("Amazon");
+    expect(quotes[1]).toMatchObject({ currency: "EUR", ungraded: 3.5 });
+  });
+  it("falls back to fuzzy search and treats 400 as no match", async () => {
+    const fetchImpl = fakeFetch([
+      ["cardinfo.php?name=", { error: "No card matching your query was found" }, 400],
+      ["cardinfo.php?fname=", { error: "No card matching your query was found" }, 400],
+    ]);
+    expect(await ygoprodeckProvider.lookup({ game: "yugioh", name: "Nothing" }, fetchImpl)).toEqual([]);
+  });
+});
+
+describe("Scryfall provider", () => {
+  it("looks up by set + collector number and picks foil pricing for foil cards", async () => {
+    const fetchImpl = fakeFetch([
+      [
+        "api.scryfall.com/cards/mh2/151",
+        { id: "abc", name: "Ragavan, Nimble Pilferer", set: "mh2", set_name: "Modern Horizons 2", collector_number: "138", rarity: "mythic", scryfall_uri: "https://scryfall.com/x", prices: { usd: "40.00", usd_foil: "55.00", eur: "35.00", eur_foil: "50.00" }, image_uris: { normal: "https://img.example/r.jpg" } },
+      ],
+    ]);
+    const quotes = await scryfallProvider.lookup({ game: "mtg", name: "Ragavan", setCode: "MH2", cardNumber: "151", variant: "foil" }, fetchImpl);
+    expect(quotes[0]).toMatchObject({ source: "scryfall", ungraded: 55, ungradedVariants: { "Non-foil": 40, Foil: 55 } });
+    expect(quotes[1]).toMatchObject({ currency: "EUR", ungraded: 50 });
+  });
+  it("retries the fuzzy lookup without the set when the set-scoped lookup 404s", async () => {
+    const fetchImpl = fakeFetch([
+      [/cards\/named\?fuzzy=.*&set=/, { object: "error" }, 404],
+      [/cards\/named\?fuzzy=/, { id: "x", name: "Black Lotus", set: "lea", set_name: "Limited Edition Alpha", collector_number: "232", prices: { usd: "100000" } }],
+    ]);
+    const quotes = await scryfallProvider.lookup({ game: "mtg", name: "Black Lotus", setCode: "zzz" }, fetchImpl);
+    expect(quotes[0]?.ungraded).toBe(100000);
+  });
+  it("lets the lookup by name decide when the set and number answer with another card", async () => {
+    // A mistyped collector number is answered with whatever sits at that slot.
+    const fetchImpl = fakeFetch([
+      ["api.scryfall.com/cards/mh2/151", { id: "r", name: "Ragavan, Nimble Pilferer", set: "mh2", set_name: "Modern Horizons 2", collector_number: "151", prices: { usd: "40.00" } }],
+      [/cards\/named/, { id: "b", name: "Lightning Bolt", set: "mh2", set_name: "Modern Horizons 2", collector_number: "429", prices: { usd: "3.00" } }],
+    ]);
+    const quotes = await scryfallProvider.lookup({ game: "mtg", name: "Lightning Bolt", setCode: "MH2", cardNumber: "151" }, fetchImpl);
+    expect(quotes[0]).toMatchObject({ ungraded: 3, matchedName: "Lightning Bolt" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("PriceCharting provider", () => {
+  beforeEach(() => setPriceChartingLimit(NO_LIMIT));
+  afterEach(() => {
+    delete process.env.PRICECHARTING_TOKEN;
+  });
+  it("is skipped without a token", async () => {
+    expect(priceChartingProvider.isConfigured()).toBe(false);
+    expect(await priceChartingProvider.lookup({ game: "pokemon", name: "Charizard" })).toEqual([]);
+  });
+  it("builds sports and TCG searches differently", () => {
+    expect(buildSearch({ game: "sports", name: "Mike Trout", year: 2011, manufacturer: "Topps", setName: "Topps Update", cardNumber: "US175" })).toBe("2011 Topps Update Mike Trout #US175");
+    expect(buildSearch({ game: "pokemon", name: "Charizard", cardNumber: "4/102", setName: "Base Set" })).toBe("Charizard #4 Base Set");
+  });
+  it("maps every grade field, the agency-specific 10s included, and cents to dollars", () => {
+    const q = productToQuote({
+      id: "1", "product-name": "Charizard #4", "console-name": "Pokemon Base Set", "loose-price": 25000,
+      "cib-price": 40000, "new-price": 60000, "graded-price": 80000, "box-only-price": 150000, "manual-only-price": 500000,
+      "bgs-10-price": 2000000, "condition-17-price": 450000, "condition-18-price": 400000, "condition-19-price": 900000, "condition-20-price": 3000000, "condition-21-price": 550000,
+    });
+    expect(q.ungraded).toBe(250);
+    expect(q.graded).toEqual({
+      "Grade 7": 400, "Grade 8": 600, "Grade 9": 800, "Grade 9.5": 1500, "PSA 10": 5000, "BGS 10": 20000, "CGC 10": 4500, "SGC 10": 4000,
+      "CGC 10 Pristine": 9000, "BGS 10 Black Label": 30000, "TAG 10": 5500,
+    });
+    // A field PriceCharting leaves out or zeroes is no price.
+    expect(productToQuote({ id: "2", "product-name": "x", "console-name": "y", "condition-21-price": 0 }).graded).toEqual({});
+  });
+  it("paces its calls to one a second across the process, and backs off for as long as a refusal asks", async () => {
+    process.env.PRICECHARTING_TOKEN = "t";
+    let now = 0;
+    const sleeps: number[] = [];
+    setPriceChartingLimit(rateLimit(1, 1000, { now: () => now, sleep: async (ms) => { sleeps.push(ms); now += ms; } }));
+    const q = { game: "pokemon" as const, name: "Charizard", externalIds: { pricecharting: "b" } };
+    const fetchImpl = fakeFetch([["api/product?", { status: "success", id: "b", "product-name": "Charizard #4", "console-name": "Pokemon Base Set", "loose-price": 26000 }]]);
+    await priceChartingProvider.lookup(q, fetchImpl);
+    await priceChartingProvider.lookup(q, fetchImpl);
+    // The second call waited out the second the first one started.
+    expect(sleeps).toEqual([1000]);
+    now += 1000;
+    const refusing = vi.fn(async () => new Response("{}", { status: 429, headers: { "retry-after": "30" } })) as unknown as typeof fetch;
+    await expect(priceChartingProvider.lookup(q, refusing)).rejects.toThrow(/PriceCharting is rate limiting this app; every PriceCharting lookup waits 30 seconds/);
+    now += 1000;
+    await priceChartingProvider.lookup(q, fetchImpl);
+    // Past the per-second window but inside the pause PriceCharting asked for: the rest of it is waited out.
+    expect(sleeps).toEqual([1000, 29000]);
+  });
+  it("ranks the product whose number and set match", async () => {
+    process.env.PRICECHARTING_TOKEN = "t";
+    const otherSet: PcProduct = { id: "a", "product-name": "Charizard #4", "console-name": "Pokemon Base Set 2", "loose-price": 10000 };
+    const match: PcProduct = { id: "b", "product-name": "Charizard #4", "console-name": "Pokemon Base Set", "loose-price": 25000, "manual-only-price": 500000 };
+    const otherNumber: PcProduct = { id: "c", "product-name": "Charizard #11", "console-name": "Pokemon Base Set", "loose-price": 3000 };
+    const products = [otherSet, match, otherNumber];
+    const q = { game: "pokemon" as const, name: "Charizard", cardNumber: "4/102", setName: "Base Set" };
+    expect(scoreProduct(q, match)).toBeGreaterThan(scoreProduct(q, otherSet));
+    expect(scoreProduct(q, match)).toBeGreaterThan(scoreProduct(q, otherNumber));
+    const quotes = await priceChartingProvider.lookup(q, fakeFetch([["api/products", { status: "success", products }]]));
+    expect(quotes[0]).toMatchObject({ externalId: "b", ungraded: 250, graded: { "PSA 10": 5000 } });
+  });
+  it("goes straight to the product when an id is known", async () => {
+    process.env.PRICECHARTING_TOKEN = "t";
+    const fetchImpl = fakeFetch([["api/product?", { status: "success", id: "b", "product-name": "Charizard #4", "console-name": "Pokemon Base Set", "loose-price": 26000 }]]);
+    const quotes = await priceChartingProvider.lookup({ game: "pokemon", name: "Charizard", externalIds: { pricecharting: "b" } }, fetchImpl);
+    expect(quotes[0]?.ungraded).toBe(260);
+  });
+});
+
+describe("which printing a Magic price is for", () => {
+  it("says foil when the foil price is the only one there is", async () => {
+    const card = {
+      id: "abc",
+      name: "Lightning Bolt",
+      set: "2xm",
+      set_name: "Double Masters",
+      collector_number: "129",
+      rarity: "uncommon",
+      prices: { usd: null, usd_foil: "42.00" },
+      scryfall_uri: "https://scryfall.example/bolt",
+    };
+    const fetchImpl = fakeFetch([["api.scryfall.com", card]]);
+    // Asking for a non-foil copy, but only the foil has a price.
+    const quotes = await scryfallProvider.lookup({ game: "mtg", name: "Lightning Bolt" }, fetchImpl);
+    expect(quotes[0]).toMatchObject({ ungraded: 42, ungradedVariants: { Foil: 42 } });
+    expect(quotes[0]?.matchedDetail).toContain("Foil");
+    expect(quotes[0]?.matchedDetail).not.toContain("Non-foil");
+  });
+
+  it("prefers the printing that was asked for", async () => {
+    const card = {
+      id: "abc",
+      name: "Lightning Bolt",
+      set: "2xm",
+      set_name: "Double Masters",
+      collector_number: "129",
+      prices: { usd: "3.00", usd_foil: "42.00" },
+    };
+    const fetchImpl = fakeFetch([["api.scryfall.com", card]]);
+    const plain = await scryfallProvider.lookup({ game: "mtg", name: "Lightning Bolt" }, fetchImpl);
+    expect(plain[0]).toMatchObject({ ungraded: 3 });
+    expect(plain[0]?.matchedDetail).toContain("Non-foil");
+
+    const foil = await scryfallProvider.lookup({ game: "mtg", name: "Lightning Bolt", variant: "foil" }, fetchImpl);
+    expect(foil[0]).toMatchObject({ ungraded: 42 });
+    expect(foil[0]?.matchedDetail).toContain("Foil");
+  });
+});
+
+describe("what a provider refuses to call a match", () => {
+  it("does not take a Pokémon card that merely contains the name, from a set the query never mentioned", async () => {
+    const fetchImpl = fakeFetch([
+      ["api.pokemontcg.io/v2/cards?q=", { data: [{ id: "xy1-99", name: "Charizard's Charmander", number: "99", set: { id: "xy1", name: "XY" }, tcgplayer: { prices: { normal: { market: 2 } } } }] }],
+    ]);
+    expect(await pokemonTcgProvider.lookup({ game: "pokemon", name: "Charizard", cardNumber: "4/102", setName: "Base Set" }, fetchImpl)).toEqual([]);
+  });
+  it("still takes the best name match for a query that has nothing but a name, and a number that agrees over a set that does not", async () => {
+    const vmax = fakeFetch([
+      ["api.pokemontcg.io/v2/cards?q=", { data: [{ id: "swsh4-44", name: "Pikachu VMAX", number: "44", set: { id: "swsh4", name: "Vivid Voltage" }, tcgplayer: { prices: { holofoil: { market: 30 } } } }] }],
+    ]);
+    expect((await pokemonTcgProvider.lookup({ game: "pokemon", name: "Pikachu" }, vmax))[0]).toMatchObject({ ungraded: 30 });
+    const base2 = fakeFetch([
+      ["api.pokemontcg.io/v2/cards?q=", { data: [{ id: "base4-4", name: "Charizard", number: "4", set: { id: "base4", name: "Base Set 2" }, tcgplayer: { prices: { holofoil: { market: 250 } } } }] }],
+    ]);
+    expect((await pokemonTcgProvider.lookup({ game: "pokemon", name: "Charizard", cardNumber: "4/102", setName: "Base Set" }, base2))[0]).toMatchObject({ ungraded: 250 });
+  });
+  it("does not let a fuzzy Yu-Gi-Oh! search answer with a card missing a word of the name", async () => {
+    const fetchImpl = fakeFetch([
+      ["cardinfo.php?name=", { error: "No card matching your query was found" }, 400],
+      ["cardinfo.php?fname=", { data: [{ id: 23995346, name: "Blue-Eyes Ultimate Dragon", card_prices: [{ tcgplayer_price: "50.00" }] }] }],
+    ]);
+    expect(await ygoprodeckProvider.lookup({ game: "yugioh", name: "Blue-Eyes White Dragon" }, fetchImpl)).toEqual([]);
+  });
+  it("does not let Scryfall's fuzzy lookup answer with the closest card it knows", async () => {
+    const fetchImpl = fakeFetch([
+      [/cards\/named/, { id: "h", name: "Lightning Helix", set: "rav", set_name: "Ravnica: City of Guilds", collector_number: "213", prices: { usd: "1.00" } }],
+    ]);
+    expect(await scryfallProvider.lookup({ game: "mtg", name: "Lightning Bolt" }, fetchImpl)).toEqual([]);
+    // Every word, in any order, with the card's own punctuation: still the card.
+    const faces = fakeFetch([[/cards\/named/, { id: "f", name: "Fire // Ice", set: "apc", set_name: "Apocalypse", collector_number: "128", prices: { usd: "2.00" } }]]);
+    expect((await scryfallProvider.lookup({ game: "mtg", name: "Fire" }, faces))[0]).toMatchObject({ ungraded: 2 });
+  });
+  it("does not let PriceCharting match on one shared word and the category alone", async () => {
+    process.env.PRICECHARTING_TOKEN = "t";
+    try {
+      const fetchImpl = fakeFetch([
+        ["pricecharting.com", { status: "success", products: [{ id: "9", "product-name": "Holo Rare Wall Poster", "console-name": "Pokemon Promo", "loose-price": 500 }] }],
+      ]);
+      expect(await priceChartingProvider.lookup({ game: "pokemon", name: "Charizard Holo", setName: "Base Set" }, fetchImpl)).toEqual([]);
+    } finally {
+      delete process.env.PRICECHARTING_TOKEN;
+    }
+  });
+});

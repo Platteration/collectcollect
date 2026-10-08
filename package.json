@@ -3,43 +3,30 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint .",
-    "typecheck": "next typegen && tsc --noEmit",
-    "test": "vitest run",
+    "dev": "npm run dev -w @collectcollect/cards",
+    "build": "npm run build --workspaces --if-present",
+    "start": "npm run start -w @collectcollect/cards",
+    "start:skins": "npm run start -w @collectcollect/skins",
+    "lint": "npm run lint --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test --workspaces --if-present",
     "test:conventions": "node --test test/conventions.mjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run test:conventions",
-    "test:e2e": "npm run build && playwright test",
+    "test:e2e": "npm run build && npm run e2e --workspaces --if-present",
     "test:all": "npm test && npm run test:e2e",
     "e2e": "npm run test:e2e",
-    "e2e:ui": "playwright test --ui"
+    "cards": "npm run dev -w @collectcollect/cards",
+    "skins": "npm run dev -w @collectcollect/skins"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.124.0",
-    "better-sqlite3": "^13.0.3",
-    "next": "16.3.4",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "sharp": "^0.35.4",
-    "zod": "^4.5.4"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.56.1",
-    "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^9.6.0",
-    "@types/node": "^22.20.1",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.4",
-    "tailwindcss": "^4",
-    "typescript": "^5",
-    "vitest": "^5.0.0"
+    "next": "16.3.8"
   }
 }

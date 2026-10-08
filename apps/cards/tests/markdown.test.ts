@@ -1,0 +1,805 @@
+import fs from "node:fs";
+import path from "node:path";
+import { beforeEach, describe, expect, it } from "vitest";
+import { getDb, openDatabase, setDb } from "@/lib/db";
+import { addAcquisition, addSnapshot, createCard, deleteCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
+import { deleteSale, recordSale } from "@/lib/sales";
+import { cardsDir, collectionDir, collectionStatus, flushCollection, readCardFiles, rebuildCollection } from "@/lib/markdown/mirror";
+import { importCardFiles } from "@/lib/markdown/restore";
+import { costBasis, listLots, listSaleLots, verifyLotInvariant } from "@/lib/acquisitions";
+import { listSales, listSalesForCard } from "@/lib/sales";
+import { realizedReturn } from "@/lib/analytics";
+import { latestSnapshotsByCard } from "@/lib/cards";
+import { parseCardMarkdown } from "@/lib/markdown/card";
+import { parseDocument, readSection, readTable, writeFrontMatter } from "@collectcollect/core/markdown/format";
+import type { GradingReportInput, PriceSummary } from "@/lib/types";
+
+function at<T>(xs: readonly T[], i: number): T {
+  const x = xs[i];
+  if (x === undefined) throw new Error(`expected an element at ${i}`);
+  return x;
+}
+
+const summary =(value: number, at: string): PriceSummary => ({
+  currency: "USD",
+  fetchedAt: at,
+  ungraded: value,
+  ungradedSource: "PriceCharting",
+  graded: { "PSA 10": value * 10, "PSA 9": value * 3 },
+  gradedSource: "PriceCharting",
+  estimatedGraded: {},
+  yourCopyValue: value,
+  yourCopyBasis: "Ungraded price, Near Mint.",
+  quotes: [],
+  errors: [],
+});
+
+function fileFor(id: number): string {
+  const name = fs.readdirSync(cardsDir()).find((f) => f.startsWith(String(id).padStart(4, "0")));
+  if (!name) throw new Error(`no file for card ${id}`);
+  return fs.readFileSync(path.join(cardsDir(), name), "utf8");
+}
+
+/** A PSA report as its API answers it, with PSA's scans. */
+const psaReport = (over: Partial<GradingReportInput> = {}): GradingReportInput => ({
+  company: "PSA",
+  cert: "12345678",
+  source: "psa",
+  checkedAt: "2026-10-01T00:00:00.000Z",
+  grade: "8",
+  gradeText: "NM-MT 8",
+  label: "Standard",
+  population: { atGrade: 12, total: null, higher: 3 },
+  images: { front: "https://images.psacard.com/front.jpg", back: "https://images.psacard.com/back.jpg" },
+  url: "https://www.psacard.com/cert/12345678/psa",
+  identity: { subject: "Ken Griffey Jr.", brand: "Upper Deck", year: "1989", cardNumber: "1", variety: null, category: "Baseball" },
+  ...over,
+});
+
+/** A TAG report as the owner types it off the DIG page. */
+const tagReport = (): GradingReportInput => ({
+  company: "TAG",
+  cert: "A1234567",
+  source: "manual",
+  checkedAt: "2026-10-01T00:00:00.000Z",
+  grade: "10",
+  label: "Pristine",
+  tag: { score: 973, rollups: { centering: 990, corners: 960, edges: 970, surface: 980 }, composite: { front: 975, back: 970 }, dings: { cornersFront: 0, surfaceBack: 1 } },
+  url: "https://my.taggrading.com/card/A1234567",
+});
+
+describe("markdown encoding", () => {
+  it("round-trips front matter through JSON values", () => {
+    const text = writeFrontMatter({ name: "Chari|zard", year: 1999, external_ids: { pokemontcg: "base1-4" }, blank: null, empty: {} });
+    const { data } = parseDocument(text);
+    expect(data).toEqual({ name: "Chari|zard", year: 1999, external_ids: { pokemontcg: "base1-4" } });
+  });
+
+  it("reads front matter a person typed by hand", () => {
+    const { data } = parseDocument(`---\nname: Charizard\nquantity: 3\nlocation: 'Binder 2'\nnotes:\n---\n\n# Charizard\n`);
+    expect(data).toEqual({ name: "Charizard", quantity: 3, location: "Binder 2", notes: null });
+  });
+
+  it("keeps pipes and headings out of the structure", () => {
+    const text = ["## Sales", "", "| A | B |", "| --- | --- |", "| one \\| two | 3 |", "", "## After", "", "later"].join("\n");
+    expect(readTable(text, "Sales")).toEqual([["one | two", "3"]]);
+    expect(readSection(text, "After")).toBe("later");
+  });
+});
+
+describe("a card as a document", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("writes a file a person can read and the app can read back", () => {
+    const card = createCard({
+      game: "pokemon",
+      name: "Charizard",
+      setName: "Base Set",
+      cardNumber: "4/102",
+      year: 1999,
+      quantity: 2,
+      gradingCompany: "PSA",
+      grade: "9",
+      purchasePrice: 250,
+      location: "Binder 2, page 4",
+      notes: "Corner ding.\n\n# not a heading",
+      externalIds: { pokemontcg: "base1-4" },
+      manualGraded: { "PSA 10": 5000 },
+    });
+    addSnapshot(card.id, summary(300, "2026-01-02T10:00:00.000Z"));
+    addSnapshot(card.id, summary(420, "2026-02-02T10:00:00.000Z"));
+    recordSale(card.id, { quantity: 1, unitPrice: 500, fees: 40, venue: "eBay", soldAt: "2026-03-01T00:00:00.000Z" });
+
+    const text = fileFor(card.id);
+    expect(text).toContain("# Charizard");
+    expect(text).toContain("Base Set");
+    expect(text).toContain("Binder 2, page 4");
+    expect(text).toContain("$500.00");
+
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.id).toBe(card.id);
+    expect(parsed.input).toMatchObject({
+      name: "Charizard",
+      setName: "Base Set",
+      cardNumber: "4/102",
+      year: 1999,
+      quantity: 1,
+      grade: "9",
+      gradingCompany: "PSA",
+      purchasePrice: 250,
+      location: "Binder 2, page 4",
+      externalIds: { pokemontcg: "base1-4" },
+      manualGraded: { "PSA 10": 5000 },
+    });
+    expect(parsed.input.notes).toBe("Corner ding.\n\n# not a heading");
+    expect(parsed.sales).toHaveLength(1);
+    expect(parsed.sales[0]).toMatchObject({ quantity: 1, unitPrice: 500, fees: 40, venue: "eBay" });
+    expect(parsed.snapshots).toHaveLength(2);
+    expect(parsed.snapshots[0]?.summary).toMatchObject({ yourCopyValue: 420, ungraded: 420, graded: { "PSA 10": 4200, "PSA 9": 1260 } });
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("does not round money on the way through", () => {
+    // A cost that is not a whole number of cents is still what was paid, and
+    // the file is the record: $1.005 written as $1.01 would come back changed.
+    const card = createCard({ game: "mtg", name: "Bolt", quantity: 2, purchasePrice: 1.005 });
+    const text = fileFor(card.id);
+    expect(text).toContain("$1.005");
+    expect(parseCardMarkdown(text)!.acquisitions[0]?.unitCost).toBe(1.005);
+    // A whole number of cents still reads the way people write money.
+    const whole = createCard({ game: "mtg", name: "Counterspell", quantity: 1, purchasePrice: 3 });
+    expect(fileFor(whole.id)).toContain("$3.00");
+  });
+
+  it("mirrors every column the cards table has", () => {
+    const card = createCard({
+      game: "sports",
+      sport: "Baseball",
+      name: "Ken Griffey Jr.",
+      setName: "Upper Deck",
+      setCode: "ud89",
+      cardNumber: "1",
+      year: 1989,
+      rarity: "Rookie",
+      variant: "Star",
+      language: "English",
+      manufacturer: "Upper Deck",
+      quantity: 2,
+      condition: "LP",
+      gradingCompany: "PSA",
+      grade: "8",
+      certNumber: "12345678",
+      centering: { front: { lr: "60/40" } },
+      gradingReport: psaReport(),
+      purchasePrice: 40,
+      notes: "Off-centre.",
+      imagePath: "11111111-1111-4111-8111-111111111111.jpg",
+      referenceImageUrl: "https://example.com/a.jpg",
+      accentColor: "#123456",
+      location: "Box A",
+      externalIds: { pricecharting: "42" },
+      manualUngraded: 30,
+      manualGraded: { "PSA 10": 900 },
+      gradingStatus: "planned",
+      identification: { name: "Ken Griffey Jr.", confidence: 0.9 } as never,
+    });
+    const text = fileFor(card.id);
+    const front = parseDocument(text).data;
+    // Written as prose rather than as a front matter field.
+    const inBody: Record<string, boolean> = {
+      notes: text.includes("Off-centre."),
+      identification: text.includes("```json"),
+    };
+    const alias: Record<string, string> = { image_path: "photo" };
+    // Derived from `name` on every open (db.ts backfillNameKeys), so it is an
+    // index key rather than anything the file would need to carry.
+    const derived = new Set(["name_key"]);
+    const columns = (getDb().prepare("PRAGMA table_info(cards)").all() as Array<{ name: string }>).map((c) => c.name).filter((c) => !derived.has(c));
+    const missing = columns.filter((column) => {
+      if (column in inBody) return !inBody[column];
+      const key = alias[column] ?? column;
+      return !(key in front);
+    });
+    expect(missing).toEqual([]);
+  });
+
+  it("leaves one file behind even for a card whose name has nothing to slug", () => {
+    // A name with no latin letters gives an empty slug, so the file is just
+    // the id; renaming it must still take the old file with it.
+    const card = createCard({ game: "pokemon", name: "リザードン" });
+    expect(fs.readdirSync(cardsDir())).toEqual(["0001.md"]);
+    updateCard(card.id, { name: "Charizard" });
+    expect(fs.readdirSync(cardsDir())).toEqual(["0001-charizard.md"]);
+    updateCard(card.id, { name: "リザードン" });
+    expect(fs.readdirSync(cardsDir())).toEqual(["0001.md"]);
+    deleteCard(card.id);
+    expect(fs.readdirSync(cardsDir())).toEqual([]);
+  });
+
+  it("writes the explainer with the very first card, not on a delay", () => {
+    createCard({ game: "pokemon", name: "First ever" });
+    expect(fs.existsSync(path.join(collectionDir(), "README.md"))).toBe(true);
+  });
+
+  it("follows a rename and forgets a deleted card", () => {
+    const card = createCard({ game: "pokemon", name: "Pikachu", setName: "Base Set" });
+    expect(fs.readdirSync(cardsDir())).toEqual(["0001-pikachu-base-set.md"]);
+    updateCard(card.id, { name: "Surfing Pikachu" });
+    expect(fs.readdirSync(cardsDir())).toEqual(["0001-surfing-pikachu-base-set.md"]);
+    deleteCard(card.id);
+    expect(fs.readdirSync(cardsDir())).toEqual([]);
+  });
+
+  it("takes an undone sale back out of the file", () => {
+    const card = createCard({ game: "pokemon", name: "Mewtwo", quantity: 2 });
+    const sale = recordSale(card.id, { quantity: 1, unitPrice: 90 });
+    expect(fileFor(card.id)).toContain("## Sales");
+    deleteSale(sale.id);
+    expect(fileFor(card.id)).not.toContain("## Sales");
+  });
+
+  it("lists the whole collection in an index", () => {
+    createCard({ game: "pokemon", name: "Alakazam", setName: "Base Set", quantity: 2 });
+    const b = createCard({ game: "yugioh", name: "Dark Magician" });
+    addSnapshot(b.id, summary(50, "2026-01-01T00:00:00.000Z"));
+    flushCollection();
+    const index = fs.readFileSync(path.join(collectionDir(), "index.md"), "utf8");
+    expect(index).toContain("[Alakazam](cards/0001-alakazam-base-set.md)");
+    expect(index).toContain("[Dark Magician](cards/0002-dark-magician.md)");
+    expect(index).toContain("$50.00");
+    expect(fs.existsSync(path.join(collectionDir(), "README.md"))).toBe(true);
+  });
+});
+
+describe("files written by something other than this app", () => {
+  it("does not let a file reshape what it is read into", () => {
+    const text = [
+      "---",
+      'name: "Sneaky"',
+      'game: "pokemon"',
+      '__proto__: {"quantity": 999}',
+      'external_ids: {"__proto__": "x", "pricecharting": "42"}',
+      'manual_graded: {"__proto__": 1, "PSA 10": 500}',
+      "---",
+      "",
+      "# Sneaky",
+      "",
+    ].join("\n");
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.input.quantity).toBe(1);
+    expect(parsed.input.externalIds).toEqual({ pricecharting: "42" });
+    expect(parsed.input.manualGraded).toEqual({ "PSA 10": 500 });
+    expect(Object.getPrototypeOf(parsed.input.externalIds!)).toBe(Object.prototype);
+  });
+
+  it("ignores an id no database could hold", () => {
+    const text = ["---", 'name: "Huge"', 'game: "pokemon"', "id: 1e30", "---", "", "# Huge", ""].join("\n");
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.id).toBeNull();
+    expect(parsed.warnings.join(" ")).toMatch(/outside the usable range/);
+  });
+
+  it("carries centering and a grading report through the file and back, and drops one it cannot read with a warning", () => {
+    const card = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", gradingCompany: "TAG", grade: "10", certNumber: "A1234567", centering: { front: { lr: "54L/46R 49T/51B" }, back: { lr: "45/55" } }, gradingReport: tagReport() });
+    const text = fileFor(card.id);
+    // Written for a person as well as for the app.
+    expect(text).toContain("## Grading report");
+    expect(text).toContain("TAG 10 Pristine · cert A1234567 · checked 2026-10-01 · entered by hand from the report");
+    expect(text).toContain("Report: <https://my.taggrading.com/card/A1234567>");
+    expect(text).toContain("TAG score 973 of 1000 (centering 990, corners 960, edges 970, surface 980).");
+    expect(text).toContain("## Centering");
+    expect(text).toContain("Front 54/46 left-right, 49/51 top-bottom; back 45/55 left-right.");
+    expect(text).toMatch(/allows up to PSA 10, BGS Pristine 10, CGC Gem Mint 10, SGC 10, TAG Gem Mint 10, ACE 10 \(approximate\)/);
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.input.centering).toEqual(card.centering);
+    expect(parsed.input.gradingReport).toEqual(card.gradingReport);
+    expect(parsed.warnings).toEqual([]);
+
+    const psa = createCard({ game: "sports", name: "Ken Griffey Jr.", gradingCompany: "PSA", grade: "8", certNumber: "12345678", gradingReport: psaReport() });
+    const psaText = fileFor(psa.id);
+    expect(psaText).toContain("PSA 8 Standard · cert 12345678 · checked 2026-10-01 · from PSA's records");
+    expect(psaText).toContain("Population 12 at this grade, 3 higher.");
+    expect(psaText).toContain("PSA lists it as: 1989 Upper Deck Ken Griffey Jr. #1 (Baseball).");
+    expect(psaText).toContain("Front scan: <https://images.psacard.com/front.jpg> · Back scan: <https://images.psacard.com/back.jpg>");
+    expect(parseCardMarkdown(psaText)!.input.gradingReport).toEqual(psa.gradingReport);
+
+    // A report edited by hand into something that is not one costs that
+    // field and a warning, never the card.
+    const broken = parseCardMarkdown(text.replace('"score":973', '"score":"lots"'))!;
+    expect(broken.input.name).toBe("Charizard");
+    expect(broken.input.gradingReport).toBeNull();
+    expect(broken.input.centering).toEqual(card.centering);
+    expect(broken.warnings.join(" ")).toMatch(/grading report was not readable/);
+    const brokenCentering = parseCardMarkdown(text.replace("[54,46]", "[60,45]"))!;
+    expect(brokenCentering.input.centering).toBeNull();
+    expect(brokenCentering.warnings.join(" ")).toMatch(/centering block was not readable/);
+
+    // A file from before either existed reads as it did.
+    const older = parseCardMarkdown(["---", 'name: "Charizard"', 'game: "pokemon"', "---", "", "# Charizard", ""].join("\n"))!;
+    expect(older.input).toMatchObject({ centering: null, gradingReport: null });
+    expect(older.warnings).toEqual([]);
+  });
+
+  it("matches a file to the slab with its cert, never to another cert", () => {
+    createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", gradingCompany: "PSA", grade: "10", certNumber: "11111111" });
+    flushCollection();
+    const file = at(readCardFiles(), 0);
+
+    setDb(openDatabase(":memory:"));
+    const other = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", gradingCompany: "PSA", grade: "10", certNumber: "22222222" });
+    addSnapshot(other.id, summary(5000, "2026-01-02T10:00:00.000Z"));
+    expect(importCardFiles([file])).toMatchObject({ created: 1, replaced: 0 });
+    expect(listCards()).toHaveLength(2);
+    expect(listSnapshots(other.id)).toHaveLength(1);
+    // The same cert is the same slab.
+    expect(importCardFiles([file])).toMatchObject({ created: 0 });
+    expect(listCards()).toHaveLength(2);
+  });
+
+  it("carries a real identification back and refuses one that is not a card", () => {
+    const identification = {
+      game: "pokemon",
+      sport: null,
+      name: "Charizard",
+      set_name: "Base Set",
+      set_code: "base1",
+      card_number: "4/102",
+      year: 1999,
+      rarity: "Holo Rare",
+      variant: "1st edition",
+      language: "English",
+      manufacturer: null,
+      subject: "Charizard",
+      grading: { company: null, grade: null, cert_number: null },
+      condition_notes: "Slight whitening.",
+      condition_assessment: {
+        centering: "60/40",
+        corners: "sharp",
+        edges: "clean",
+        surface: "clean",
+        estimated_grade_low: "8",
+        estimated_grade_high: "9",
+        caveat: null,
+      },
+      confidence: 0.94,
+      alternatives: [],
+      search_query: "Charizard 4/102 Base Set",
+    };
+    const card = createCard({ game: "pokemon", name: "Charizard", identification: identification as never });
+    const parsed = parseCardMarkdown(fileFor(card.id))!;
+    expect(parsed.input.identification).toEqual(identification);
+
+    // A record from before the condition assessment existed still comes back.
+    const older = { ...identification, condition_assessment: undefined };
+    const olderCard = createCard({ game: "pokemon", name: "Venusaur", identification: older as never });
+    expect(parseCardMarkdown(fileFor(olderCard.id))!.input.identification).toMatchObject({ name: "Charizard" });
+
+    // So does one that carries the numeric centering ratios.
+    const measured = { ...identification, condition_assessment: { ...identification.condition_assessment, centering_ratios: { front_lr: "60/40", front_tb: "52/48", back_lr: null, back_tb: null } } };
+    const measuredCard = createCard({ game: "pokemon", name: "Blastoise", identification: measured as never });
+    expect(parseCardMarkdown(fileFor(measuredCard.id))!.input.identification).toEqual(measured);
+
+    // Something that is only shaped like JSON is dropped, with a warning,
+    // rather than reaching pages that do arithmetic on its fields.
+    const broken = fileFor(card.id).replace('"confidence": 0.94', '"confidence": "very"');
+    const brokenParsed = parseCardMarkdown(broken)!;
+    expect(brokenParsed.input.identification).toBeNull();
+    expect(brokenParsed.warnings.join(" ")).toMatch(/did not describe a card/);
+  });
+
+  it("writes what every copy cost into the file and reads it back", () => {
+    const card = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", purchasePrice: 100 });
+    addAcquisition(card.id, { quantity: 2, unitCost: 0, source: "pack pull | free" });
+    addAcquisition(card.id, { quantity: 1, unitCost: null, source: "inherited" });
+
+    const text = fileFor(card.id);
+    expect(text).toContain("## Acquisitions");
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.acquisitions).toMatchObject([
+      { quantity: 1, remaining: 1, unitCost: 100 },
+      // Free is a price. Unknown is not, and the two must not collapse.
+      { quantity: 2, remaining: 2, unitCost: 0, source: "pack pull | free" },
+      { quantity: 1, remaining: 1, unitCost: null, source: "inherited" },
+    ]);
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("says which copies a sale took", () => {
+    const card = createCard({ game: "pokemon", name: "Charizard", purchasePrice: 100 });
+    addAcquisition(card.id, { quantity: 1, unitCost: 300 });
+    recordSale(card.id, { quantity: 2, unitPrice: 500 });
+    const parsed = parseCardMarkdown(fileFor(card.id))!;
+    expect(parsed.sales[0]?.lots).toMatchObject([
+      { quantity: 1, unitCost: 100 },
+      { quantity: 1, unitCost: 300 },
+    ]);
+  });
+
+  it("reads an old file that only says what was paid", () => {
+    const text = [
+      "---",
+      'id: 7',
+      'name: "Charizard"',
+      'game: "pokemon"',
+      "quantity: 3",
+      "purchase_price: 250",
+      'created_at: "2024-01-01T00:00:00.000Z"',
+      "---",
+      "",
+      "# Charizard",
+      "",
+    ].join("\n");
+    const parsed = parseCardMarkdown(text)!;
+    // One purchase of three copies at the only price the file knows.
+    expect(parsed.acquisitions).toEqual([
+      { quantity: 3, remaining: 3, unitCost: 250, acquiredAt: "2024-01-01T00:00:00.000Z", source: null, notes: null },
+    ]);
+
+    const empty = parseCardMarkdown(text.replace("quantity: 3", "quantity: 0"))!;
+    expect(empty.acquisitions).toEqual([]);
+  });
+
+  it("keeps a sale readable in a file written before lots existed", () => {
+    const text = [
+      "---",
+      'name: "Charizard"',
+      'game: "pokemon"',
+      "quantity: 0",
+      "---",
+      "",
+      "# Charizard",
+      "",
+      "## Sales",
+      "",
+      "| Sold | Copies | Each | Fees | Cost each | Venue | Notes |",
+      "| --- | --- | --- | --- | --- | --- | --- |",
+      "| 2026-01-02T10:00:00.000Z | 1 | $500.00 | $40.00 | $100.00 | eBay | — |",
+      "",
+    ].join("\n");
+    const parsed = parseCardMarkdown(text)!;
+    // Seven columns, not eight: the sale still reads, with no provenance.
+    expect(parsed.sales[0]).toMatchObject({ quantity: 1, unitPrice: 500, fees: 40, unitCost: 100, venue: "eBay", lots: [] });
+  });
+
+  it("keeps a source label that has brackets of its own", () => {
+    const text = [
+      "---",
+      'name: "Bolt"',
+      'game: "mtg"',
+      "---",
+      "",
+      "# Bolt",
+      "",
+      "## Value history",
+      "",
+      "| Date | Your copy | Ungraded | Graded | Basis |",
+      "| --- | --- | --- | --- | --- |",
+      "| 2026-02-02T10:00:00.000Z | $8.00 | $8.00 (Scryfall (TCGplayer-derived USD)) | PSA 10 $200.00 (PriceCharting) | Ungraded. |",
+      "",
+    ].join("\n");
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.snapshots[0]?.summary).toMatchObject({
+      ungraded: 8,
+      ungradedSource: "Scryfall (TCGplayer-derived USD)",
+      graded: { "PSA 10": 200 },
+      gradedSource: "PriceCharting",
+    });
+  });
+
+  it("is not confused by a card named after one of its own sections", () => {
+    const card = createCard({ game: "pokemon", name: "Notes", notes: "The real note." });
+    const parsed = parseCardMarkdown(fileFor(card.id))!;
+    expect(parsed.input.name).toBe("Notes");
+    expect(parsed.input.notes).toBe("The real note.");
+  });
+
+  it("keeps a name with a newline in it from writing its own sections", () => {
+    const card = createCard({ game: "pokemon", name: "Trickster\n## Sales\n| 2026-01-01 | 9 | $1.00 |" });
+    const text = fileFor(card.id);
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.sales).toEqual([]);
+    expect(text).not.toMatch(/^## Sales$/m);
+  });
+
+  it("keeps a note that looks like the rest of the file", () => {
+    const card = createCard({
+      game: "pokemon",
+      name: "Meta",
+      notes: "## Sales\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n\n---\n\n\n# The end\n\n\\# already escaped",
+    });
+    const parsed = parseCardMarkdown(fileFor(card.id))!;
+    expect(parsed.input.notes).toBe(card.notes);
+    expect(parsed.sales).toEqual([]);
+  });
+});
+
+describe("recovering a collection from its files", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("rebuilds a collection into an empty database", () => {
+    const a = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", quantity: 2, purchasePrice: 100 });
+    addSnapshot(a.id, summary(300, "2026-01-02T10:00:00.000Z"));
+    recordSale(a.id, { quantity: 1, unitPrice: 500, fees: 20 });
+    createCard({ game: "sports", name: "Ken Griffey Jr.", year: 1989, location: "Box A" });
+    flushCollection();
+    const files = readCardFiles();
+    expect(files).toHaveLength(2);
+
+    setDb(openDatabase(":memory:"));
+    expect(listCards()).toHaveLength(0);
+    const result = importCardFiles(files);
+    expect(result).toMatchObject({ created: 2, replaced: 0, sales: 1, prices: 1 });
+    expect(result.skipped).toEqual([]);
+
+    const cards = listCards();
+    expect(cards).toHaveLength(2);
+    const charizard = cards.find((c) => c.name === "Charizard")!;
+    expect(charizard.id).toBe(a.id);
+    expect(charizard).toMatchObject({ quantity: 1, purchasePrice: 100, setName: "Base Set" });
+    expect(listCards({ location: "Box A" })).toHaveLength(1);
+  });
+
+  it("recognises a card it already holds when the file's id is taken", () => {
+    createCard({ game: "pokemon", name: "Snorlax", setName: "Jungle", quantity: 3 });
+    flushCollection();
+    const files = readCardFiles();
+
+    // A different collection, where id 1 is somebody else entirely.
+    setDb(openDatabase(":memory:"));
+    createCard({ game: "yugioh", name: "Dark Magician" });
+    createCard({ game: "pokemon", name: "Snorlax", setName: "Jungle", quantity: 1 });
+    const first = importCardFiles(files);
+    expect(first).toMatchObject({ created: 0, replaced: 1 });
+    expect(listCards().find((c) => c.name === "Snorlax")!.quantity).toBe(3);
+    // ...and doing it again still changes nothing.
+    expect(importCardFiles(files)).toMatchObject({ created: 0, replaced: 1 });
+    expect(listCards()).toHaveLength(2);
+  });
+
+  it("does not read the folder's own index or explainer as cards", () => {
+    createCard({ game: "pokemon", name: "Snorlax" });
+    flushCollection();
+    const readme = fs.readFileSync(path.join(collectionDir(), "README.md"), "utf8");
+    const index = fs.readFileSync(path.join(collectionDir(), "index.md"), "utf8");
+    expect(parseCardMarkdown(readme)).toBeNull();
+    expect(parseCardMarkdown(index)).toBeNull();
+  });
+
+  it("is safe to run twice", () => {
+    createCard({ game: "pokemon", name: "Snorlax", quantity: 3 });
+    flushCollection();
+    const files = readCardFiles();
+    setDb(openDatabase(":memory:"));
+    importCardFiles(files);
+    const second = importCardFiles(readCardFiles());
+    expect(second).toMatchObject({ created: 0, replaced: 1 });
+    expect(listCards()).toHaveLength(1);
+  });
+
+  it("writes the recovered card back under the id its file claimed", () => {
+    createCard({ game: "pokemon", name: "Filler" });
+    createCard({ game: "pokemon", name: "Filler two" });
+    const zapdos = createCard({ game: "pokemon", name: "Zapdos", setName: "Base Set" });
+    flushCollection();
+    const file = readCardFiles().find((f) => f.name.includes("zapdos"))!;
+
+    setDb(openDatabase(":memory:"));
+    importCardFiles([file]);
+    expect(listCards()[0]?.id).toBe(zapdos.id);
+    expect(fs.readdirSync(cardsDir())).toContain(`000${zapdos.id}-zapdos-base-set.md`);
+    // Adopting the id must not leave a file behind under the one it was
+    // created with a moment earlier.
+    expect(fs.readdirSync(cardsDir()).filter((f) => f.includes("zapdos"))).toHaveLength(1);
+  });
+
+  it("will not let a raw copy overwrite a slab and its history", () => {
+    // A file describing an ungraded Charizard...
+    createCard({ game: "pokemon", name: "Charizard", setName: "Base Set" });
+    flushCollection();
+    const raw = at(readCardFiles(), 0);
+
+    // ...meets a collection where that card came back from the grader, with a
+    // sale and a price history behind it.
+    setDb(openDatabase(":memory:"));
+    const slab = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", gradingCompany: "PSA", grade: "10", quantity: 2 });
+    addSnapshot(slab.id, summary(5000, "2026-01-02T10:00:00.000Z"));
+    recordSale(slab.id, { quantity: 1, unitPrice: 5200 });
+
+    const result = importCardFiles([raw]);
+    expect(result).toMatchObject({ created: 1, replaced: 0 });
+    const kept = listCards().find((c) => c.grade === "10")!;
+    expect(kept.id).toBe(slab.id);
+    expect(listSnapshots(kept.id)).toHaveLength(1);
+    expect(listCards()).toHaveLength(2);
+  });
+
+  it("never overwrites a card that merely shares an id", () => {
+    createCard({ game: "pokemon", name: "Somebody Else's Charizard", setName: "Base Set" });
+    flushCollection();
+    const stranger = at(readCardFiles(), 0);
+
+    setDb(openDatabase(":memory:"));
+    const mine = createCard({ game: "yugioh", name: "Dark Magician" });
+    const result = importCardFiles([stranger]);
+    expect(result).toMatchObject({ created: 1, replaced: 0 });
+    expect(result.warnings[0]?.message).toContain("Dark Magician");
+    const cards = listCards();
+    expect(cards).toHaveLength(2);
+    expect(cards.find((c) => c.id === mine.id)!.name).toBe("Dark Magician");
+  });
+
+  it("keeps handing out fresh ids after adopting the ones in the files", () => {
+    createCard({ game: "pokemon", name: "First" });
+    createCard({ game: "pokemon", name: "Second" });
+    createCard({ game: "pokemon", name: "Third" });
+    flushCollection();
+    const files = readCardFiles();
+    setDb(openDatabase(":memory:"));
+    importCardFiles([at(files, 2)]);
+    const next = createCard({ game: "pokemon", name: "Fourth" });
+    expect(next.id).toBeGreaterThan(3);
+  });
+
+  it("loses a mangled row, not the card", () => {
+    const card = createCard({ game: "pokemon", name: "Gyarados", quantity: 2 });
+    recordSale(card.id, { quantity: 1, unitPrice: 30 });
+    const broken = fileFor(card.id).replace(/^\| 2026.*$/m, "| what | even | is | this |");
+    const parsed = parseCardMarkdown(broken)!;
+    expect(parsed.input.name).toBe("Gyarados");
+    expect(parsed.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("rebuilds the folder from the database without deleting cards it does not have", () => {
+    createCard({ game: "pokemon", name: "Eevee" });
+    // A card this database has never heard of: the folder may be the only copy
+    // of it left, so a rebuild counts it rather than deleting it.
+    fs.writeFileSync(path.join(cardsDir(), "9999-vaporeon.md"), '---\nid: 9999\nname: "Vaporeon"\n---\n\n# Vaporeon\n');
+    // A half-written file from a crash belongs to nobody.
+    fs.writeFileSync(path.join(cardsDir(), "0001-half-written.md.tmp"), "half\n");
+    const result = rebuildCollection(listCards());
+    expect(result).toMatchObject({ written: 1, orphans: 1 });
+    expect(fs.readdirSync(cardsDir()).sort()).toEqual(["0001-eevee.md", "9999-vaporeon.md"]);
+    expect(collectionStatus().files).toBe(2);
+  });
+
+  it("clears a file left behind by a card it has just rewritten", () => {
+    const card = createCard({ game: "pokemon", name: "Eevee" });
+    fs.writeFileSync(path.join(cardsDir(), `000${card.id}-old-name.md`), "stale\n");
+    expect(rebuildCollection(listCards())).toMatchObject({ written: 1, orphans: 0 });
+    expect(fs.readdirSync(cardsDir())).toEqual(["0001-eevee.md"]);
+  });
+
+  it("survives losing the database entirely", () => {
+    // The whole promise: throw away everything but the folder, and the
+    // collection still values the same — and still knows what it cost.
+    const a = createCard({ game: "pokemon", name: "Charizard", setName: "Base Set", quantity: 2, purchasePrice: 100 });
+    const b = createCard({ game: "mtg", name: "Black Lotus", quantity: 1, purchasePrice: 400 });
+    // A second copy at a different price, and a sale that takes the older one.
+    addAcquisition(a.id, { quantity: 1, unitCost: 250, source: "card show" });
+    recordSale(a.id, { quantity: 1, unitPrice: 500, fees: 20 });
+    // Several prices each, so the rebuilt history has to keep its direction:
+    // the newest price is the one the portfolio is valued at.
+    addSnapshot(a.id, summary(120, "2025-06-02T10:00:00.000Z"));
+    addSnapshot(a.id, summary(300, "2026-01-02T10:00:00.000Z"));
+    addSnapshot(b.id, summary(7000, "2025-06-02T10:00:00.000Z"));
+    addSnapshot(b.id, summary(9000, "2026-01-02T10:00:00.000Z"));
+    flushCollection();
+    const before = totalValue();
+    const investedBefore = costBasis(a.id);
+    const realizedBefore = realizedReturn(listSales());
+    const files = readCardFiles();
+
+    setDb(openDatabase(":memory:"));
+    importCardFiles(files);
+    expect(totalValue()).toBe(before);
+    const restored = listCards().find((c) => c.name === "Charizard")!;
+    // What was paid for the copies still held, and for the one sold, both come
+    // back — including which copy the sale took.
+    expect(costBasis(restored.id)).toEqual(investedBefore);
+    expect(realizedReturn(listSales())).toEqual(realizedBefore);
+    expect(listLots(restored.id).map((l) => [l.quantity, l.remaining, l.unitCost])).toEqual([
+      [2, 1, 100],
+      [1, 1, 250],
+    ]);
+    expect(verifyLotInvariant()).toEqual([]);
+    expect(before).toBe(300 * 2 + 9000);
+    expect(listSnapshots(restored.id).map((s) => s.summary.yourCopyValue)).toEqual([300, 120]);
+  });
+});
+
+/** What the portfolio is worth, the way the app totals it. */
+describe("what a rebuild puts right", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("lets the restored purchases decide the purchase price, not the front matter", () => {
+    const card = createCard({ game: "pokemon", name: "Priced", quantity: 2, purchasePrice: 1 });
+    flushCollection();
+    // A hand edit to the summary line, which is derived from the lots below it.
+    const files = readCardFiles().map((f) => ({ ...f, text: f.text.replace(/^purchase_price: .*$/m, "purchase_price: 99") }));
+    setDb(openDatabase(":memory:"));
+    importCardFiles(files);
+    expect(listCards()[0]).toMatchObject({ id: card.id, purchasePrice: 1 });
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
+  it("matches a sale to a lot that still has copies to give back", () => {
+    // Two lots bought the same day at the same price. Matching by day and cost
+    // alone would pin both sales on the first lot, and undoing them would hand
+    // it back more copies than it ever had.
+    const card = createCard({ game: "pokemon", name: "Lotted", quantity: 2, purchasePrice: 1 });
+    addAcquisition(card.id, { quantity: 2, unitCost: 1 });
+    recordSale(card.id, { quantity: 2, unitPrice: 5 });
+    recordSale(card.id, { quantity: 1, unitPrice: 5 });
+    flushCollection();
+    const files = readCardFiles();
+
+    setDb(openDatabase(":memory:"));
+    importCardFiles(files);
+    const [first, second] = listLots(card.id);
+    const bigger = listSalesForCard(card.id).find((s) => s.quantity === 2)!;
+    const smaller = listSalesForCard(card.id).find((s) => s.quantity === 1)!;
+    expect(listSaleLots(bigger.id).map((l) => l.acquisitionId)).toEqual([first!.id]);
+    expect(listSaleLots(smaller.id).map((l) => l.acquisitionId)).toEqual([second!.id]);
+    deleteSale(bigger.id);
+    deleteSale(smaller.id);
+    expect(listLots(card.id).map((l) => [l.quantity, l.remaining])).toEqual([
+      [2, 2],
+      [2, 2],
+    ]);
+    expect(listCards()[0]?.quantity).toBe(4);
+    expect(verifyLotInvariant()).toEqual([]);
+  });
+
+  it("skips a sale row whose date is not a date", () => {
+    const text = [
+      "---",
+      "id: 1",
+      'game: "pokemon"',
+      'name: "Snorlax"',
+      "quantity: 1",
+      "---",
+      "",
+      "# Snorlax",
+      "",
+      "## Sales",
+      "",
+      "| Sold | Copies | Each | Fees | Cost each | Venue | Notes | Lots |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+      "| yesterday | 1 | $5.00 | $0.00 | $1.00 | eBay |  |  |",
+      "| 2026-02-01T00:00:00.000Z | 1 | $5.00 | $0.00 | $1.00 | eBay |  |  |",
+      "",
+    ].join("\n");
+    const parsed = parseCardMarkdown(text)!;
+    expect(parsed.sales).toHaveLength(1);
+    expect(parsed.warnings.some((w) => /unreadable sale row: yesterday/.test(w))).toBe(true);
+  });
+});
+
+function totalValue(): number {
+  const latest = latestSnapshotsByCard();
+  return listCards().reduce((sum, card) => sum + (latest.get(card.id)?.summary.yourCopyValue ?? 0) * card.quantity, 0);
+}
+
+describe("a card with a very long price history", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("lists its newest thousand prices and says how many older ones the database holds", () => {
+    const card = createCard({ game: "pokemon", name: "Long history" });
+    const insert = getDb().prepare("INSERT INTO price_snapshots (card_id, fetched_at, summary) VALUES (?, ?, ?)");
+    getDb().transaction(() => {
+      for (let i = 1; i <= 1200; i++) insert.run(card.id, new Date(Date.UTC(2020, 0, 1) + i * 864e5).toISOString(), JSON.stringify(summary(i, new Date(Date.UTC(2020, 0, 1) + i * 864e5).toISOString())));
+      // One row nothing can read is passed over, as it always was.
+      insert.run(card.id, "2019-01-01T00:00:00.000Z", "{not json");
+    })();
+    updateCard(card.id, { notes: "rewrite the file" });
+    const text = fileFor(card.id);
+    const parsed = parseCardMarkdown(text);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.snapshots).toHaveLength(1000);
+    expect(parsed!.snapshots[0]?.summary).toMatchObject({ yourCopyValue: 1200, ungraded: 1200, ungradedSource: "PriceCharting", graded: { "PSA 10": 12000, "PSA 9": 3600 }, gradedSource: "PriceCharting", yourCopyBasis: "Ungraded price, Near Mint." });
+    expect(parsed!.snapshots.at(-1)?.summary.yourCopyValue).toBe(201);
+    expect(text).toContain("200 earlier prices not shown; the database holds them.");
+    // The price rows are dated 2020 to 2023; the one purchase row is dated today.
+    expect(text.split("\n").filter((line) => /^\| 202[0-3]-/.test(line)).length).toBe(1000);
+  });
+});

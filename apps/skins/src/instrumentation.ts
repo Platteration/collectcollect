@@ -1,0 +1,32 @@
+export async function register() {
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    // Said once at boot, because "which folder is this server reading?" is the
+    // first question when an inventory looks empty.
+    const { dataDir } = await import("./lib/db");
+    console.log(`[collectcollect-skins] Data directory: ${dataDir()}`);
+    // The one invariant everything about money rests on: every copy belongs to
+    // a lot. Checked at boot rather than on a request, and only when there is a
+    // database to check, so an empty data directory is not created just to look.
+    const { databaseExists, describeRecoveryConflicts, recoveryConflicts } = await import("./lib/db");
+    if (databaseExists()) {
+      // An earlier start's rollback may have left two copies of something in
+      // place; that stays worth saying at every boot until someone sorts it out.
+      const conflicts = recoveryConflicts();
+      if (conflicts) console.warn(describeRecoveryConflicts(conflicts.conflicts));
+      const { verifyLotInvariant } = await import("./lib/acquisitions");
+      const broken = verifyLotInvariant();
+      if (broken.length > 0) {
+        console.warn(
+          `[collectcollect-skins] ${broken.length} item(s) whose quantity and purchase lots disagree: ${broken.slice(0, 20).join(", ")}${broken.length > 20 ? "…" : ""}. Editing the count on each puts them right.`,
+        );
+      }
+    }
+    const { startPriceScheduler } = await import("./lib/scheduler");
+    startPriceScheduler();
+    const { authEnabled } = await import("./lib/auth");
+    if (!authEnabled()) {
+      // A reasonable choice on a machine only you can reach; never a silent one.
+      console.warn("[collectcollect-skins] No SKINS_APP_PASSWORD set: every route is open to anyone who can reach this port.");
+    }
+  }
+}

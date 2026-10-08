@@ -1,27 +1,91 @@
+# Two apps, two images, two volumes. They share code and nothing else: separate
+# databases, separate directories, separate passwords.
+#
+#   docker compose up --build            # both
+#   docker compose up --build cards      # just the card app
 services:
-  collectcollect:
-    build: .
+  cards:
+    build:
+      context: .
+      args:
+        APP: cards
+    # Bound to this machine only. Neither app speaks TLS and a password is
+    # optional, so exposing a port to the network is a decision, not a default;
+    # put a reverse proxy in front and change the bind address there.
     ports:
-      # Published on every interface, which is what makes this reachable from a
-      # phone on the same network. With no APP_PASSWORD set that is the whole
-      # LAN; use "127.0.0.1:3000:3000" to keep it to this machine.
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+    # Optional: the apps run with no .env at all. What each one reads from it
+    # is listed in .env.example — the card app its own variables, the skins
+    # app the SKINS_-prefixed ones.
     env_file:
-      - .env
+      - path: .env
+        required: false
+    # The data directory is the volume, whatever .env says: `environment` wins
+    # over `env_file`, so a DATA_DIR meant for a shell install cannot point the
+    # container at its own writable layer, where a collection would vanish with
+    # the container.
+    environment:
+      DATA_DIR: /data
     volumes:
       - collectcollect-data:/data
-    restart: unless-stopped
-    # The same check the image declares, so a `docker compose ps` shows it.
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 30s
       timeout: 5s
-      start_period: 10s
+      start_period: 20s
+      retries: 3
+    # Ten seconds is the default; a server finishing a price refresh or a
+    # backup copy is given longer to close its database cleanly.
+    stop_grace_period: 30s
+    # The server needs no capability the base image grants and must not gain
+    # any: nothing inside runs as root, and nothing should be able to.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # A request body is buffered whole before a route sees it — up to 64 MB, per
     # request rather than across them — so a few concurrent uploads or restores
     # are the app's memory high-water mark, not its idle ~200 MB. Without a
     # limit here the ceiling is the host's memory.
     mem_limit: 2g
+    restart: unless-stopped
+
+  skins:
+    build:
+      context: .
+      args:
+        APP: skins
+    ports:
+      - "127.0.0.1:3001:3000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SKINS_DATA_DIR: /data
+    volumes:
+      - collectcollect-skins-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    # Ten seconds is the default; a server finishing a price refresh or a
+    # backup copy is given longer to close its database cleanly.
+    stop_grace_period: 30s
+    # The server needs no capability the base image grants and must not gain
+    # any: nothing inside runs as root, and nothing should be able to.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # A request body is buffered whole before a route sees it — up to 64 MB, per
+    # request rather than across them — so a few concurrent uploads or restores
+    # are the app's memory high-water mark, not its idle ~200 MB. Without a
+    # limit here the ceiling is the host's memory.
+    mem_limit: 2g
+    restart: unless-stopped
 
 volumes:
   collectcollect-data:
+  collectcollect-skins-data:

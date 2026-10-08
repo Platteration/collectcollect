@@ -1,0 +1,90 @@
+import { beforeEach, describe, expect, it } from "vitest";
+import { getDb, openDatabase, setDb } from "@/lib/db";
+import { getSettings, saveSettings } from "@/lib/settings";
+import { PUT } from "@/app/api/settings/route";
+import { DEFAULT_SETTINGS } from "@/lib/types";
+
+const put = (body: unknown) =>
+  PUT(new Request("http://localhost/api/settings", { method: "PUT", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }));
+
+describe("saving settings", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("changes only what it was given", async () => {
+    saveSettings({ ...DEFAULT_SETTINGS, spreadMinAmount: 3, ownerName: "Ada" });
+    const res = await put({ spreadMinAmount: 5 });
+    expect(res.status).toBe(200);
+    expect(getSettings()).toMatchObject({ spreadMinAmount: 5, ownerName: "Ada" });
+  });
+
+  it("refuses a value that is not a number, and changes nothing", async () => {
+    saveSettings({ ...DEFAULT_SETTINGS, alertMovePercent: 30 });
+    const res = await put({ alertMovePercent: null });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/price-move alert percentage/);
+    expect(getSettings().alertMovePercent).toBe(30);
+  });
+
+  it("refuses a fee that would mean a sale pays nothing", async () => {
+    const res = await put({ marketFees: { steam: 1 } });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/market fees \(steam\)/);
+    expect(getSettings().marketFees.steam).toBe(DEFAULT_SETTINGS.marketFees.steam);
+  });
+
+  it("leaves markets it was not told about alone", async () => {
+    saveSettings({ ...DEFAULT_SETTINGS, marketFees: { ...DEFAULT_SETTINGS.marketFees, csfloat: 0.01 } });
+    expect((await put({ marketFees: { skinport: 0.1 } })).status).toBe(200);
+    expect(getSettings().marketFees).toMatchObject({ skinport: 0.1, csfloat: 0.01 });
+  });
+
+  it("refuses a webhook that is not a URL rather than quietly switching alerts off", async () => {
+    saveSettings({ ...DEFAULT_SETTINGS, alertWebhookUrl: "https://hooks.example/abc" });
+    for (const bad of ["not a url", "ftp://hooks.example/x", "javascript:alert(1)", 42, null]) {
+      const res = await put({ alertWebhookUrl: bad });
+      expect(res.status, String(bad)).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/webhook/i);
+      expect(getSettings().alertWebhookUrl).toBe("https://hooks.example/abc");
+    }
+    // Blank is how it is switched off on purpose.
+    expect((await put({ alertWebhookUrl: "" })).status).toBe(200);
+    expect(getSettings().alertWebhookUrl).toBe("");
+  });
+
+  it("refuses an owner name that is not text", async () => {
+    saveSettings({ ...DEFAULT_SETTINGS, ownerName: "Ada" });
+    const res = await put({ ownerName: ["A"] });
+    expect(res.status).toBe(400);
+    expect(getSettings().ownerName).toBe("Ada");
+  });
+
+  it("says so when the body is not JSON", async () => {
+    const res = await PUT(new Request("http://localhost/api/settings", { method: "PUT", body: "{nope" }));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("reading settings back", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("applies the same rules as saving, so a stored fee at or above 1 comes back as the default", () => {
+    // A copy written by hand, or by a version before the rule existed.
+    getDb()
+      .prepare("INSERT INTO settings (key, value) VALUES ('settings', ?)")
+      .run(JSON.stringify({ marketFees: { steam: 1.5, skinport: -0.1 }, alertMovePercent: -2, ownerName: "  Ada  " }));
+    const read = getSettings();
+    expect(read.marketFees.steam).toBe(DEFAULT_SETTINGS.marketFees.steam);
+    expect(read.marketFees.skinport).toBe(DEFAULT_SETTINGS.marketFees.skinport);
+    expect(read.alertMovePercent).toBe(DEFAULT_SETTINGS.alertMovePercent);
+    expect(read.ownerName).toBe("Ada");
+  });
+
+  it("drops the wear, StatTrak and Souvenir multipliers a stored copy still carries, which nothing ever read", () => {
+    getDb()
+      .prepare("INSERT INTO settings (key, value) VALUES ('settings', ?)")
+      .run(JSON.stringify({ ...DEFAULT_SETTINGS, exteriorMultipliers: { factory_new: 1.2 }, stattrakMultiplier: 1.5, souvenirMultiplier: 2, spreadMinAmount: 7 }));
+    const read = getSettings() as unknown as Record<string, unknown>;
+    expect(Object.keys(read).sort()).toEqual(Object.keys(DEFAULT_SETTINGS).sort());
+    expect(read.spreadMinAmount).toBe(7);
+  });
+});

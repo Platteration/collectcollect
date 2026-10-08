@@ -1,0 +1,618 @@
+@import "tailwindcss";
+
+/*
+ * Classes used by shared components live outside this app's own tree, and
+ * Tailwind only scans what it is pointed at. Without this they are tree-shaken
+ * out of this app's stylesheet and the components render unstyled — the tab
+ * bar, for one, stops being fixed to the bottom of the screen.
+ */
+@source "../../../../packages/core/src";
+
+/*
+ * The theme is always resolved to an explicit data-theme by the inline script
+ * in the layout, so "system" never has to be expressed in CSS: one attribute
+ * decides everything, including Tailwind's dark: utilities.
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --background: #f5f0e6;
+  --foreground: #24333e;
+  --line: #c9c2b3;
+  --line-strong: #8e978f;
+  --surface: #fffaf0;
+  --surface-raised: #e9e2d3;
+  --muted: #5b6b72;
+  --tabletop-edge: #c9c2b3;
+  --tabletop-shine: rgba(255,255,255,0.7);
+}
+
+[data-theme="dark"] {
+  --background: #19232d;
+  --foreground: #f7f1e5;
+  --line: #526674;
+  --line-strong: #82949c;
+  --surface: #24323e;
+  --surface-raised: #30424f;
+  --muted: #b7c2c7;
+  --tabletop-edge: #101820;
+  --tabletop-shine: rgba(255,255,255,0.12);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-display: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* Room for a phone's home indicator and notch when installed. */
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.card-surface {
+  border-radius: 0.75rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: inset 0 1px 0 var(--tabletop-shine), 0 3px 0 var(--tabletop-edge);
+  /* A chart drawn inside a panel cuts its hover halo from the panel, not the ground. */
+  --chart-surface: var(--surface);
+}
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+}
+.btn-primary {
+  @apply btn;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.btn-secondary {
+  @apply btn;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--foreground);
+}
+.btn-secondary:hover {
+  background: var(--surface-raised);
+}
+.btn-danger {
+  @apply btn;
+  border: 1px solid color-mix(in srgb, var(--chart-bad) 45%, transparent);
+  color: var(--chart-bad-text);
+  background: transparent;
+}
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--chart-bad) 12%, transparent);
+}
+.input {
+  @apply w-full rounded-lg px-3 py-2 text-sm outline-none;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--foreground);
+}
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-solid) 25%, transparent);
+}
+.label {
+  @apply mb-1 block text-xs font-medium uppercase tracking-wide;
+  color: var(--muted);
+}
+.badge {
+  @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+}
+
+/*
+ * Chart chrome. In light this is the validated palette from the dataviz
+ * reference; in dark the chrome becomes white hairlines and only the
+ * up/down colours carry saturation, which is what makes the wireline read.
+ */
+:root {
+  --accent: #296f69;
+  --accent-ink: #fffaf0;
+  --accent-solid: #296f69;
+  /* What a chart sits on; a panel overrides it below, so a hover halo is always cut from its own surface. */
+  --chart-surface: var(--background);
+  --chart-grid: #e1e0d9;
+  --chart-axis: #c3c2b7;
+  --chart-muted: #898781;
+  --chart-good: #0ca30c;
+  --chart-good-text: #006300;
+  --chart-bad: #d03b3b;
+  --chart-bad-text: #b32b2b;
+  --chart-raw: #2a78d6; /* the owner's own copy, in the outlook chart */
+  --chart-series-1: #2a78d6; /* blue */
+  --chart-series-2: #eb6834; /* orange: gem-mint outcome */
+  --chart-series-3: #1baf7a; /* aqua: mid-grade outcome */
+  --chart-series-4: #eda100; /* yellow */
+  --chart-series-5: #e87ba4; /* magenta */
+}
+
+[data-theme="dark"] {
+  --accent: #88c9c0;
+  --accent-ink: #19232d;
+  --accent-solid: #88c9c0;
+  --chart-surface: var(--background);
+  --chart-grid: rgba(255, 255, 255, 0.09);
+  --chart-axis: rgba(255, 255, 255, 0.3);
+  --chart-muted: rgba(242, 244, 245, 0.55);
+  /*
+   * The two colours the eye is meant to find on a dark ground. Deliberately
+   * brighter than the categorical band: this is a status pair, not a
+   * categorical one, and direction is also carried by an arrow and the sign of
+   * the number, so it never rests on colour alone.
+   */
+  --chart-good: #2fe08a;
+  --chart-good-text: #4ff0a1;
+  --chart-bad: #ff5f6d;
+  --chart-bad-text: #ff8189;
+  /* The white wire is reserved for the owner's own line; using it as a
+     categorical colour would let one game shout over the others. */
+  --chart-raw: #ffffff;
+  /*
+   * The categorical slots are the dataviz reference dark palette, which
+   * passes every check of scripts/validate_palette.js against this surface:
+   * lightness band, chroma floor, CVD separation and contrast. Lighter,
+   * prettier values sat outside the band and were rejected.
+   */
+  --chart-series-1: #3987e5;
+  --chart-series-2: #d95926;
+  --chart-series-3: #199e70;
+  --chart-series-4: #c98500;
+  --chart-series-5: #d55181;
+}
+
+.delta-up { color: var(--chart-good-text); }
+.delta-down { color: var(--chart-bad-text); }
+
+/*
+ * Color schemes: each picks a fresh --accent/--accent-ink/--accent-solid,
+ * nothing else — never the good/bad or categorical chart tokens above, so a
+ * gain is always green and a loss always red, whatever scheme is chosen.
+ * "teal" (above) is the default and needs no [data-scheme] rule of its own.
+ */
+[data-scheme="amber"] { --accent: #a85c04; --accent-ink: #fffaf0; --accent-solid: #a85c04; }
+[data-scheme="amber"][data-theme="dark"] { --accent: #f5b862; --accent-ink: #241300; --accent-solid: #f5b862; }
+[data-scheme="sky"] { --accent: #2f6feb; --accent-ink: #ffffff; --accent-solid: #2f6feb; }
+[data-scheme="sky"][data-theme="dark"] { --accent: #8ab4f8; --accent-ink: #0b1d33; --accent-solid: #8ab4f8; }
+[data-scheme="indigo"] { --accent: #4f46e5; --accent-ink: #ffffff; --accent-solid: #4f46e5; }
+[data-scheme="indigo"][data-theme="dark"] { --accent: #a5b4fc; --accent-ink: #1e1b3a; --accent-solid: #a5b4fc; }
+[data-scheme="violet"] { --accent: #7c3aed; --accent-ink: #ffffff; --accent-solid: #7c3aed; }
+[data-scheme="violet"][data-theme="dark"] { --accent: #c4b5fd; --accent-ink: #2e1065; --accent-solid: #c4b5fd; }
+[data-scheme="plum"] { --accent: #b23a72; --accent-ink: #ffffff; --accent-solid: #b23a72; }
+[data-scheme="plum"][data-theme="dark"] { --accent: #f0a8cf; --accent-ink: #3a0620; --accent-solid: #f0a8cf; }
+[data-scheme="copper"] { --accent: #b4552c; --accent-ink: #ffffff; --accent-solid: #b4552c; }
+[data-scheme="copper"][data-theme="dark"] { --accent: #e2946b; --accent-ink: #2a1206; --accent-solid: #e2946b; }
+[data-scheme="slate"] { --accent: #334155; --accent-ink: #ffffff; --accent-solid: #334155; }
+[data-scheme="slate"][data-theme="dark"] { --accent: #cbd5e1; --accent-ink: #0f172a; --accent-solid: #cbd5e1; }
+
+/* Display type: condensed, used for the hero value, card names and headings. */
+.font-display {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+}
+.hero-figure {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: proportional-nums;
+}
+
+/*
+ * The slab's printed label, tinted per grading company so a slab reads at a
+ * glance. The case itself is drawn by the .slab3d rules below.
+ */
+.slab-label {
+  background: var(--slab-label, #6b7280);
+  color: #fff;
+  border-radius: 0.35rem 0.35rem 0 0;
+  padding: 2px 6px;
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.slab-psa { --slab-label: #b3122a; }
+.slab-bgs { --slab-label: #1f3f8f; }
+.slab-cgc { --slab-label: #1d6f42; }
+.slab-sgc { --slab-label: #2f2f34; }
+.slab-tag { --slab-label: #5b3fa8; }
+.slab-ace { --slab-label: #0f6a8a; }
+.slab-ags { --slab-label: #7a5200; }
+
+/*
+ * The card as an object. This is the one place the tabletop's shallow depth
+ * gives way: a card face that tilts a few degrees towards the pointer and
+ * catches the light, and for a graded card three planes — case back, card,
+ * acrylic front — that separate as it turns. Nothing here has overflow,
+ * opacity or a filter of its own, which would flatten the 3D context.
+ */
+.card3d-scene {
+  perspective: 900px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  touch-action: pan-y;
+}
+.card3d-scene-compact {
+  height: 100%;
+}
+.card3d-body {
+  --rx: 0deg;
+  --ry: 0deg;
+  --mx: 32%;
+  --my: 22%;
+  --gloss: 1;
+  --wx: 0deg;
+  --wy: 0deg;
+  transform-style: preserve-3d;
+  /* The pointer's tilt on top of however far the card has curled. */
+  transform: rotateX(calc(var(--rx) + var(--wx))) rotateY(calc(var(--ry) + var(--wy)));
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  width: 100%;
+  max-height: 100%;
+}
+.card3d-scene-compact .card3d-body {
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+}
+.card3d-body[data-tilting] {
+  transition-duration: 70ms;
+}
+/* Tiles do not follow the pointer, but the whole tile lifts a little on hover. */
+.group:hover .card3d-scene-compact .card3d-body {
+  transform: rotateX(calc(4deg + var(--wx))) rotateY(calc(-5deg + var(--wy)));
+}
+
+.card3d-face {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.35rem;
+  width: 100%;
+  /* A card has a rounded cut edge; a hairline keeps a white border from bleeding into the panel. */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+.card3d-face-compact {
+  width: auto;
+  height: 100%;
+  margin: 0 auto;
+}
+.card3d-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  transform-origin: center;
+}
+.card3d-face-compact .card3d-art {
+  width: auto;
+  height: 100%;
+  max-width: 100%;
+}
+.card3d-blank {
+  display: flex;
+  aspect-ratio: 3 / 4;
+  height: 100%;
+  min-height: 6rem;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+  color: #9ca3af;
+}
+/* The light on the surface: a soft highlight that moves with the tilt and fades with wear. */
+.card3d-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 60% 45% at var(--mx) var(--my),
+    rgba(255, 255, 255, calc(0.34 * var(--gloss))),
+    rgba(255, 255, 255, calc(0.1 * var(--gloss))) 45%,
+    rgba(255, 255, 255, 0) 75%
+  );
+  mix-blend-mode: screen;
+}
+/*
+ * A holographic finish: a rainbow band that slides as the light moves, and
+ * a narrow glint riding on it. The rainbow is overlay-blended, which tints
+ * the print's mid-tones and leaves its whites and blacks alone, so the art
+ * stays readable; --gloss dulls both on a worn card. Where it shows follows
+ * the finish — a holo's art box, everything but that box on a reverse holo,
+ * the whole card for a foil or refractor — through a feathered mask, since
+ * no two games put the art box in quite the same place.
+ */
+.card3d-holo {
+  --holo-v: linear-gradient(to bottom, transparent 7%, #000 13%, #000 50%, transparent 57%);
+  --holo-h: linear-gradient(to right, transparent 5%, #000 10%, #000 90%, transparent 95%);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(115deg, transparent 44%, rgba(255, 255, 255, 0.55) 50%, transparent 56%),
+    linear-gradient(
+      115deg,
+      rgba(255, 70, 140, 0.85) 20%,
+      rgba(255, 210, 60, 0.85) 32%,
+      rgba(80, 240, 150, 0.85) 44%,
+      rgba(60, 170, 255, 0.85) 56%,
+      rgba(170, 90, 255, 0.85) 68%,
+      rgba(255, 70, 140, 0.85) 80%
+    );
+  background-size: 300% 300%, 220% 220%;
+  background-position: var(--mx) var(--my), var(--mx) var(--my);
+  mix-blend-mode: overlay;
+  opacity: calc(0.6 * var(--gloss));
+}
+.card3d-holo-holo {
+  mask-image: var(--holo-h), var(--holo-v);
+  mask-composite: intersect;
+}
+.card3d-holo-reverse {
+  opacity: calc(0.45 * var(--gloss));
+  /* Everything, less the art box: the box is the two bands' overlap, excluded from a full layer. */
+  mask-image: linear-gradient(#000, #000), var(--holo-h), var(--holo-v);
+  mask-composite: exclude, intersect;
+}
+.card3d-holo-foil {
+  opacity: calc(0.45 * var(--gloss));
+}
+.card3d-holo-refractor {
+  opacity: calc(0.6 * var(--gloss));
+}
+/*
+ * The pattern pressed into the foil, drawn by weight from the card's id —
+ * the plain sheen above is the default. Each keeps the moving rainbow as its
+ * last layer and adds a texture over it that stays put, as a real pattern
+ * does while the colour slides across it.
+ */
+.card3d-holo-pattern-stripes {
+  background-image:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.4) 0 1px, transparent 1px 5px),
+    linear-gradient(115deg, rgba(255, 70, 140, 0.85) 20%, rgba(255, 210, 60, 0.85) 32%, rgba(80, 240, 150, 0.85) 44%, rgba(60, 170, 255, 0.85) 56%, rgba(170, 90, 255, 0.85) 68%, rgba(255, 70, 140, 0.85) 80%);
+  background-size: auto, 220% 220%;
+  background-position: 0 0, var(--mx) var(--my);
+}
+.card3d-holo-pattern-cosmos {
+  background-image:
+    radial-gradient(circle at 18% 22%, rgba(255, 120, 200, 0.7) 0 5%, transparent 9%),
+    radial-gradient(circle at 72% 18%, rgba(120, 220, 255, 0.7) 0 4%, transparent 8%),
+    radial-gradient(circle at 40% 48%, rgba(255, 230, 120, 0.7) 0 6%, transparent 10%),
+    radial-gradient(circle at 82% 58%, rgba(170, 120, 255, 0.7) 0 5%, transparent 9%),
+    radial-gradient(circle at 24% 74%, rgba(120, 255, 180, 0.7) 0 4%, transparent 8%),
+    radial-gradient(circle at 62% 86%, rgba(255, 150, 110, 0.7) 0 5%, transparent 9%),
+    linear-gradient(115deg, rgba(255, 70, 140, 0.85) 20%, rgba(255, 210, 60, 0.85) 32%, rgba(80, 240, 150, 0.85) 44%, rgba(60, 170, 255, 0.85) 56%, rgba(170, 90, 255, 0.85) 68%, rgba(255, 70, 140, 0.85) 80%);
+  background-size: auto, auto, auto, auto, auto, auto, 220% 220%;
+  background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, var(--mx) var(--my);
+}
+.card3d-holo-pattern-cracked-ice {
+  background-image:
+    repeating-linear-gradient(60deg, rgba(255, 255, 255, 0.5) 0 1px, transparent 1px 13px),
+    repeating-linear-gradient(-60deg, rgba(255, 255, 255, 0.5) 0 1px, transparent 1px 17px),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.3) 0 1px, transparent 1px 23px),
+    linear-gradient(115deg, rgba(255, 70, 140, 0.85) 20%, rgba(255, 210, 60, 0.85) 32%, rgba(80, 240, 150, 0.85) 44%, rgba(60, 170, 255, 0.85) 56%, rgba(170, 90, 255, 0.85) 68%, rgba(255, 70, 140, 0.85) 80%);
+  background-size: auto, auto, auto, 220% 220%;
+  background-position: 0 0, 0 0, 0 0, var(--mx) var(--my);
+}
+.card3d-holo-pattern-starlight {
+  background-image:
+    radial-gradient(circle at 12% 16%, #fff 0 0.5%, transparent 1.2%),
+    radial-gradient(circle at 34% 9%, #fff 0 0.4%, transparent 1%),
+    radial-gradient(circle at 58% 21%, #fff 0 0.6%, transparent 1.3%),
+    radial-gradient(circle at 86% 12%, #fff 0 0.4%, transparent 1%),
+    radial-gradient(circle at 22% 38%, #fff 0 0.5%, transparent 1.2%),
+    radial-gradient(circle at 71% 36%, #fff 0 0.4%, transparent 1%),
+    radial-gradient(circle at 44% 57%, #fff 0 0.6%, transparent 1.3%),
+    radial-gradient(circle at 90% 55%, #fff 0 0.5%, transparent 1.2%),
+    radial-gradient(circle at 15% 69%, #fff 0 0.4%, transparent 1%),
+    radial-gradient(circle at 62% 74%, #fff 0 0.5%, transparent 1.2%),
+    radial-gradient(circle at 33% 88%, #fff 0 0.6%, transparent 1.3%),
+    radial-gradient(circle at 81% 90%, #fff 0 0.4%, transparent 1%),
+    linear-gradient(115deg, rgba(255, 70, 140, 0.85) 20%, rgba(255, 210, 60, 0.85) 32%, rgba(80, 240, 150, 0.85) 44%, rgba(60, 170, 255, 0.85) 56%, rgba(170, 90, 255, 0.85) 68%, rgba(255, 70, 140, 0.85) 80%);
+  background-size: auto, auto, auto, auto, auto, auto, auto, auto, auto, auto, auto, auto, 220% 220%;
+  background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, var(--mx) var(--my);
+}
+/* A curled card: lit along its crown, shaded where it bends away. */
+.card3d-curve {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+.card3d-curve-y {
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.28), rgba(255, 255, 255, 0) 30%, rgba(255, 255, 255, 0) 70%, rgba(0, 0, 0, 0.28));
+}
+.card3d-curve-x {
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.28), rgba(255, 255, 255, 0) 30%, rgba(255, 255, 255, 0) 70%, rgba(0, 0, 0, 0.28));
+}
+.card3d-wear {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* The slab: a tinted case behind, the card, and a sheet of acrylic in front. */
+.slab3d {
+  position: relative;
+  transform-style: preserve-3d;
+  padding: 4px;
+  border-radius: 0.6rem;
+}
+.card3d-scene-compact .slab3d {
+  height: 100%;
+}
+.slab3d-back {
+  position: absolute;
+  inset: -3px;
+  border-radius: 0.75rem;
+  transform: translateZ(-8px);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--slab-label, #6b7280) 22%, #d9d4c7), color-mix(in srgb, var(--slab-label, #6b7280) 10%, #b8b2a4));
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.22);
+}
+[data-theme="dark"] .slab3d-back {
+  background: linear-gradient(150deg, color-mix(in srgb, var(--slab-label, #6b7280) 30%, #3a4652), color-mix(in srgb, var(--slab-label, #6b7280) 12%, #1c2630));
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.55);
+}
+.slab3d-inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  transform: translateZ(0);
+}
+.slab3d-window {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0 0 0.35rem 0.35rem;
+  background: rgba(255, 255, 255, 0.6);
+}
+[data-theme="dark"] .slab3d-window {
+  background: rgba(0, 0, 0, 0.3);
+}
+.slab3d-front {
+  position: absolute;
+  inset: 0;
+  border-radius: 0.6rem;
+  pointer-events: none;
+  transform: translateZ(10px);
+  background:
+    radial-gradient(ellipse 55% 40% at var(--mx) var(--my), rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 70%),
+    linear-gradient(150deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.04) 40%, rgba(0, 0, 0, 0.05));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+[data-theme="dark"] .slab3d-front {
+  background:
+    radial-gradient(ellipse 55% 40% at var(--mx) var(--my), rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 70%),
+    linear-gradient(150deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02) 40%, rgba(0, 0, 0, 0.25));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card3d-body {
+    transition: none;
+  }
+  .group:hover .card3d-scene-compact .card3d-body {
+    transform: rotateX(var(--wx)) rotateY(var(--wy));
+  }
+}
+
+/* A card's own art tints its detail header. */
+.accent-wash {
+  background-image: linear-gradient(160deg, color-mix(in srgb, var(--accent) 26%, transparent), transparent 65%);
+}
+
+/* Content reveal: a short rise-and-fade on load, skipped for reduced motion. */
+@keyframes reveal-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.reveal {
+  animation: reveal-rise 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal { animation: none; }
+}
+
+/* Shared illustrated tabletop controls; chart colors and card art retain their semantics. */
+@media screen {
+  .btn-primary, .btn-secondary {
+    border-radius: 0.75rem;
+    box-shadow: 0 3px 0 var(--tabletop-edge);
+  }
+  .btn-primary:active:not(:disabled), .btn-secondary:active:not(:disabled) {
+    box-shadow: 0 1px 0 var(--tabletop-edge);
+    transform: translateY(2px);
+  }
+  .btn-primary:focus-visible, .btn-secondary:focus-visible {
+    outline: 2px solid var(--accent-solid);
+    outline-offset: 3px;
+  }
+}
+
+/* Printing the appraisal report: drop the app chrome, force ink-on-paper colours. */
+@media print {
+  /* Only the site chrome goes; the report's own header must print. */
+  body > header,
+  body > footer,
+  .print\:hidden {
+    display: none !important;
+  }
+  :root {
+    --background: #fff;
+    --foreground: #000;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+  main {
+    max-width: none;
+    padding: 0 0.25in;
+  }
+  .card3d-body {
+    transform: none !important;
+  }
+  .card3d-sheen,
+  .card3d-holo,
+  .card3d-curve,
+  .slab3d-front {
+    display: none;
+  }
+  .report table {
+    font-size: 11px;
+  }
+  .report tr {
+    break-inside: avoid;
+  }
+  .report thead {
+    display: table-header-group;
+  }
+}
+
+/* The mobile tab bar sits above the home indicator when installed. */
+.tabbar {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+/* Header respects a notch in landscape. */
+.safe-x {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+/* The installed app fills the screen, so the header clears the status bar. */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+/*
+ * Wells: image placeholders and progress tracks. A mid-grey block reads as a
+ * slab against the wireline ground, so these are a faint tint with a hairline.
+ */
+.well {
+  /* background-color, not the shorthand: a tile can also carry .accent-wash,
+     whose gradient lives in background-image and must survive this. */
+  background-color: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+/* Chart tooltips sit over the plot, so they need their own opaque ground. */
+.tooltip-surface {
+  background: color-mix(in srgb, var(--background) 92%, var(--foreground) 8%);
+  border: 1px solid var(--line-strong);
+  color: var(--foreground);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}

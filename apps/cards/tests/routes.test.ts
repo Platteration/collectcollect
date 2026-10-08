@@ -1,0 +1,541 @@
+import fs from "node:fs";
+import pkg from "../package.json";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { closeDatabase, databaseFile, openDatabase, setDb } from "@/lib/db";
+import { createCard, getCard } from "@/lib/cards";
+import { createAlert } from "@/lib/alerts";
+import { recordSale } from "@/lib/sales";
+import { saveGoal, saveGoalItem } from "@/lib/goals";
+import { createSubmission } from "@/lib/submissions";
+
+/** Routes take their path parameters as a promise. */
+const ctx = <T extends Record<string, string>>(params: T) => ({ params: Promise.resolve(params) });
+
+const json = (url: string, method: string, body: unknown) =>
+  new Request(url, { method, body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
+
+const notJson = (url: string, method: string) =>
+  new Request(url, { method, body: "{not json", headers: { "Content-Type": "application/json" } });
+
+async function read<T>(res: Response): Promise<T> {
+  return (await res.json()) as T;
+}
+
+describe("ids that do not name a card", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("are all answered 404, whatever shape they are", async () => {
+    const { GET, PATCH, DELETE } = await import("@/app/api/cards/[id]/route");
+    for (const id of ["abc", "0", "-1", "1.5", "", "999", "1e3", " 1"]) {
+      const res = await GET(new Request("http://localhost/api/cards/x"), ctx({ id }) as never);
+      expect(res.status, `GET ${JSON.stringify(id)}`).toBe(404);
+    }
+    expect((await PATCH(json("http://localhost/api/cards/x", "PATCH", { name: "X" }), ctx({ id: "abc" }) as never)).status).toBe(404);
+    expect((await DELETE(new Request("http://localhost/api/cards/x", { method: "DELETE" }), ctx({ id: "abc" }) as never)).status).toBe(404);
+  });
+
+  it("reach the card when they do name one", async () => {
+    const card = createCard({ game: "pokemon", name: "Snorlax" });
+    const { GET, PATCH } = await import("@/app/api/cards/[id]/route");
+    const res = await GET(new Request("http://localhost/api/cards/1"), ctx({ id: String(card.id) }) as never);
+    expect(res.status).toBe(200);
+    expect(await read<{ card: { name: string }; latestPrice: unknown }>(res)).toMatchObject({ card: { name: "Snorlax" }, latestPrice: null });
+
+    const patched = await PATCH(json("http://localhost/api/cards/1", "PATCH", { location: "Box A" }), ctx({ id: String(card.id) }) as never);
+    expect((await read<{ card: { location: string } }>(patched)).card.location).toBe("Box A");
+  });
+
+  it("say so when the body is not JSON", async () => {
+    const card = createCard({ game: "pokemon", name: "Snorlax" });
+    const { PATCH } = await import("@/app/api/cards/[id]/route");
+    const res = await PATCH(notJson("http://localhost/api/cards/1", "PATCH"), ctx({ id: String(card.id) }) as never);
+    expect(res.status).toBe(400);
+    expect((await read<{ error: string }>(res)).error).toMatch(/JSON body/);
+  });
+
+  it("report what the repository refused", async () => {
+    const card = createCard({ game: "pokemon", name: "Snorlax" });
+    const { PATCH } = await import("@/app/api/cards/[id]/route");
+    const res = await PATCH(json("http://localhost/api/cards/1", "PATCH", { game: "wizards" }), ctx({ id: String(card.id) }) as never);
+    expect(res.status).toBe(400);
+    expect((await read<{ error: string }>(res)).error).toMatch(/Unknown game/);
+  });
+});
+
+describe("alerts over HTTP", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("lists, counts, dismisses and marks read", async () => {
+    const card = createCard({ game: "pokemon", name: "Snorlax" });
+    createAlert({ kind: "price_move", cardId: card.id, title: "Up 20%", body: "…" });
+    const second = createAlert({ kind: "ready_to_grade", cardId: card.id, title: "Ready", body: "…" });
+
+    const alerts = await import("@/app/api/alerts/route");
+    const listed = await read<{ alerts: unknown[]; unread: number }>(await alerts.GET());
+    expect(listed.alerts).toHaveLength(2);
+    expect(listed.unread).toBe(2);
+
+    const one = await import("@/app/api/alerts/[id]/route");
+    const dismissed = await one.DELETE(new Request("http://localhost/api/alerts/1", { method: "DELETE" }), ctx({ id: String(second.id) }) as never);
+    expect(dismissed.status).toBe(200);
+    expect((await read<{ unread: number }>(await alerts.GET())).unread).toBe(1);
+
+    expect((await one.DELETE(new Request("http://localhost/api/alerts/x", { method: "DELETE" }), ctx({ id: "nope" }) as never)).status).toBe(404);
+
+    const marked = await read<{ marked: number; unread: number }>(await alerts.POST());
+    expect(marked).toMatchObject({ marked: 1, unread: 0 });
+  });
+});
+
+describe("refreshing prices over HTTP", () => {
+  beforeEach(async () => {
+    setDb(openDatabase(":memory:"));
+    (await import("@/app/api/prices/refresh/route")).throttle.reset();
+  });
+
+  it("refuses a stale window that is not a number of hours", async () => {
+    const { POST } = await import("@/app/api/prices/refresh/route");
+    for (const stale of ["", "abc", "-1", "1e400"]) {
+      const res = await POST(new Request(`http://localhost/api/prices/refresh?stale=${encodeURIComponent(stale)}`, { method: "POST" }));
+      expect(res.status, JSON.stringify(stale)).toBe(400);
+    }
+    expect((await POST(new Request("http://localhost/api/prices/refresh?stale=24", { method: "POST" }))).status).toBe(200);
+    expect((await POST(new Request("http://localhost/api/prices/refresh", { method: "POST" }))).status).toBe(200);
+  });
+
+  it("says a refresh is already running rather than starting another", async () => {
+    const { POST } = await import("@/app/api/prices/refresh/route");
+    createCard({ game: "other", name: "Slow enough", manualUngraded: 1 });
+    const first = POST(new Request("http://localhost/api/prices/refresh", { method: "POST" }));
+    const second = await POST(new Request("http://localhost/api/prices/refresh", { method: "POST" }));
+    expect(second.status).toBe(409);
+    expect((await first).status).toBe(200);
+  });
+
+  it("stops a runaway client after six in a minute", async () => {
+    const { POST } = await import("@/app/api/prices/refresh/route");
+    for (let i = 0; i < 6; i++) await POST(new Request("http://localhost/api/prices/refresh", { method: "POST" }));
+    const seventh = await POST(new Request("http://localhost/api/prices/refresh", { method: "POST" }));
+    expect(seventh.status).toBe(429);
+    expect(seventh.headers.get("Retry-After")).toMatch(/^\d+$/);
+  });
+});
+
+describe("the routes the README documents and nothing in the app calls", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("lists every sale with what they realised", async () => {
+    const card = createCard({ game: "pokemon", name: "Sold Snorlax", quantity: 3, purchasePrice: 1 });
+    recordSale(card.id, { quantity: 2, unitPrice: 4, fees: 0.5 });
+    const { GET } = await import("@/app/api/sales/route");
+    const body = await read<{ sales: Array<{ quantity: number }>; realized: { sales: number; gain: number } }>(await GET());
+    expect(body.sales).toHaveLength(1);
+    expect(body.realized).toMatchObject({ sales: 1, gain: 5.5 });
+  });
+
+  it("hands back a card's price history and a 404 for a card that is not there", async () => {
+    const { addSnapshot } = await import("@/lib/cards");
+    const card = createCard({ game: "pokemon", name: "Priced Snorlax" });
+    const summary = { currency: "USD" as const, ungraded: 10, ungradedSource: "x", graded: {}, gradedSource: null, estimatedGraded: {}, yourCopyValue: 10, yourCopyBasis: "", quotes: [], errors: [] };
+    addSnapshot(card.id, { ...summary, fetchedAt: "2026-01-01T00:00:00.000Z" });
+    addSnapshot(card.id, { ...summary, ungraded: 12, yourCopyValue: 12, fetchedAt: "2026-02-01T00:00:00.000Z" });
+    const { GET } = await import("@/app/api/cards/[id]/prices/route");
+    const body = await read<{ snapshots: Array<{ summary: { yourCopyValue: number } }> }>(await GET(new Request("http://localhost/x"), ctx({ id: String(card.id) }) as never));
+    expect(body.snapshots.map((s) => s.summary.yourCopyValue)).toEqual([12, 10]);
+    expect((await GET(new Request("http://localhost/x"), ctx({ id: "999" }) as never)).status).toBe(404);
+  });
+});
+
+describe("the health check", () => {
+  it("answers without opening a collection", async () => {
+    const { GET } = await import("@/app/api/health/route");
+    const body = await read<{ ok: boolean; app: string; database: boolean; scheduler: { enabled: boolean; running: boolean } }>(await GET());
+    expect(body.ok).toBe(true);
+    expect(body.app).toBe("collectcollect");
+    // Exactly these keys: the route answers without a session and from any
+    // Host, so a data path, an environment value or a count added here would
+    // be handed to anyone who can reach the port.
+    expect(Object.keys(body).sort()).toEqual(["app", "database", "ok", "scheduler", "version"]);
+    expect((body as unknown as { version: string }).version).toBe(pkg.version);
+    expect(typeof body.database).toBe("boolean");
+    expect(body.scheduler).toMatchObject({ running: false });
+    // It answers anyone, so it says nothing about where the collection lives
+    // or what last went wrong.
+    expect(body).not.toHaveProperty("dataDir");
+    expect(body.scheduler).not.toHaveProperty("lastError");
+  });
+
+  it("says the database is not ok when it is there but cannot be opened, and ok once it can", async () => {
+    const { GET } = await import("@/app/api/health/route");
+    const health = async () => (await read<{ ok: boolean; database: boolean }>(await GET())).database;
+    fs.mkdirSync(process.env.DATA_DIR!, { recursive: true });
+    setDb(openDatabase(databaseFile()));
+    expect(await health()).toBe(true);
+    // A restore journal nothing can replay: the file exists, and every
+    // request against it fails. "Database ok" has to mean a query ran.
+    closeDatabase();
+    const journal = `${databaseFile()}.restore-journal.json`;
+    fs.writeFileSync(journal, JSON.stringify({ version: 2 }));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await health()).toBe(false);
+    expect(error).toHaveBeenCalledWith("[health]", expect.stringMatching(/recovery journal is invalid/));
+    fs.rmSync(journal);
+    expect(await health()).toBe(true);
+    closeDatabase();
+  });
+});
+
+describe("pricing one card over HTTP", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("is throttled, and answers a source failure with a 502 rather than a crash", async () => {
+    const { POST, throttle } = await import("@/app/api/cards/[id]/price/route");
+    throttle.reset();
+    const card = createCard({ game: "pokemon", name: "Priced" });
+    // No provider is configured or reachable here, so a refresh either stores
+    // nothing or fails; either way the route answers with JSON.
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("network down");
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    try {
+      const res = await POST(new Request("http://localhost/x", { method: "POST" }), ctx({ id: String(card.id) }) as never);
+      expect([200, 502]).toContain(res.status);
+      expect(res.headers.get("content-type")).toContain("json");
+      expect((await POST(new Request("http://localhost/x", { method: "POST" }), ctx({ id: "999" }) as never)).status).toBe(404);
+      for (let i = 0; i < 118; i++) await POST(new Request("http://localhost/x", { method: "POST" }), ctx({ id: "999" }) as never);
+      const refused = await POST(new Request("http://localhost/x", { method: "POST" }), ctx({ id: String(card.id) }) as never);
+      expect(refused.status).toBe(429);
+      expect(refused.headers.get("Retry-After")).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+      throttle.reset();
+    }
+  });
+});
+
+describe("undoing a sale over HTTP", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("is a 404 for a sale that is not there and a 200 for one that is", async () => {
+    const { DELETE } = await import("@/app/api/sales/[id]/route");
+    expect((await DELETE(new Request("http://localhost/api/sales/9", { method: "DELETE" }), ctx({ id: "9" }) as never)).status).toBe(404);
+    expect((await DELETE(new Request("http://localhost/api/sales/x", { method: "DELETE" }), ctx({ id: "abc" }) as never)).status).toBe(404);
+    const card = createCard({ game: "pokemon", name: "Sold Snorlax", quantity: 1 });
+    const sale = recordSale(card.id, { quantity: 1, unitPrice: 10 });
+    expect((await DELETE(new Request("http://localhost/api/sales/1", { method: "DELETE" }), ctx({ id: String(sale.id) }) as never)).status).toBe(200);
+  });
+});
+
+describe("what the lookup routes refuse", () => {
+  beforeEach(async () => {
+    setDb(openDatabase(":memory:"));
+    (await import("@/app/api/identify/route")).throttle.reset();
+  });
+
+  it("stops a runaway client after ten identifications in a minute", async () => {
+    const { POST } = await import("@/app/api/identify/route");
+    // Each of these is refused for having nothing to identify, and each still
+    // counts: the limit is on asking, not on being answered.
+    for (let i = 0; i < 10; i++) expect((await POST(json("http://localhost/api/identify", "POST", { uploads: [] }))).status).toBe(400);
+    const eleventh = await POST(json("http://localhost/api/identify", "POST", { uploads: [] }));
+    expect(eleventh.status).toBe(429);
+    expect((await read<{ error: string }>(eleventh)).error).toMatch(/Too many identifications/);
+  });
+
+  it("will not price a game it does not know or a card with no name", async () => {
+    const { POST } = await import("@/app/api/prices/lookup/route");
+    expect((await POST(json("http://localhost/api/prices/lookup", "POST", { game: "wizards", name: "X" }))).status).toBe(400);
+    expect((await POST(json("http://localhost/api/prices/lookup", "POST", { game: "pokemon", name: "  " }))).status).toBe(400);
+    expect((await POST(notJson("http://localhost/api/prices/lookup", "POST"))).status).toBe(400);
+  });
+
+  it("does not let a prototype property pass as a game or a condition", async () => {
+    // "constructor" is `in` every object. Let through, it would reach a price
+    // lookup as a game, and `function Object() { [native code] }` would be
+    // what the provider was asked about.
+    const lookup = await import("@/app/api/prices/lookup/route");
+    for (const game of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      const res = await lookup.POST(json("http://localhost/api/prices/lookup", "POST", { game, name: "X" }));
+      expect(res.status, game).toBe(400);
+      expect(await res.text()).not.toContain("native code");
+    }
+    const condition = await lookup.POST(json("http://localhost/api/prices/lookup", "POST", { game: "pokemon", name: "X", condition: "constructor" }));
+    expect(condition.status).toBe(400);
+    expect((await read<{ error: string }>(condition)).error).toMatch(/condition/i);
+
+    const cards = await import("@/app/api/cards/route");
+    expect((await cards.GET(new Request("http://localhost/api/cards?game=constructor"))).status).toBe(400);
+    expect((await cards.GET(new Request("http://localhost/api/cards?similar=1&game=constructor&name=X"))).status).toBe(400);
+
+    const sets = await import("@/app/api/sets/refresh/route");
+    expect((await sets.POST(json("http://localhost/api/sets/refresh", "POST", { game: "constructor", setName: "Base" }))).status).toBe(400);
+
+    const csv = await import("@/app/api/import/route");
+    expect((await csv.POST(json("http://localhost/api/import", "POST", { csv: "name\nX", game: "constructor" }))).status).toBe(400);
+  });
+
+  it("will not fetch a checklist for a game it does not know or a set with no name", async () => {
+    const { POST } = await import("@/app/api/sets/refresh/route");
+    expect((await POST(json("http://localhost/api/sets/refresh", "POST", { game: "wizards", setName: "Base" }))).status).toBe(400);
+    expect((await POST(json("http://localhost/api/sets/refresh", "POST", { game: "pokemon", setName: " " }))).status).toBe(400);
+  });
+
+  it("will not identify nothing, too much, or a name it did not write", async () => {
+    const { POST } = await import("@/app/api/identify/route");
+    expect((await POST(json("http://localhost/api/identify", "POST", { uploads: [] }))).status).toBe(400);
+    expect((await POST(json("http://localhost/api/identify", "POST", { uploads: ["a", "b", "c", "d", "e"] }))).status).toBe(400);
+    // A hint past what a scan may store is refused before any photo is read or any model is asked.
+    const essay = await POST(json("http://localhost/api/identify", "POST", { uploads: ["0a1b2c3d-0000-4000-8000-000000000000.jpg"], hint: "x".repeat(2001) }));
+    expect(essay.status).toBe(400);
+    expect(((await essay.json()) as { error: string }).error).toMatch(/at most 2000 characters/);
+    const bad = await POST(json("http://localhost/api/identify", "POST", { uploads: ["../../etc/passwd"] }));
+    expect(bad.status).toBe(400);
+    expect((await read<{ error: string }>(bad)).error).toMatch(/Invalid upload name/);
+    const missing = await POST(json("http://localhost/api/identify", "POST", { uploads: ["aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg"] }));
+    expect(missing.status).toBe(404);
+  });
+
+  it("serves an upload only under a name it wrote", async () => {
+    const { GET } = await import("@/app/api/uploads/[name]/route");
+    expect((await GET(new Request("http://localhost/api/uploads/x"), ctx({ name: "../../secrets.jpg" }) as never)).status).toBe(404);
+    expect((await GET(new Request("http://localhost/api/uploads/x"), ctx({ name: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg" }) as never)).status).toBe(404);
+  });
+});
+
+describe("the collection routes", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("says so when the plain-text copy is switched off", async () => {
+    process.env.MARKDOWN_MIRROR = "off";
+    try {
+      const { POST } = await import("@/app/api/collection/rebuild/route");
+      const res = await POST();
+      expect(res.status).toBe(409);
+      expect((await read<{ error: string }>(res)).error).toMatch(/switched off/);
+    } finally {
+      delete process.env.MARKDOWN_MIRROR;
+    }
+  });
+
+  it("has nothing to hand over when there are no cards", async () => {
+    const { GET } = await import("@/app/api/collection/route");
+    const res = await GET(new Request("http://localhost/api/collection"));
+    expect(res.status).toBe(404);
+  });
+
+  it("streams a zip once there is something in it", async () => {
+    createCard({ game: "pokemon", name: "Snorlax" });
+    const { GET } = await import("@/app/api/collection/route");
+    const res = await GET(new Request("http://localhost/api/collection"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toContain("zip");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect(String.fromCharCode(...bytes.subarray(0, 2))).toBe("PK");
+  });
+});
+
+describe("where cards are kept", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("lists every location in use, with a count", async () => {
+    createCard({ game: "pokemon", name: "A", location: "Box A", quantity: 2 });
+    createCard({ game: "pokemon", name: "B", location: "Box A" });
+    createCard({ game: "pokemon", name: "C", location: "Binder 1" });
+    createCard({ game: "pokemon", name: "D" });
+    // A card with no copies left is not somewhere any more.
+    const sold = createCard({ game: "pokemon", name: "E", location: "Box Z", quantity: 1 });
+    recordSale(sold.id, { unitPrice: 5 });
+
+    const { GET } = await import("@/app/api/locations/route");
+    const { locations } = await read<{ locations: Array<{ location: string; cards: number }> }>(await GET());
+    expect(locations).toEqual([
+      { location: "Binder 1", cards: 1 },
+      { location: "Box A", cards: 2 },
+    ]);
+  });
+});
+
+describe("a card's photo, after the card exists", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("is attached, replaced and removed, and the file that is no longer needed goes with it", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { uploadsDir } = await import("@/lib/db");
+    const { PATCH } = await import("@/app/api/cards/[id]/route");
+    const card = createCard({ game: "pokemon", name: "Pictured" });
+    const first = "11111111-2222-4333-8444-555555555555.jpg";
+    const second = "22222222-2222-4333-8444-555555555555.jpg";
+    for (const name of [first, second]) fs.writeFileSync(path.join(uploadsDir(), name), "jpeg bytes");
+    const patch = (body: unknown) => PATCH(json(`http://localhost/api/cards/${card.id}`, "PATCH", body), ctx({ id: String(card.id) }) as never);
+
+    // A name of the wrong shape, or one nothing was uploaded under, is said no to.
+    expect((await patch({ imagePath: "../etc/passwd" })).status).toBe(400);
+    const missing = await patch({ imagePath: "33333333-2222-4333-8444-555555555555.jpg" });
+    expect(missing.status).toBe(400);
+    expect(((await missing.json()) as { error: string }).error).toMatch(/not one this app stored/);
+
+    expect((await patch({ imagePath: first, accentColor: "#123456" })).status).toBe(200);
+    expect(getCard(card.id)).toMatchObject({ imagePath: first, accentColor: "#123456" });
+
+    // Replacing removes the old file; the new one is untouched.
+    expect((await patch({ imagePath: second })).status).toBe(200);
+    expect(fs.existsSync(path.join(uploadsDir(), first))).toBe(false);
+    expect(fs.existsSync(path.join(uploadsDir(), second))).toBe(true);
+
+    // Removing clears both columns and the file.
+    expect((await patch({ imagePath: null, accentColor: null })).status).toBe(200);
+    expect(getCard(card.id)).toMatchObject({ imagePath: null, accentColor: null });
+    expect(fs.existsSync(path.join(uploadsDir(), second))).toBe(false);
+
+    // An edit that does not mention the photo leaves it alone.
+    fs.writeFileSync(path.join(uploadsDir(), first), "jpeg bytes");
+    await patch({ imagePath: first });
+    await patch({ notes: "still pictured" });
+    expect(getCard(card.id)?.imagePath).toBe(first);
+    expect(fs.existsSync(path.join(uploadsDir(), first))).toBe(true);
+  });
+});
+
+describe("bodies a runaway client could grow without limit", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  /** One byte over is enough: the limit is on bytes read, not on what the JSON means. */
+  const oversized = (limit: number) => JSON.stringify({ pad: "x".repeat(limit) });
+  const send = (url: string, body: string, method = "POST") => new Request(url, { method, headers: { "content-type": "application/json" }, body });
+
+  it("refuses a body over the route's limit with a 413 that names the limit, on every JSON route", async () => {
+    const card = createCard({ game: "pokemon", name: "Limited" });
+    const goal = saveGoal({ name: "Limit" });
+    const wanted = saveGoalItem(goal.id, { game: "pokemon", name: "Pikachu" });
+    const sub = createSubmission({ company: "PSA" });
+    const cardCtx = { params: Promise.resolve({ id: String(card.id) }) } as never;
+    // The runaway-client tests above spend these; this test is about bytes, not turns.
+    (await import("@/app/api/identify/route")).throttle.reset();
+    (await import("@/app/api/providers/test/route")).throttle.reset();
+    (await import("@/lib/backup")).restoreThrottle.reset();
+    const routes: Array<{ name: string; limit: number; run: (body: string) => Promise<Response> }> = [
+      { name: "backup/replaced", limit: 4 * 1024, run: async (b) => (await import("@/app/api/backup/replaced/route")).POST(send("http://localhost/api/backup/replaced", b)) },
+      { name: "setup", limit: 4 * 1024, run: async (b) => (await import("@/app/api/setup/route")).PUT(send("http://localhost/api/setup", b, "PUT")) },
+      { name: "sets/refresh", limit: 4 * 1024, run: async (b) => (await import("@/app/api/sets/refresh/route")).POST(send("http://localhost/api/sets/refresh", b)) },
+      { name: "providers/test", limit: 4 * 1024, run: async (b) => (await import("@/app/api/providers/test/route")).POST(send("http://localhost/api/providers/test", b)) },
+      { name: "identify", limit: 16 * 1024, run: async (b) => (await import("@/app/api/identify/route")).POST(send("http://localhost/api/identify", b)) },
+      { name: "prices/lookup", limit: 16 * 1024, run: async (b) => (await import("@/app/api/prices/lookup/route")).POST(send("http://localhost/api/prices/lookup", b)) },
+      { name: "goals", limit: 16 * 1024, run: async (b) => (await import("@/app/api/goals/route")).POST(send("http://localhost/api/goals", b)) },
+      { name: "goals/[id]", limit: 16 * 1024, run: async (b) => (await import("@/app/api/goals/[id]/route")).PUT(send(`http://localhost/api/goals/${goal.id}`, b, "PUT"), ctx({ id: goal.id })) },
+      { name: "goals/[id]/items", limit: 16 * 1024, run: async (b) => (await import("@/app/api/goals/[id]/items/route")).POST(send(`http://localhost/api/goals/${goal.id}/items`, b), ctx({ id: goal.id })) },
+      { name: "goals/[id]/items/[itemId]", limit: 16 * 1024, run: async (b) => (await import("@/app/api/goals/[id]/items/[itemId]/route")).PUT(send(`http://localhost/api/goals/${goal.id}/items/${wanted.id}`, b, "PUT"), ctx({ id: goal.id, itemId: wanted.id })) },
+      { name: "submissions", limit: 16 * 1024, run: async (b) => (await import("@/app/api/submissions/route")).POST(send("http://localhost/api/submissions", b)) },
+      { name: "submissions/[id]", limit: 256 * 1024, run: async (b) => (await import("@/app/api/submissions/[id]/route")).PATCH(send(`http://localhost/api/submissions/${sub.id}`, b, "PATCH"), ctx({ id: String(sub.id) }) as never) },
+      { name: "settings", limit: 64 * 1024, run: async (b) => (await import("@/app/api/settings/route")).PUT(send("http://localhost/api/settings", b, "PUT")) },
+      { name: "cards", limit: 64 * 1024, run: async (b) => (await import("@/app/api/cards/route")).POST(send("http://localhost/api/cards", b)) },
+      { name: "cards/intake", limit: 64 * 1024, run: async (b) => (await import("@/app/api/cards/intake/route")).POST(send("http://localhost/api/cards/intake", b)) },
+      { name: "cards/[id]", limit: 64 * 1024, run: async (b) => (await import("@/app/api/cards/[id]/route")).PATCH(send(`http://localhost/api/cards/${card.id}`, b, "PATCH"), cardCtx) },
+      { name: "cards/[id]/sales", limit: 16 * 1024, run: async (b) => (await import("@/app/api/cards/[id]/sales/route")).POST(send(`http://localhost/api/cards/${card.id}/sales`, b), cardCtx) },
+      { name: "cards/[id]/acquisitions", limit: 16 * 1024, run: async (b) => (await import("@/app/api/cards/[id]/acquisitions/route")).POST(send(`http://localhost/api/cards/${card.id}/acquisitions`, b), cardCtx) },
+      { name: "cards/[id]/cert", limit: 4 * 1024, run: async (b) => (await import("@/app/api/cards/[id]/cert/route")).POST(send(`http://localhost/api/cards/${card.id}/cert`, b), cardCtx) },
+    ];
+    expect(routes).toHaveLength(19);
+    for (const route of routes) {
+      const res = await route.run(oversized(route.limit));
+      expect(res.status, route.name).toBe(413);
+      expect((await read<{ error: string }>(res)).error, route.name).toBe(`Request body exceeds the ${route.limit} byte limit`);
+    }
+    // Under the limit, the body is read as before, on both shapes of handler.
+    const intake = await (await import("@/app/api/cards/intake/route")).POST(send("http://localhost/api/cards/intake", JSON.stringify({ game: "pokemon", name: "Still fine" })));
+    expect(intake.status).toBe(201);
+    const renamed = await (await import("@/app/api/goals/[id]/route")).PUT(send(`http://localhost/api/goals/${goal.id}`, JSON.stringify({ name: "Still fine" }), "PUT"), ctx({ id: goal.id }));
+    expect(renamed.status).toBe(200);
+  });
+});
+
+describe("looking a card up on PSA", () => {
+  beforeEach(async () => {
+    setDb(openDatabase(":memory:"));
+    (await import("@/app/api/cards/[id]/cert/route")).throttle.reset();
+    const { createPsaBudget, setPsaBudget } = await import("@/lib/grading/psa");
+    setPsaBudget(createPsaBudget());
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  const post = (id: string, body: unknown = {}) => json(`http://localhost/api/cards/${id}/cert`, "POST", body);
+
+  it("refuses what it cannot look up, each with a reason: an unknown card, the wrong company, a bad cert, no token", async () => {
+    const { POST } = await import("@/app/api/cards/[id]/cert/route");
+    expect((await POST(post("999"), ctx({ id: "999" }) as never)).status).toBe(404);
+    const tag = createCard({ game: "pokemon", name: "Slabbed", gradingCompany: "TAG", grade: "10", certNumber: "A1234567" });
+    const refusedCompany = await POST(post(String(tag.id)), ctx({ id: String(tag.id) }) as never);
+    expect(refusedCompany.status).toBe(400);
+    expect((await read<{ error: string }>(refusedCompany)).error).toMatch(/Only PSA offers a cert lookup/);
+    const psa = createCard({ game: "pokemon", name: "Slabbed", gradingCompany: "PSA", grade: "10", certNumber: "12" });
+    const badCert = await POST(post(String(psa.id)), ctx({ id: String(psa.id) }) as never);
+    expect(badCert.status).toBe(400);
+    expect((await read<{ error: string }>(badCert)).error).toMatch(/8 to 10 digits/);
+    const notJsonBody = await POST(notJson(`http://localhost/api/cards/${psa.id}/cert`, "POST"), ctx({ id: String(psa.id) }) as never);
+    expect(notJsonBody.status).toBe(400);
+    const unconfigured = await POST(post(String(psa.id), { cert: "12345678" }), ctx({ id: String(psa.id) }) as never);
+    expect(unconfigured.status).toBe(503);
+    expect((await read<{ error: string }>(unconfigured)).error).toMatch(/PSA_API_TOKEN/);
+  });
+
+  it("applies PSA's record to the card: the grade, the cert and the report, the identity only when asked, and never the photo", async () => {
+    vi.stubEnv("PSA_API_TOKEN", "t");
+    const { fakeFetch } = await import("./helpers");
+    const cert = (await import("./fixtures/psa-cert.json")).default;
+    const images = (await import("./fixtures/psa-images.json")).default;
+    vi.stubGlobal("fetch", fakeFetch([
+      ["GetByCertNumber/12345678", cert],
+      ["GetImagesByCertNumber/12345678", images],
+    ]));
+    const { POST } = await import("@/app/api/cards/[id]/cert/route");
+    const card = createCard({ game: "pokemon", name: "Charizard", gradingCompany: "PSA", grade: "9", certNumber: "12345678", imagePath: "11111111-2222-4333-8444-555555555555.jpg", gradingStatus: "submitted" });
+    const res = await POST(post(String(card.id)), ctx({ id: String(card.id) }) as never);
+    expect(res.status).toBe(200);
+    const body = await read<{ card: { grade: string; gradingReport: { source: string; images: { front: string } }; imagePath: string; year: number | null; gradingStatus: string }; imagesSkipped: boolean }>(res);
+    expect(body.card).toMatchObject({ grade: "10", gradingStatus: "undecided", imagePath: "11111111-2222-4333-8444-555555555555.jpg", year: null });
+    expect(body.card.gradingReport).toMatchObject({ source: "psa", images: { front: "https://images.psacard.com/cert/12345678/front.jpg" } });
+    expect(body.imagesSkipped).toBe(false);
+    expect(getCard(card.id)?.grade).toBe("10");
+    // Asked to, it fills the blank identity fields, and only those.
+    const asked = await POST(post(String(card.id), { apply: { identity: true } }), ctx({ id: String(card.id) }) as never);
+    expect((await read<{ card: { year: number; cardNumber: string; name: string } }>(asked)).card).toMatchObject({ year: 1999, cardNumber: "4", name: "Charizard" });
+  });
+
+  it("answers what PSA answered: no record is a 404, a spent budget a 429 with a Retry-After, a refusal a 502", async () => {
+    vi.stubEnv("PSA_API_TOKEN", "t");
+    const { POST } = await import("@/app/api/cards/[id]/cert/route");
+    const card = createCard({ game: "pokemon", name: "Charizard", gradingCompany: "PSA", grade: "9", certNumber: "12345678" });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    const missing = await POST(post(String(card.id)), ctx({ id: String(card.id) }) as never);
+    expect(missing.status).toBe(404);
+    expect((await read<{ error: string }>(missing)).error).toMatch(/no record of cert 12345678/);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 403 })));
+    const refused = await POST(post(String(card.id)), ctx({ id: String(card.id) }) as never);
+    expect(refused.status).toBe(502);
+    expect((await read<{ error: string }>(refused)).error).toMatch(/not approved/);
+    const { createPsaBudget, setPsaBudget } = await import("@/lib/grading/psa");
+    setPsaBudget(createPsaBudget(0, 3600e3));
+    const spent = await POST(post(String(card.id)), ctx({ id: String(card.id) }) as never);
+    expect(spent.status).toBe(429);
+    expect(Number(spent.headers.get("Retry-After"))).toBeGreaterThan(0);
+    expect((await read<{ error: string }>(spent)).error).toMatch(/used its PSA lookups for today/);
+    // Nothing about the card changed along the way.
+    expect(getCard(card.id)).toMatchObject({ grade: "9", gradingReport: null });
+  });
+
+  it("takes a report and centering entered by hand through PATCH, and rejects a bad one with the reason", async () => {
+    const { PATCH } = await import("@/app/api/cards/[id]/route");
+    const card = createCard({ game: "pokemon", name: "Charizard", gradingCompany: "TAG", grade: "10", certNumber: "A1234567" });
+    const report = { company: "TAG", cert: "A1234567", source: "manual", checkedAt: "2026-10-01T00:00:00.000Z", grade: "10", tag: { score: "973" } };
+    const ok = await PATCH(json(`http://localhost/api/cards/${card.id}`, "PATCH", { gradingReport: report, centering: { front: "54L/46R 49T/51B" } }), ctx({ id: String(card.id) }) as never);
+    expect(ok.status).toBe(200);
+    expect((await read<{ card: { gradingReport: { tag: { score: number } }; centering: unknown } }>(ok)).card).toMatchObject({ gradingReport: { tag: { score: 973 } }, centering: { front: { lr: [54, 46], tb: [49, 51] } } });
+    const bad = await PATCH(json(`http://localhost/api/cards/${card.id}`, "PATCH", { gradingReport: { ...report, tag: { score: 5000 } } }), ctx({ id: String(card.id) }) as never);
+    expect(bad.status).toBe(400);
+    expect((await read<{ error: string }>(bad)).error).toMatch(/grading report.*tag\.score/);
+  });
+});

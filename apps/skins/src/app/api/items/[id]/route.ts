@@ -1,0 +1,45 @@
+import { NextResponse } from "next/server";
+import { HasSalesError, deleteItem, getItem, latestSnapshot, updateItem } from "@/lib/items";
+import { BodyLimitError, errorMessage, jsonError, parseId, readJsonLimited } from "@collectcollect/core/http";
+import type { ItemInput } from "@/lib/types";
+
+export async function GET(_request: Request, ctx: RouteContext<"/api/items/[id]">) {
+  const id = parseId((await ctx.params).id);
+  const item = id ? getItem(id) : null;
+  if (!item) return jsonError("Item not found", 404);
+  return NextResponse.json({ item, latestPrice: latestSnapshot(item.id)?.summary ?? null });
+}
+
+export async function PATCH(request: Request, ctx: RouteContext<"/api/items/[id]">) {
+  const id = parseId((await ctx.params).id);
+  if (!id) return jsonError("Item not found", 404);
+  let body: Partial<ItemInput>;
+  try {
+    // A record the form sends is far under 64 KB; a runaway client cannot buffer more.
+    body = (await readJsonLimited(request, 64 * 1024)) as Partial<ItemInput>;
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(e.message, 413);
+    return jsonError("Expected a JSON body");
+  }
+  try {
+    const item = updateItem(id, body);
+    if (!item) return jsonError("Item not found", 404);
+    return NextResponse.json({ item });
+  } catch (e) {
+    return jsonError(errorMessage(e));
+  }
+}
+
+export async function DELETE(_request: Request, ctx: RouteContext<"/api/items/[id]">) {
+  const id = parseId((await ctx.params).id);
+  const item = id ? getItem(id) : null;
+  if (!item) return jsonError("Item not found", 404);
+  try {
+    deleteItem(item.id);
+  } catch (e) {
+    // A sold item keeps its history; the answer is a reason, not a 500.
+    if (e instanceof HasSalesError) return jsonError(e.message, 409);
+    throw e;
+  }
+  return NextResponse.json({ ok: true });
+}
