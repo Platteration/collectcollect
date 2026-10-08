@@ -12,9 +12,9 @@ afterEach(() => {
 /** A request as a browser would send it: Host always, the fetch metadata optionally. */
 function request(
   url: string,
-  opts: { method?: string; host?: string; origin?: string; site?: string } = {},
+  opts: { method?: string; host?: string; origin?: string; site?: string; headers?: Record<string, string> } = {},
 ): NextRequest {
-  const headers = new Headers();
+  const headers = new Headers(opts.headers);
   headers.set("host", opts.host ?? new URL(url).host);
   if (opts.origin) headers.set("origin", opts.origin);
   if (opts.site) headers.set("sec-fetch-site", opts.site);
@@ -74,6 +74,7 @@ describe("cross-site writes", () => {
       { site: "cross-site", origin: "https://evil.example" },
       { origin: "https://evil.example" },
       { origin: "null" },
+      { origin: "not a url" },
       // Another port on the same machine is a different origin: the skins app
       // beside this one must not be able to write here either.
       { origin: "http://localhost:3001" },
@@ -104,6 +105,48 @@ describe("cross-site writes", () => {
 
   it("does not block reads, which the same-origin policy already covers", async () => {
     expect(await status(request("http://localhost:3000/api/cards", { site: "cross-site", origin: "https://evil.example" }))).toBe(200);
+  });
+
+  it("refuses one with a password set too, before a session is asked about, with the headers on", async () => {
+    // A write needs no preflight when its body is text/plain, and the routes
+    // read JSON whatever the content type says.
+    process.env.APP_PASSWORD = "hunter2";
+    const refused = await proxy(request("http://localhost:3000/api/backup/restore", {
+      method: "POST",
+      site: "same-site",
+      origin: "http://localhost:3001",
+      headers: { "content-type": "text/plain" },
+    }));
+    expect(refused.status).toBe(403);
+    expect(refused.headers.get("Content-Security-Policy")).toMatch(/default-src 'self'/);
+  });
+
+  it("refuses a write the browser says no page started, which none of the app's pages sends", async () => {
+    // A typed address or a bookmark is a GET; "none" on a write is not this app.
+    expect(await status(request("http://localhost:3000/api/cards", { method: "POST", site: "none" }))).toBe(403);
+  });
+
+  it("compares the whole authority, so a proxy in front passes the Host through with its port", async () => {
+    process.env.ALLOWED_HOSTS = "cards.example";
+    const post = (host: string, origin: string) =>
+      status(request("http://localhost:3000/api/cards", { method: "POST", site: "same-origin", host, origin }));
+    // Behind a proxy that ends TLS on 443 the origin has no port and neither does Host.
+    expect(await post("cards.example", "https://cards.example")).toBe(200);
+    expect(await post("cards.example:8443", "https://cards.example:8443")).toBe(200);
+    // nginx's $host drops a non-default port; .env.example says to use $http_host.
+    expect(await post("cards.example", "https://cards.example:8443")).toBe(403);
+  });
+
+  it("never believes X-Forwarded-Host, even from a declared proxy", async () => {
+    process.env.TRUST_PROXY = "1";
+    // Both names answered, so only the comparison can refuse it.
+    process.env.ALLOWED_HOSTS = "cards.example, 10.0.0.5";
+    const forwarded = request("http://10.0.0.5:3000/api/cards", {
+      method: "POST",
+      origin: "https://cards.example",
+      headers: { "x-forwarded-host": "cards.example" },
+    });
+    expect(await status(forwarded)).toBe(403);
   });
 });
 

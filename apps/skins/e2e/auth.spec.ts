@@ -96,7 +96,11 @@ test.describe("password gate", () => {
     await page.goto("/login");
     await page.getByLabel("Password").fill(E2E_PASSWORD);
     await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page).toHaveURL("/");
+    // Signing in is a full navigation, and the server-rendered nav is visible
+    // before the scripts that wire its buttons have run: a click in that gap
+    // sends nothing. waitForURL also waits for the load event, by which time
+    // React is listening and replays a click it gets.
+    await page.waitForURL("/");
 
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/login/);
