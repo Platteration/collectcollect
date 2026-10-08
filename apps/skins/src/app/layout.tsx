@@ -11,6 +11,8 @@ import { SkinsTabBar } from "@/components/TabBar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { SignOut } from "@collectcollect/core/components/SignOut";
 import { ServiceWorker } from "@/components/ServiceWorker";
+import { NoScriptNote } from "@collectcollect/core/components/NoScriptNote";
+import { Started } from "@collectcollect/core/components/Started";
 
 // Condensed display face for the hero value, item names and headings.
 const display = localFont({
@@ -62,10 +64,11 @@ const NAV = [
 ] as const;
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  // The one inline script needs the nonce the proxy minted for this request,
-  // or the content security policy refuses it and the page flashes the wrong
-  // theme. Reading a header also keeps every page dynamic, which a per-request
-  // nonce requires: a page rendered at build time would carry none.
+  // The theme script and the safety net need the nonce the proxy minted for
+  // this request, or the content security policy refuses them: the page
+  // flashes the wrong theme, and a page that failed to start says nothing.
+  // Reading a header also keeps every page dynamic, which a per-request nonce
+  // requires: a page rendered at build time would carry none.
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   // The app's own chrome is for someone signed in. On the login page it would
   // offer links that bounce straight back, a Sign out button and the count of
@@ -76,9 +79,14 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" data-theme="light" data-scheme="teal" className={`${display.variable} h-full antialiased`} suppressHydrationWarning>
       <head>
+        {/* The safety net, in a file of its own (see packages/core/src/guard.ts): a
+            page whose scripts fail to arrive or throw while starting says so. */}
+        <script src="/guard.js" nonce={nonce} async />
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body className="flex min-h-full flex-col">
+        <NoScriptNote app="CollectCollect Skins" />
+        <Started />
         <ServiceWorker />
         <header
           className="safe-top sticky top-0 z-20 border-b backdrop-blur"

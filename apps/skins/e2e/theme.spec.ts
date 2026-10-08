@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test.describe("color scheme", () => {
   test("changes the accent but never the gain/loss colors, and survives a reload", async ({ page }) => {

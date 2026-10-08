@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test("missing costs lead to editable purchase lots on a phone", async ({ page, request }) => {
   const response = await request.post("/api/cards", { data: { game: "pokemon", name: "Lot repair Dragonite", quantity: 2, purchasePrice: 10 } });

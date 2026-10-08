@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "./fixtures";
 
 /** The filter chips, which share their wording with the items they filter to. */
 const filters = (page: Page) => page.getByRole("navigation", { name: "Filters" });

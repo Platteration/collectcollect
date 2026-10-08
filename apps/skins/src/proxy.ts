@@ -9,13 +9,14 @@ export const proxy = createProxy(auth, {
   // the installed app's shell) cannot load.
   publicPaths: ["/login", "/api/auth", "/api/health", "/offline", "/manifest.webmanifest", "/icons", "/sw.js"],
   // Steam serves every item image, and only Steam.
-  imageHosts: ["https://community.cloudflare.steamstatic.com", "https://steamcommunity-a.akamaihd.net"],
+  imageSources: ["https://community.cloudflare.steamstatic.com", "https://steamcommunity-a.akamaihd.net"],
 });
 
 export const config = {
-  // Everything except Next's own endpoints — its static chunks, the image
-  // optimiser, and in development the hot-reload socket, none of which is a
-  // page or an API — and the favicon. Next parses this at build time, so it
-  // cannot come from the shared package.
-  matcher: ["/((?!_next/|favicon.ico).*)"],
+  // Every path, the framework's own files and a missing favicon included:
+  // each response leaves with the security headers, and the not-found page
+  // Next drew for an unmatched path carried none. Only the development
+  // server's hot-reload socket is left alone. Next parses this at build time,
+  // so it cannot come from the shared package.
+  matcher: ["/((?!_next/webpack-hmr).*)"],
 };

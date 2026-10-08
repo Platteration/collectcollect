@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { addCardByHand } from "./helpers";
 
 test.describe("the collection in plain text", () => {

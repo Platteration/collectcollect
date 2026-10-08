@@ -1,7 +1,7 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
-import { expect, test as base, type Page } from "@playwright/test";
+import { expect, test as base, type Page } from "./fixtures";
 import { setDb } from "../src/lib/db";
 import { DB_FILE } from "../src/lib/paths";
 import { claimScanIdentification, finishScanIdentification, getScanDraft } from "../src/lib/scan-drafts";

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { addCardByHand, cardPhoto } from "./helpers";
 
 test("a photo can be added to a card later, replaced, and removed", async ({ page }) => {

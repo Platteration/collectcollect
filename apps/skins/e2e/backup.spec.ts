@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { zipStream } from "@collectcollect/core/zip";
 
 /** Add an item through the form and land on its page. */

@@ -57,7 +57,7 @@ describe("host allowlist", () => {
     const api = await proxy(request("http://localhost:3000/api/cards", { host: "rebind.attacker.example" }));
     expect(api.status).toBe(403);
     expect(await api.json()).toEqual({ error: "This server does not answer to that host name. Set ALLOWED_HOSTS to add it." });
-    expect(api.headers.get("Content-Security-Policy")).toMatch(/default-src 'self'/);
+    expect(api.headers.get("Content-Security-Policy")).toMatch(/default-src 'none'/);
     expect(api.headers.get("X-Frame-Options")).toBe("DENY");
     const page = await proxy(request("http://localhost:3000/collection", { host: "rebind.attacker.example" }));
     expect(page.status).toBe(403);
@@ -118,7 +118,7 @@ describe("cross-site writes", () => {
       headers: { "content-type": "text/plain" },
     }));
     expect(refused.status).toBe(403);
-    expect(refused.headers.get("Content-Security-Policy")).toMatch(/default-src 'self'/);
+    expect(refused.headers.get("Content-Security-Policy")).toMatch(/default-src 'none'/);
   });
 
   it("refuses a write the browser says no page started, which none of the app's pages sends", async () => {
@@ -198,7 +198,7 @@ describe("security headers", () => {
 
   it("lets no script in but this origin's and the one inline script it hands a nonce", async () => {
     const csp = directives((await proxy(request("http://localhost:3000/"))).headers.get("Content-Security-Policy"));
-    expect(csp["default-src"]).toEqual(["'self'"]);
+    expect(csp["default-src"]).toEqual(["'none'"]);
     expect(csp["script-src"]).not.toContain("'unsafe-inline'");
     expect(csp["script-src"]).not.toContain("'unsafe-eval'");
     expect(csp["script-src"]?.some((source: string) => source.startsWith("'nonce-"))).toBe(true);

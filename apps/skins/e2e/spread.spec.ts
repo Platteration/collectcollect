@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test.describe("where to sell", () => {
   test("ranks by what the whole holding is worth moving, not by the price tag", async ({ page }) => {

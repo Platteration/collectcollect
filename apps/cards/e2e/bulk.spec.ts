@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { addCardByHand } from "./helpers";
 
 test("cards can be selected and acted on together without price data", async ({ page, request }) => {

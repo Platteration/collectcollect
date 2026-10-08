@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 // Order matters: seeing the list marks it read, so the test that needs the
 // seeded alert still unread runs first, with the marking refused.

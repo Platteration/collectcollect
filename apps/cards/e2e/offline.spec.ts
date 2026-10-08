@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 // The suite promises it never calls a price API. A saved card's price refresh
 // runs on the server, where no page.route can answer it, so the servers under

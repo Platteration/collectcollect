@@ -1,0 +1,5 @@
+# CollectCollect: report a vulnerability privately, as SECURITY.md describes.
+Contact: https://github.com/Platteration/collectcollect/security/advisories/new
+Expires: 2027-10-08T00:00:00.000Z
+Policy: https://github.com/Platteration/collectcollect/blob/HEAD/SECURITY.md
+Preferred-Languages: en

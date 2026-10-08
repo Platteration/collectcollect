@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 async function create(page: Page, data: Record<string, unknown>): Promise<number> {
   const res = await page.request.post("/api/cards", { data: { game: "pokemon", setName: "Report Set", ...data } });

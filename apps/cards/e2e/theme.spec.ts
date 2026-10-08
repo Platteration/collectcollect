@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test.describe("theme", () => {
   test("follows the system by default and remembers an explicit choice", async ({ browser }) => {

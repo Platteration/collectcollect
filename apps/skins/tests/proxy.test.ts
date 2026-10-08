@@ -27,7 +27,7 @@ describe("the shared gate, wired into the skins app", () => {
     const restore = await proxy(request("http://localhost:3001/api/backup/restore", { method: "POST", site: "cross-site" }));
     expect(restore.status).toBe(403);
     expect(await restore.json()).toEqual({ error: "Cross-site request refused." });
-    expect(restore.headers.get("Content-Security-Policy")).toMatch(/default-src 'self'/);
+    expect(restore.headers.get("Content-Security-Policy")).toMatch(/default-src 'none'/);
     // The card app on the port beside this one is another origin.
     expect(await status(request("http://localhost:3001/api/items", { method: "POST", origin: "http://localhost:3000" }))).toBe(403);
   });

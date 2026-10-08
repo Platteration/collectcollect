@@ -8,17 +8,21 @@ export const proxy = createProxy(auth, {
   // Paths that must stay reachable without a session, or the login page (and
   // the installed app's shell) cannot load.
   publicPaths: ["/login", "/api/auth", "/api/health", "/offline", "/manifest.webmanifest", "/icons", "/sw.js"],
-  // Reference images come from whichever price source matched the card, so
+  // A photo shows from the browser's own copy (blob:) while it uploads, and
+  // reference images come from whichever price source matched the card, so
   // any https host is allowed for images and nothing else.
-  imageHosts: ["https:"],
+  imageSources: ["blob:", "https:"],
   // Scan mode reads the camera.
   permissions: { camera: true },
+  // A photo's name never changes, so its route lets the browser keep it.
+  cachedPaths: ["/api/uploads/"],
 });
 
 export const config = {
-  // Everything except Next's own endpoints — its static chunks, the image
-  // optimiser, and in development the hot-reload socket, none of which is a
-  // page or an API — and the favicon. Next parses this at build time, so it
-  // cannot come from the shared package.
-  matcher: ["/((?!_next/|favicon.ico).*)"],
+  // Every path, the framework's own files and a missing favicon included:
+  // each response leaves with the security headers, and the not-found page
+  // Next drew for an unmatched path carried none. Only the development
+  // server's hot-reload socket is left alone. Next parses this at build time,
+  // so it cannot come from the shared package.
+  matcher: ["/((?!_next/webpack-hmr).*)"],
 };

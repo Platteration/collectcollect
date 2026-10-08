@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test.describe("installable app", () => {
   test("serves a manifest, icons and a service worker of its own", async ({ request }) => {

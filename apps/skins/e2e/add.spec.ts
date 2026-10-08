@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test.describe("before anything is here", () => {
   // First in the first spec that writes, so this really is an empty inventory.

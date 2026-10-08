@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { addCardByHand } from "./helpers";
 
 test("cards can be filed away and found again by where they are kept", async ({ page }) => {

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 async function add(page: import("@playwright/test").Page, name: string, fields: Record<string, string> = {}) {
   await page.goto("/add");

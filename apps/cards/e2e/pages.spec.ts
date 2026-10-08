@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test.describe("what every response carries", () => {
   test("security headers, and a content security policy the page's own scripts satisfy", async ({ page }) => {
@@ -23,13 +23,16 @@ test.describe("what every response carries", () => {
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).not.toContain("unsafe-eval");
 
-    // The proxy's matcher leaves /_next/ alone; next.config.ts carries the
-    // static files' headers, so a chunk is as unsniffable as the page.
+    // The proxy runs for /_next/ as well, so a chunk carries every header
+    // the page does, the policy included (website.spec.ts holds every one of
+    // them to the README).
     const src = await page.locator('script[src^="/_next/static/"]').first().getAttribute("src");
     const asset = await page.request.get(src!);
     expect(asset.ok()).toBe(true);
     expect(asset.headers()["x-content-type-options"]).toBe("nosniff");
     expect(asset.headers()["x-frame-options"]).toBe("DENY");
+    expect(asset.headers()["cross-origin-resource-policy"]).toBe("same-origin");
+    expect(asset.headers()["content-security-policy"]).toMatch(/^default-src 'none'; /);
 
     // The inline theme script carries the nonce and ran: the attribute it sets
     // is there before anything else could have put it there.

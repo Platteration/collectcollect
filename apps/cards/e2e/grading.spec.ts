@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { addCardByHand } from "./helpers";
 
 test("a grading submission runs from draft to a booked outcome", async ({ page }) => {

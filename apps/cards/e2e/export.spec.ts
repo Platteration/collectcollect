@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test.describe("taking the collection out as a spreadsheet", () => {
   test("exports the collection and the sales ledger, without handing Excel a formula", async ({ page }) => {

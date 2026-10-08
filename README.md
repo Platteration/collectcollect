@@ -296,9 +296,125 @@ Compose gives each app a 2 GB memory limit: a request body is buffered whole, up
 
 **Webhooks.** The alert webhook is posted to by the server itself, so it has to be an address on the public internet: `localhost`, `*.local`, and any private, loopback, link-local or reserved address (carrier-grade NAT, benchmarking, multicast and the like) are refused when saved, a name that resolves to one is refused at delivery, and the request does not follow redirects.
 
-**What every response carries.** A content security policy that allows scripts only from the app itself, plus the one inline script that applies the theme before first paint, which is let through by a nonce minted per request; images from the app, `data:`/`blob:` and (for cards) any https host a price source's reference image might come from; nothing framed, nothing embedded, no `<base>`. Alongside it: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` (a page's address names a card), `Cross-Origin-Opener-Policy: same-origin`, a permissions policy that refuses the camera except where scan mode uses it, and no `X-Powered-By`. `Strict-Transport-Security` (a year, `includeSubDomains`) is sent when the request came over TLS, directly or through a trusted proxy, or when `APP_BASE_URL` starts with `https://`; `includeSubDomains` holds every name under that host to https too, so give the app a leaf name or a host whose subdomains are all https. Next's static files carry the same headers but the policy and HSTS, which a browser takes from the page. `GET /api/health` answers without a session — `{ ok, app, version, database, scheduler: { enabled, running, lastRunAt } }`, and nothing more, since it answers anyone — for a container health check or a proxy. `database` is true only when a query has just run through the live connection: a database file whose restore journal cannot be replayed reports false, with the reason in the log rather than the response, and an install with no database yet reports false without one being created. `ok` means the process answers.
+**What every response carries** is in [The website](#the-website) below. `GET /api/health` answers without a session — `{ ok, app, version, database, scheduler: { enabled, running, lastRunAt } }`, and nothing more, since it answers anyone — for a container health check or a proxy. `database` is true only when a query has just run through the live connection: a database file whose restore journal cannot be replayed reports false, with the reason in the log rather than the response, and an install with no database yet reports false without one being created. `ok` means the process answers.
 
 **Limits on the expensive routes.** Identifying a photo (10 a minute), uploading (30), refreshing every price (6), pricing one card (120, since a scan or a bulk refresh sends one per card), reading a folder or a Steam inventory back in (6), importing a spreadsheet (30), downloading a backup or the folder (6), and restoring a backup or putting one back (6) each refuse with a 429 and a `Retry-After` past their limit. They are in memory and per process — protection against a runaway client or a double-clicked button, not a public API's defence. No request body is accepted past 64 MB: each app's proxy makes Next buffer every body, and past its buffer Next would hand a route a body cut short rather than refuse it, so the buffer is set to that and every route's ceiling sits under it. Only one whole-collection price refresh runs at a time, whoever asks: a second is told so with a 409, since the answer it wants is already being produced.
+
+### The website
+
+Each app is its own website: the pages are the interface, and the Node server
+behind them does everything else — it answers every request with the headers
+below, refuses what is not part of the site, draws the not-found page and keeps
+the collection. There is no static export and nothing to configure on a web
+server: the app sets its headers itself (`packages/core/src/proxy.ts`, which
+runs for every path, Next's own files and the not-found page included), so a
+reverse proxy in front should pass them through and add no policy of its own —
+two policies on one response are both enforced, and the stricter wins wherever
+they differ. Each app lives at the root of its own origin (its cookies, service
+worker and links all assume `/`), so give each one its own host name or port
+rather than a path on a shared one.
+
+These are the headers each app sends on every response when it is served over
+https. Over plain http (the default on a home network) the same, less
+`Strict-Transport-Security` and `upgrade-insecure-requests`, which would send
+every script and stylesheet to an https port nothing listens on. `{nonce}` is
+16 random bytes, fresh for every response. Both blocks are read by the tests:
+each app's `tests/website.test.ts` holds its proxy's output equal to its block
+word for word, and its browser suite holds every live response to it.
+
+The card app:
+
+<!-- headers:cards:begin -->
+```text
+Content-Security-Policy: default-src 'none'; script-src 'self' 'nonce-{nonce}' 'strict-dynamic'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' blob: https:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: no-referrer
+Permissions-Policy: accelerometer=(), autoplay=(), browsing-topics=(), camera=(self), clipboard-read=(), clipboard-write=(), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), interest-cohort=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), usb=(), window-management=(), xr-spatial-tracking=()
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Resource-Policy: same-origin
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+```
+<!-- headers:cards:end -->
+
+The skins app:
+
+<!-- headers:skins:begin -->
+```text
+Content-Security-Policy: default-src 'none'; script-src 'self' 'nonce-{nonce}' 'strict-dynamic'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' https://community.cloudflare.steamstatic.com https://steamcommunity-a.akamaihd.net; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: no-referrer
+Permissions-Policy: accelerometer=(), autoplay=(), browsing-topics=(), camera=(), clipboard-read=(), clipboard-write=(), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), interest-cohort=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), usb=(), window-management=(), xr-spatial-tracking=()
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Resource-Policy: same-origin
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+```
+<!-- headers:skins:end -->
+
+Every source in the policy was measured, by driving each app's production build
+in Chromium under exactly this header (`npm run test:e2e`: every spec fails on a
+policy violation, and `e2e/website.spec.ts` drives the main flow and checks the
+headers of every response), not copied from anywhere:
+
+| Directive | Why |
+| --- | --- |
+| `default-src 'none'` | Nothing loads unless it is named below. |
+| `script-src` | This origin's files, and an inline script only with this response's nonce: Next stamps it on its bootstrap and page data, the layout on the theme script and the safety net. `'strict-dynamic'` lets those load Next's chunks and makes a modern browser ignore `'self'`, so markup injected into a page cannot load even one of this origin's own files. No `'unsafe-inline'`, and `'unsafe-eval'` only under `next dev`. |
+| `style-src 'self'`, `style-src-attr 'unsafe-inline'` | The app's own stylesheets, and `style` attributes, which React writes for the theme's variables, the charts and each card's colour. An injected `<style>` element is refused. `next dev` adds `'unsafe-inline'` for its overlay. |
+| `img-src` | Cards: uploaded photos (this origin), a photo's preview while it uploads (`blob:`), and reference images from whichever price source matched (`https:`). Skins: Steam's image hosts. No `data:`: nothing uses one. |
+| `font-src`, `connect-src`, `worker-src`, `manifest-src` | The display face, the app's own API, its service worker and its manifest — all this origin. `next dev` adds its websocket. |
+| `form-action 'self'` | The collection and inventory search boxes are plain forms that reload their own page, so they work before the scripts arrive. |
+| media | None: the scan screen's camera preview is a stream handed to `<video>` as an object, which no fetch directive governs. |
+| `frame-ancestors 'none'`, `X-Frame-Options: DENY` | Nothing here is meant to be framed; Settings has one-click buttons (sign out everywhere) that a framing page would like to steer. |
+| `upgrade-insecure-requests` | Only over https, as above. |
+
+Measured and not adopted: `require-trusted-types-for 'script'`. Next's chunk
+loader assigns script URLs as strings, so under it every navigation to a page
+whose code had not loaded yet threw and fell back to a full page load, the
+not-found page threw while drawing, and the service worker, registered from a
+string, was refused — the app could neither install nor open offline.
+
+`Permissions-Policy` denies every feature Chromium knows that a page could
+reach for, but the camera on the card app's scan screen; the browser suite reads
+`document.featurePolicy` back and fails on a name Chromium does not recognise (a
+misspelt feature is ignored without a word) or a feature the page still has.
+`Referrer-Policy: no-referrer` because a page's address names a card or an item.
+`Cross-Origin-Resource-Policy: same-origin`: no other site may embed a photo, a
+chart or a script from here. `Strict-Transport-Security` (a year,
+`includeSubDomains`) goes out when the request came over TLS, directly or
+through a trusted proxy, or when `APP_BASE_URL` starts with `https://`;
+`includeSubDomains` holds every name under that host to https too, so give the
+app a leaf name or a host whose subdomains are all https. No `X-Powered-By`.
+Next's image optimiser (`/_next/image`, which neither app uses) sets a stricter
+policy of its own on what it answers.
+
+**Caching**, as measured: every page, and every API answer but an uploaded
+photo, is `no-store` (the collection, what it cost and what it is worth never go
+to the browser's disk); a photo is `private, max-age=31536000, immutable`, since
+its name never changes; Next's content-hashed build files are `public,
+max-age=31536000, immutable`; `/sw.js` and `/guard.js` are `no-cache`, and the
+manifest, the icons, `robots.txt` and `security.txt` `max-age=0` — revalidated on
+every use, because their names carry no version.
+
+**A safety net.** Every page loads `/guard.js` (`packages/core/src/guard.ts`)
+before the app: when the page's scripts fail to arrive or throw before React has
+taken the page over, a note at the top says the page did not finish loading and
+offers Reload, instead of buttons that silently do nothing. Without JavaScript
+at all, a `<noscript>` note says what still works: the pages read, links and the
+search boxes work, and nothing can be added or changed.
+
+**For robots and for reports.** `/robots.txt` asks every crawler to stay out —
+this is one owner's collection — and `/.well-known/security.txt` points at
+GitHub's private vulnerability reporting, as `SECURITY.md` does. Both answer
+without a session, as do Next's build files and `/guard.js`, which the login
+page needs. `security.txt` expires on 2027-10-08, and each app's
+`tests/website.test.ts` fails once it has: renew it, a year ahead at most.
+
+**Nothing else is served.** The repository's own files — `README.md`,
+`package.json`, `.env`, `.git/`, the sources, the data directory — answer 404:
+only routes and each app's `public/` folder are reachable, which the browser
+suite checks address by address.
 
 ## Development
 
@@ -344,6 +460,11 @@ call Anthropic or a price API, but everything else, including the database,
 runs for real. It covers adding a card by hand, duplicate
 merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
 grading submission from draft to booked outcome, and the password gate.
+Every spec imports its `test` from `e2e/fixtures.ts`, so any page a test drives
+fails it on a content security policy violation, an uncaught exception or a
+request that leaves the site, and `e2e/website.spec.ts` drives each app's main
+flow holding every response to the README's headers (see
+[The website](#the-website)).
 
 The type checker runs strict, with `noUncheckedIndexedAccess` on in every
 workspace: an element read out of an array or a table is `undefined` until the
@@ -384,8 +505,10 @@ atomic-write.ts          Write-then-rename with fsync, for every file the mirror
 lookup.ts, series.ts     Prototype-safe table lookup; extent and thinning for long series
 manifest.ts, service-worker.ts
                          The installable app shell both apps share; each app only names itself
+guard.ts                 The safety net every page loads first, served at /guard.js
 charts/, components/     Chart geometry and the components both apps draw with, including the
-                         not-found, error and offline pages and the service worker registration
+                         not-found, error and offline pages, the service worker registration,
+                         the safety net's Started signal and the no-JavaScript note
 ```
 
 Inside `apps/cards`:
@@ -435,8 +558,11 @@ src/lib/import.ts        Maps a spreadsheet's columns to cards, previews, then a
 src/lib/backup.ts        The zip of everything, and the restore that swaps it in
 src/lib/sets/            Set checklist providers, caching and completion matching
 src/lib/auth.ts          This app's cookie name and variables for the shared password gate
-src/proxy.ts             Guards every route when APP_PASSWORD is set
-e2e/                     Playwright suite driving a real build
+src/proxy.ts             Runs for every path: the security headers, the host and cross-site
+                         checks, and the password gate when APP_PASSWORD is set
+public/                  robots.txt, .well-known/security.txt and the icons
+e2e/                     Playwright suite driving a real build; fixtures.ts holds every spec
+                         to the policy, website.spec.ts drives the site and its headers
 src/lib/cards.ts, db.ts  SQLite (better-sqlite3) repository and schema
 src/components/          UI (add flow, card detail, price panel, settings)
 tests/                   Vitest suites (providers with mocked fetch, valuation, repository)

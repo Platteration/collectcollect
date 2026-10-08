@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 // The suite promises it never asks a market for a price. A priced item's lookup
 // runs on the server, where no page.route can answer it, so the servers under

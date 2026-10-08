@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 const CSV = [
   "Card Name,Game,Edition,Card Number,Qty,Cond,Price Paid,Sleeved",
