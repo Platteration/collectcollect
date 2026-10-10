@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Auth, Revoked } from "./auth";
 import { isSecureRequest } from "./net";
+import { requestSecurityError } from "./request-guard";
 
 /**
  * What a page is allowed to load, beyond itself.
@@ -93,6 +94,9 @@ export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
       requestHeaders.set("Content-Security-Policy", csp);
       return secure(NextResponse.next({ request: { headers: requestHeaders } }));
     };
+
+    const refused = requestSecurityError(request);
+    if (refused) return secure(NextResponse.json({ error: refused.message }, { status: refused.status }));
 
     if (!auth.authEnabled()) return next();
 
