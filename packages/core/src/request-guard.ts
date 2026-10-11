@@ -15,6 +15,19 @@ function authority(value: string): URL | null {
   }
 }
 
+/**
+ * Whether a request carries any body bytes. HTTP gives a request a body only through
+ * Transfer-Encoding or a non-zero Content-Length (RFC 9112 section 6.3); `request.body`
+ * cannot say, because the proxy is handed a stream for every method but GET and HEAD,
+ * empty or not. A length that is not a plain zero counts as a body, so a malformed one
+ * fails closed.
+ */
+function carriesBody(request: Request): boolean {
+  if (request.headers.has("transfer-encoding")) return true;
+  const length = request.headers.get("content-length");
+  return length !== null && !/^\s*0+\s*$/.test(length);
+}
+
 /** A public DNS name needs the operator's explicit approval to prevent rebinding. */
 export function hostAllowed(value: string, configured = process.env.ALLOWED_HOSTS): boolean {
   const url = authority(value);
@@ -52,10 +65,17 @@ export function requestSecurityError(request: Request): { status: number; messag
 
   // No JSON handler accepts a safelisted text/plain form, even if its bytes parse as JSON.
   // Multipart upload/restore routes retain their existing size and archive validation.
+  // A write that declares a type or carries bytes must declare JSON. One that does
+  // neither — a DELETE, or an action POST such as a price refresh, from a script with
+  // no body — has nothing to parse and goes through; a browser form can never take
+  // that shape, since the browser always declares a form's type.
   const path = new URL(request.url).pathname;
-  if (path.startsWith("/api/") && request.body && !MULTIPART_PATHS.has(path)) {
-    const type = request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
-    if (type !== "application/json") return { status: 415, message: "Expected application/json" };
+  if (path.startsWith("/api/") && !MULTIPART_PATHS.has(path)) {
+    const declared = request.headers.get("content-type");
+    const type = declared?.split(";")[0]?.trim().toLowerCase();
+    if (type !== "application/json" && (declared !== null || carriesBody(request))) {
+      return { status: 415, message: "Expected application/json" };
+    }
   }
   return null;
 }
