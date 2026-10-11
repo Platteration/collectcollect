@@ -44,6 +44,22 @@ describe("the passwordless browser boundary", () => {
     }))).toBeNull();
   });
 
+  it("lets a bodyless write through without a Content-Type, in the shape the proxy receives", () => {
+    // Next hands the proxy a body stream for every method but GET and HEAD, empty or not,
+    // so this is a DELETE or an action POST as a script sends it: a stream, no Content-Type,
+    // and no header that would give the request a body.
+    const asProxied = (method: string, headers: Record<string, string> = {}) => new Request("http://localhost:3000/api/cards/7/price", {
+      method, headers, body: new ReadableStream({ start(controller) { controller.close(); } }), duplex: "half",
+    } as RequestInit);
+    expect(requestSecurityError(asProxied("DELETE"))).toBeNull();
+    expect(requestSecurityError(asProxied("POST", { "Content-Length": "0" }))).toBeNull();
+    // Bytes, a declared type, or a length that is not plainly zero still have to be JSON.
+    expect(requestSecurityError(asProxied("POST", { "Content-Length": "2" }))?.status).toBe(415);
+    expect(requestSecurityError(asProxied("POST", { "Transfer-Encoding": "chunked" }))?.status).toBe(415);
+    expect(requestSecurityError(asProxied("POST", { "Content-Length": "0", "Content-Type": "application/x-www-form-urlencoded" }))?.status).toBe(415);
+    expect(requestSecurityError(asProxied("POST", { "Content-Length": "abc" }))?.status).toBe(415);
+  });
+
   it("supports trusted TLS reverse proxies and scripts without browser provenance headers", () => {
     process.env.ALLOWED_HOSTS = "cards.example";
     process.env.TRUST_PROXY = "1";
