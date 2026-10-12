@@ -1,6 +1,9 @@
 // Loaded into every server the end-to-end suites start (each app's
-// playwright.config.ts, through NODE_OPTIONS --import), before Next: they can
-// reach no host but their own. A saved card's first price refresh, and a
+// playwright.config.ts, through NODE_OPTIONS --import), before Next: through
+// fetch they can reach no host but their own. (An alert webhook is the one
+// request the servers make outside fetch, over a socket of its own so that the
+// address it checks is the address it uses; no suite sets one, and this does
+// not cover it.) A saved card's first price refresh, and a
 // priced item's lookup, run on the server, where no page.route can answer
 // them, so without this a CI runner priced every card the suite added against
 // the real APIs, at whatever speed they answered that day, while a sandbox

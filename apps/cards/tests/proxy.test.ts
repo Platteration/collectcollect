@@ -7,6 +7,7 @@ afterEach(() => {
   delete process.env.ALLOWED_HOSTS;
   delete process.env.APP_BASE_URL;
   delete process.env.TRUST_PROXY;
+  delete process.env.COOKIE_SECURE;
 });
 
 /** A request as a browser would send it: Host always, the fetch metadata optionally. */
@@ -126,8 +127,11 @@ describe("cross-site writes", () => {
     expect(await status(request("http://localhost:3000/api/cards", { method: "POST", site: "none" }))).toBe(403);
   });
 
-  it("compares the whole authority, so a proxy in front passes the Host through with its port", async () => {
+  it("compares the whole origin, so a proxy in front passes the Host through with its port and says it ends TLS", async () => {
     process.env.ALLOWED_HOSTS = "cards.example";
+    // The proxy ends TLS, and the app is told so (APP_BASE_URL, or TRUST_PROXY
+    // with X-Forwarded-Proto), as it must be for HSTS and the cookie's Secure flag.
+    process.env.APP_BASE_URL = "https://cards.example";
     const post = (host: string, origin: string) =>
       status(request("http://localhost:3000/api/cards", { method: "POST", site: "same-origin", host, origin }));
     // Behind a proxy that ends TLS on 443 the origin has no port and neither does Host.
@@ -135,6 +139,23 @@ describe("cross-site writes", () => {
     expect(await post("cards.example:8443", "https://cards.example:8443")).toBe(200);
     // nginx's $host drops a non-default port; .env.example says to use $http_host.
     expect(await post("cards.example", "https://cards.example:8443")).toBe(403);
+    // An http page of the same name is another origin, and one a network attacker
+    // can write into: refused even from a browser too old to send Fetch Metadata.
+    expect(await post("cards.example", "http://cards.example")).toBe(403);
+    // Told nothing, the app takes the request for plain http, and an https page's
+    // write does not match the origin it serves.
+    delete process.env.APP_BASE_URL;
+    expect(await post("cards.example", "https://cards.example")).toBe(403);
+    // COOKIE_SECURE=1 is how an owner behind a proxy the app was not told about says it is https.
+    process.env.COOKIE_SECURE = "1";
+    expect(await post("cards.example", "https://cards.example")).toBe(200);
+    expect(await post("cards.example", "http://cards.example")).toBe(403);
+    delete process.env.COOKIE_SECURE;
+    process.env.TRUST_PROXY = "1";
+    const forwarded = request("http://localhost:3000/api/cards", {
+      method: "POST", host: "cards.example", origin: "https://cards.example", headers: { "x-forwarded-proto": "https" },
+    });
+    expect(await status(forwarded)).toBe(200);
   });
 
   it("never believes X-Forwarded-Host, even from a declared proxy", async () => {

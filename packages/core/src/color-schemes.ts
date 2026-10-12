@@ -1,13 +1,10 @@
-/**
- * The accent hues a person can pick between, independent of light/dark. Every
- * scheme touches only `--accent`/`--accent-ink`/`--accent-solid` in
- * `globals.css`; gain and loss colours (`--chart-good*`/`--chart-bad*`) never
- * vary by scheme, and no hue here sits in the green or red range those use.
+/** Coordinated hobby palettes. IDs and swatches retain existing saved choices.
+ * The shared stylesheet changes aesthetic surfaces and accents, never financial,
+ * categorical, rarity or grading-company colors.
  */
 export interface ColorScheme {
   id: string;
   label: string;
-  /** The light-mode accent, for painting a swatch dot in the picker. */
   swatch: string;
 }
 

@@ -53,13 +53,17 @@ Each app keeps its settings server-side: one JSON record under the `settings` ke
 SQLite `settings` table, read and sanitised by `getSettings()`/`saveSettings()` in
 `apps/cards/src/lib/settings.ts` and `apps/skins/src/lib/settings.ts` and edited on
 `/settings`. Two preferences live in the browser instead, shared by both apps through
-`packages/core`: the theme (`ThemeToggle`, localStorage `theme`: `system`, `light` or
-`dark`; `system` follows `prefers-color-scheme`) and the accent (`ColorSchemePicker`,
-localStorage `colorScheme`, one of `COLOR_SCHEMES` in `packages/core/src/color-schemes.ts`).
-Both are read by literal comparison or a `Set` of the known ids, so a stored value that
-names something on `Object.prototype` reads as the default; each layout's inline
-`THEME_SCRIPT` applies them before the first paint and is kept in step with the two
-components. Those two keys predate the shared settings contract and do not yet follow it
+`packages/core`: the theme (localStorage `theme`: `system`, `light` or `dark`; `system`
+follows `prefers-color-scheme`) and the palette (localStorage `colorScheme`, one of
+`COLOR_SCHEMES` in `packages/core/src/color-schemes.ts`, whose grounds, panels and accents
+are `packages/core/src/family-theme.css`). One controller, `packages/core/src/appearance.ts`,
+reads, stores and applies both for `ThemeToggle` (the header's switch and palette menu) and
+`ColorSchemePicker` (Settings), keeps a choice the browser will not store in memory with a
+note, and keeps tabs in step. It reads both by literal comparison against the known ids, so
+a stored value that names something on `Object.prototype` reads as the default. Each
+layout's inline `THEME_SCRIPT` applies them before the first paint and is kept in step with
+`appearance.ts`; it writes the stored palette name unchecked, so an unknown one shows the
+base colours until the controller puts the default in its place on load. Those two keys predate the shared settings contract and do not yet follow it
 (`<app>.<record>.v<N>`, a `settings-contract` test): renaming them is a migration of its
 own, not part of the merge that brought them here. Each control is its own reset, and
 nothing about one is destructive, so nothing is confirmed. The About section on each
