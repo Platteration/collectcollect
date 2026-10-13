@@ -29,6 +29,17 @@ test.describe("password gate", () => {
     await expect(page.getByRole("link", { name: /^\+ Add/ })).toHaveCount(0);
   });
 
+  test("offers no sign-in with Google when none is set up", async ({ page, request }) => {
+    await page.goto("/login");
+    await expect(page.getByLabel("Password")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sign in with Google" })).toHaveCount(0);
+    for (const path of ["/api/auth/google/start", "/api/auth/google/callback?state=x&code=y"]) {
+      const res = await request.get(path, { maxRedirects: 0 });
+      expect(res.status(), path).toBe(404);
+      expect(res.headers()["set-cookie"], path).toBeUndefined();
+    }
+  });
+
   test("an API call without a session is refused", async ({ request }) => {
     expect((await request.get("/api/items")).status()).toBe(401);
     // A write is refused the same way, not with a redirect a fetch would follow.

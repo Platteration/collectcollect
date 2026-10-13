@@ -11,7 +11,7 @@ npm run test:e2e    # builds both apps, then drives each in Chromium
 
 `npm run test:e2e` (also `npm run e2e`) builds first, since the suites drive a
 real production build. The suites boot their own servers on fixed ports (3210–3211 for cards,
-3220–3222 for skins) against throwaway data directories, and clean up after
+3220–3223 for skins) against throwaway data directories, and clean up after
 themselves.
 
 ## What goes where
@@ -25,6 +25,9 @@ themselves.
 - Each app's `src/lib` is its repository and rules; `src/app/api` is thin
   routes over it; `src/components` is the UI. Tests live in each app's `tests`
   (Vitest) and `e2e` (Playwright).
+- `packages/core/src/kit` is the sign-in kit every repository of the family
+  carries, JavaScript copied byte for byte: it is never edited here (CLAUDE.md,
+  "Sign in with Google"), and its own self-test runs as `packages/core`'s tests.
 
 ## How changes land
 

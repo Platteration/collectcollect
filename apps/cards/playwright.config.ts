@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { E2E_PASSWORD, LOCKED_DATA_DIR, OPEN_DATA_DIR } from "./e2e/data-dir";
+import { E2E_ACCOUNTS, E2E_CLIENT } from "../../scripts/fake-google.mjs";
 
 // Fixture timestamps render identically in the server and the browser on every host.
 process.env.TZ = "UTC";
@@ -16,6 +17,10 @@ const LOCKED_PORT = 3211;
 // Both servers reach no host but their own (scripts/e2e-offline.mjs), so a
 // price lookup made on the server fails at once rather than calling a real API.
 const offline = [process.env.NODE_OPTIONS, `--import=${pathToFileURL(path.join(import.meta.dirname, "../../scripts/e2e-offline.mjs")).href}`].filter(Boolean).join(" ");
+// The locked server also offers sign-in with Google, whose token endpoint and
+// keys it reaches through a fake (scripts/e2e-google.mjs); the suite plays
+// Google's sign-in page itself (auth.spec.ts).
+const withGoogle = `${offline} --import=${pathToFileURL(path.join(import.meta.dirname, "../../scripts/e2e-google.mjs")).href}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -61,9 +66,13 @@ export default defineConfig({
       // behind a TLS proxy the app was not told about: the https address it is
       // reached at, and the names it is still reached by at home, which are
       // plain http (auth.spec.ts, "an https address beside a home network's names").
+      // Sign-in with Google beside the password, returning to this address,
+      // which a browser counts as secure (auth.spec.ts, "sign-in with Google").
       env: {
-        DATA_DIR: LOCKED_DATA_DIR, APP_PASSWORD: E2E_PASSWORD, AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: offline,
+        DATA_DIR: LOCKED_DATA_DIR, APP_PASSWORD: E2E_PASSWORD, AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: withGoogle,
         APP_BASE_URL: "https://cards.example", ALLOWED_HOSTS: "cards.example,cardbox.lan,127.0.0.1",
+        APP_URL: `http://127.0.0.1:${LOCKED_PORT}`, GOOGLE_CLIENT_ID: E2E_CLIENT.id, GOOGLE_CLIENT_SECRET: E2E_CLIENT.secret,
+        GOOGLE_ALLOWED_SUBS: E2E_ACCOUNTS.owner.sub,
       },
     },
   ],

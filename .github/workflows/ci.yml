@@ -54,7 +54,7 @@ jobs:
       # Each app's suite drives a production build it makes itself, so the suite stays
       # self-contained locally; the build step above is what names a build failure as
       # its own. Both apps boot their own servers on their own ports (3210-3211 for
-      # cards, 3220-3222 for skins) against throwaway data directories.
+      # cards, 3220-3223 for skins) against throwaway data directories.
       - run: npm run test:e2e
 
       - name: Upload the reports

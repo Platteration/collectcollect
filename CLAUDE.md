@@ -4,11 +4,45 @@
 
 An npm workspace: `apps/cards` (the trading-card app), `apps/skins` (the same engine for
 CS2 items) and `packages/core` (code with no opinion about what is collected: the proxy
-and its security headers, the password gate and sessions, forwarded-header trust, body
-limits, restore validation, zip, CSV, charts). Each app is a Next.js app with its own
-`AGENTS.md`/`CLAUDE.md`, which `next dev` writes and which are committed as it makes them.
+and its security headers, the gate — a password, sign-in with Google, or both — and
+sessions, forwarded-header trust, body limits, restore validation, zip, CSV, charts).
+Each app is a Next.js app with its own `AGENTS.md`/`CLAUDE.md`, which `next dev` writes
+and which are committed as it makes them.
 `next` itself is declared once, in the root `package.json`, so both apps and the shared
 package run the same version; `CONTRIBUTING.md` has what goes where.
+
+## Sign in with Google
+
+The fleet's sign-in kit lives at `packages/core/src/kit/`, not `server/kit/`: the apps reach
+it only through `packages/core`, which Next transpiles and bundles into each app and the
+Docker image. Its bytes are the canonical copy's (`diff -r` against it is empty) and are
+never edited here: a change is asked of the canonical copy and copied in whole. This
+repository uses three of its modules, `google.js`, `crypto.js` and `http.js`, from
+`packages/core/src/google-signin.ts`; the rest (its own sessions, users, Stripe, the
+adapters) is carried unused, since there is no shop and no webhook here. `npm test` runs its
+self-test (`packages/core`'s `test` script, `node --test src/kit/selftest.mjs`), and
+`packages/core`'s `typecheck` checks its declarations with the package's own tsconfig and its
+JavaScript with `tsconfig.kit.json` (the same options plus `checkJs` and Node's types); its
+`eslint .` lints all seventeen files.
+
+Sign-in with Google is a way past each app's gate, beside the password or in its place, for
+the accounts the app lists: `google-config.ts` reads the app's variables (`APP_URL` and
+`GOOGLE_*` for cards, `SKINS_APP_URL` and `SKINS_GOOGLE_*` for skins, by `googleVariables`
+in each app's `src/lib/auth.ts`), and `google-signin.ts` is the start and callback routes.
+An allowed account gets the app's own session cookie (`cc_session`, `cc_skins_session`),
+the one the password gives, so revocation, *Sign out everywhere* and the proxy need nothing
+new; the state between leaving for Google and coming back is a sealed
+`__Host-collectcollect-<app>-oauth` cookie. The rules that hold it: any `GOOGLE_` variable
+turns the gate on, and a configuration that does not hold (an empty list included) lets
+nobody in rather than opening the app; with no password, sessions are signed with the seed
+or `APP_SECRET`, never a key derived from nothing; a session is bound to the list, so
+changing it ends every session, and a gate with no Google variables signs exactly what it
+signed before. `apps/cards/tests/google-signin.test.ts` drives the routes against the fake
+Google in `scripts/fake-google.mjs`, handed in through `createAuthRoutes({ fetch })`; the
+browser suites' Google servers (cards' locked server, skins' `google` project on 3223) get
+the same fake through `scripts/e2e-google.mjs`, and the specs answer Google's sign-in page
+at the protocol (`googleSignsIn`): Playwright passes a redirected request to the network
+whatever `page.route` says, and the start route reaches Google by a redirect.
 
 ## Conventions
 
@@ -52,7 +86,8 @@ Chromium ignores beside `'strict-dynamic'`, and `worker-src`, which it fills fro
 needs it. Every spec imports `test` from `e2e/fixtures.ts`, not
 `@playwright/test` (`tests/website.test.ts` fails on one that does not), so every page any
 test drives, in a context the test makes for itself too, fails on a policy violation, an
-uncaught exception or a request that leaves the site; `unwatchedContext` is for a test
+uncaught exception or a request that leaves the site (but one: the top-level navigation to
+Google's sign-in page, which the test answers itself); `unwatchedContext` is for a test
 whose pages break those rules on purpose. `website.spec.ts` starts every page the app
 has, read off `src/app`: a new page fails it until the walk has an address for it. In
 skins an item's picture is drawn only from the hosts `IMAGE_SOURCES` names

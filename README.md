@@ -224,7 +224,12 @@ whichever page is showing.
 
 **Password.** Set `SKINS_APP_PASSWORD` — its own variable, and its own cookie.
 Cookies are scoped to a host and not to a port, so two of these apps served from
-localhost would otherwise hand each other their sessions.
+localhost would otherwise hand each other their sessions. Sign-in with Google
+works as in the card app (see Deploy), with variables of its own:
+`SKINS_APP_URL`, `SKINS_GOOGLE_CLIENT_ID`, `SKINS_GOOGLE_CLIENT_SECRET`,
+`SKINS_GOOGLE_ALLOWED_SUBS` and `SKINS_GOOGLE_ALLOWED_EMAILS`. One Google client
+can serve both apps, with both callback addresses on it; who may sign in is
+still each app's own list.
 
 **Keeping history flowing.** The server re-prices anything whose latest price
 is older than `SKINS_AUTO_REFRESH_HOURS` (default 24, set 0 to disable) once an
@@ -289,6 +294,8 @@ docker build -t collectcollect-skins --build-arg APP=skins .
 Compose gives each app a 2 GB memory limit: a request body is buffered whole, up to 64 MB, so a few uploads or restores at once are the high-water mark. `bash scripts/release-candidate.sh <version>` validates a release candidate of the card image on this machine — the whole gate, a container boot, a goal surviving a restart — and packages the image with the candidate Compose file into `release/`, publishing nothing ([Self-hosting](docs/SELF_HOSTING.md) says how to try one).
 
 **Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach (each app says so in its log at startup). Failed attempts are rate limited — eight a minute per client, reserved before the password is checked, so firing guesses in parallel buys nothing — and changing the password invalidates existing sessions. Each session carries an id: signing out ends that one, wherever a copy of its cookie went, and *Sign out everywhere* on the Settings page ends every session issued so far — for the phone that was lost or the browser left signed in. The record lives in `sessions.json` in the data directory, and a sign-out that cannot be written there says so rather than reporting success. The login page shows nothing of the app — no navigation, no unread-alert count — to someone who is not signed in. The cookie is signed with a random key kept beside it in `session-secret`, so a stolen cookie is no help to anyone guessing the password; `APP_SECRET` replaces that key if you would rather set one. Neither file is in a backup: a restore onto a new machine asks for the password once more. So does upgrading past the point either was introduced, since older sessions are not recognised.
+
+**Sign in with Google.** Beside the password, or in its place, the app can let you in with a Google account: yours, and only the accounts you name. It needs a Google OAuth client of type *Web application* whose authorised redirect URI is the app's address followed by `api/auth/google/callback` (`https://cards.example.com/api/auth/google/callback`), and these variables: `APP_URL`, that address (the site's root, https, or `http://localhost` and `http://127.0.0.1` on this machine), `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and who may sign in: `GOOGLE_ALLOWED_SUBS`, Google's ids for the accounts, and/or `GOOGLE_ALLOWED_EMAILS`, addresses Google says are verified, each a comma- or space-separated list (an address is compared without regard to case). The login page then offers *Sign in with Google*: the browser goes to Google and comes back to `api/auth/google/callback`, where the app checks the answer — the code flow with PKCE, a state and a nonce held in a short-lived signed `__Host-` cookie, and Google's signature, issuer, audience, expiry and nonce on the ID token (the shared kit's `google.js`, kept in `packages/core/src/kit`) — and then the list. An account on it gets the same session cookie the password gives, so it lasts 30 days, *Sign out* and *Sign out everywhere* end it, and the login page and the gate treat it alike; anything else lands back on the login page, which says "Sign-in didn't complete." once. The log names Google's id for an account the list turned away, so a first sign-in tells you the number to add, and nothing from Google is shown or logged beyond that. The callback calls Google at most ten times a minute for one client (counted as the login limiter counts one, below). Setting any `GOOGLE_` variable turns the gate on whether or not the rest holds: until it does, nobody can sign in that way, the login page says it is not fully set up, and the log names what is missing or malformed, never a value — an empty list counts as missing, since it would let in every Google account there is. With no password, sessions are signed with the random key in `session-secret` or `APP_SECRET` and never with one derived from nothing: where neither can be had, nobody can sign in and the log says why. Changing who may sign in ends every session, the password's included, as changing the password does (and so does turning sign-in with Google on or off). Google tells the app the account's id and, when it is verified, its address; the app compares them with the list and stores neither for an account it lets in — the session cookie names no one — and writes only the id of one it turned away, to the log. Sign-in with Google works at `APP_URL` alone: Google returns only there and its cookie is `Secure`, so it needs https (or this machine), and the login page's button goes there from any other name the app answers to; a plain-http home address keeps the password.
 
 > Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
 
@@ -484,7 +491,11 @@ boots each and asks it how it is; and an `audit` job runs
 Unit tests cover the pieces where a mistake is silent: price matching and the
 provider adapters (against recorded responses, never the network), the
 valuation and grading-outlook maths, the repository and its migrations, sales,
-submissions, alert rules, and the password gate.
+submissions, alert rules, and the gate: the password, and sign-in with Google
+against a fake Google (`scripts/fake-google.mjs`: its own RSA key, token
+endpoint and consent screen) handed to the routes in place of `fetch`, with
+the kit's own self-test (`packages/core/src/kit/selftest.mjs`) run by
+`npm test`.
 
 The end-to-end suite drives a real production build in Chromium against a
 throwaway data directory. Identification is intercepted in the browser, and the
@@ -493,12 +504,17 @@ so a price lookup made on the server fails at once and says so; the tests never
 call Anthropic or a price API, but everything else, including the database,
 runs for real. It covers adding a card by hand, duplicate
 merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
-grading submission from draft to booked outcome, and the password gate.
+grading submission from draft to booked outcome, and the gate: the password,
+sign-in with Google beside it (cards) and on its own (skins). Google's half of
+a sign-in is played the same way: its sign-in page by the test, answered at the
+protocol with a redirect back to the app, and its token endpoint and keys by
+the fake that `scripts/e2e-google.mjs` puts in front of the server's `fetch`.
 Every spec imports its `test` from `e2e/fixtures.ts` (each app's
 `tests/website.test.ts` fails on one that does not), so any page a test drives,
 in a browser context of the test's own making too, fails it on a content
 security policy violation, an uncaught exception or a request that leaves the
-site; only `unwatchedContext` makes a context outside those rules, for the two
+site (but the one navigation to Google's sign-in page, which the test answers
+itself); only `unwatchedContext` makes a context outside those rules, for the two
 tests whose pages break them on purpose. `e2e/website.spec.ts` drives each app's
 main flow and starts every page it has, holding every response to the README's
 headers (see [The website](#the-website)).
@@ -526,7 +542,11 @@ Inside `packages/core/src`:
 ```
 markdown/                The Markdown codec: front matter, tables, money, slugs
 zip.ts, csv.ts           Dependency-free streaming zip writer and reader; RFC 4180 CSV reader
-auth.ts, auth-route.ts   The optional password gate, its sign-in routes, and revoking a session
+auth.ts, auth-route.ts   The optional gate (a password, Google or both), its sign-in routes, and revoking a session
+google-config.ts         Sign-in with Google: each app's variables, who may sign in, where to return
+google-signin.ts         Its two routes: leaving for Google, and coming back through the kit's checks
+kit/                     The shared sign-in kit, copied byte for byte and never edited here; this
+                         repository uses google.js, crypto.js and http.js (see CLAUDE.md)
 sessions.ts              Ended sessions, kept in one small file beside the data
 proxy.ts                 The per-request gate: request-guard.ts, session check, CSP nonce, security headers
 forwarded.ts             Which X-Forwarded-* entry may be believed: the one a trusted proxy wrote
@@ -580,7 +600,8 @@ src/app/                 Next.js App Router pages and API routes
   api/locations          GET — storage locations in use, for autocomplete
   api/sets/refresh       POST — fetch and store a set's published checklist
   api/auth               POST signs in, DELETE signs out this session; /revoke ends every
-                         session at once (only when APP_PASSWORD is set)
+                         session at once (only when the gate is on); /google/start and
+                         /google/callback sign in with Google (404 unless it is set up)
   api/health             GET — is the server up, which version, what is it reading; needs no session
   api/settings           Multipliers + provider status
 src/lib/identify/        Claude vision call and the identification schema
@@ -598,9 +619,9 @@ src/lib/markdown/        The plain-text copy: format, one card as a document, th
 src/lib/import.ts        Maps a spreadsheet's columns to cards, previews, then applies in one transaction
 src/lib/backup.ts        The zip of everything, and the restore that swaps it in
 src/lib/sets/            Set checklist providers, caching and completion matching
-src/lib/auth.ts          This app's cookie name and variables for the shared password gate
+src/lib/auth.ts          This app's cookie names and variables for the shared gate
 src/proxy.ts             Runs for every path: the security headers, the host and cross-site
-                         checks, and the password gate when APP_PASSWORD is set
+                         checks, and the gate when APP_PASSWORD or a GOOGLE_ variable is set
 public/                  robots.txt, .well-known/security.txt and the icons
 e2e/                     Playwright suite driving a real build; fixtures.ts holds every spec
                          to the policy, website.spec.ts drives the site and its headers

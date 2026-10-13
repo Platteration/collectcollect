@@ -6,7 +6,7 @@ import { collectionStatus } from "@/lib/markdown/mirror";
 import { dataDir, databaseFile, recoveryConflicts } from "@/lib/db";
 import { recoveryConflictsFile } from "@collectcollect/core/collection-swap";
 import { RecoveryNotice } from "@collectcollect/core/components/RecoveryNotice";
-import { SESSION_DAYS, authEnabled } from "@/lib/auth";
+import { SESSION_DAYS, auth, authEnabled } from "@/lib/auth";
 import { SignOut } from "@collectcollect/core/components/SignOut";
 import { ColorSchemePicker } from "@collectcollect/core/components/ColorSchemePicker";
 import { backupSummary, replacedCollections } from "@/lib/backup";
@@ -23,9 +23,13 @@ export default function SettingsPage() {
         <h1 className="font-display text-2xl font-semibold uppercase tracking-wide">Settings</h1>
         <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
           Everything is kept in <code className="font-mono text-xs">{dataDir()}</code>, on this machine.{" "}
-          {authEnabled()
-            ? "A password is set, so this app asks for it once and then remembers the session."
-            : "No password is set (SKINS_APP_PASSWORD), so anyone who can reach this page can change it."}
+          {!authEnabled()
+            ? "No password is set (SKINS_APP_PASSWORD), so anyone who can reach this page can change it."
+            : auth.google().settings === null
+              ? "A password is set, so this app asks for it once and then remembers the session."
+              : auth.passwordEnabled()
+                ? "A password is set and sign-in with Google is on, so this app asks for one of them once and then remembers the session."
+                : "Sign-in with Google is on, so this app asks you to sign in once and then remembers the session."}
         </p>
       </header>
 
@@ -46,8 +50,9 @@ export default function SettingsPage() {
         <section className="card-surface p-4">
           <h2 className="font-display text-lg font-semibold uppercase tracking-wide">Sessions</h2>
           <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
-            Every device that gave the password stays signed in for {SESSION_DAYS} days. If one of them is lost, or was
-            left signed in somewhere, end every session at once; each will ask for the password again.
+            {auth.google().settings === null
+              ? `Every device that gave the password stays signed in for ${SESSION_DAYS} days. If one of them is lost, or was left signed in somewhere, end every session at once; each will ask for the password again.`
+              : `Every device signed in stays signed in for ${SESSION_DAYS} days. If one of them is lost, or was left signed in somewhere, end every session at once; each will have to sign in again.`}
           </p>
           <div className="mt-3">
             <SignOut everywhere />

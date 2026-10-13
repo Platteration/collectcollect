@@ -1,5 +1,32 @@
 import http from "node:http";
+import type { Page } from "@playwright/test";
 import { documentedHeaders, expect, headerProblems, test, watch } from "./fixtures";
+import { authorize, E2E_ACCOUNTS, type FakeAccount } from "../../../scripts/fake-google.mjs";
+
+/**
+ * Google's sign-in page, played by the test (scripts/fake-google.mjs): the
+ * account agrees, and Google sends the browser back to the app. The server's
+ * half, the token endpoint and the keys, is the fake scripts/e2e-google.mjs
+ * puts in front of the server's fetch.
+ */
+async function googleSignsIn(page: Page, account: FakeAccount) {
+  // At the protocol, not through page.route: the browser reaches Google's page
+  // by the redirect the app's start route answers with, and Playwright hands a
+  // redirected request straight to the network, route or no route. Chromium's
+  // own interception pauses it like any other.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Fetch.enable", { patterns: [{ urlPattern: "https://accounts.google.com/*", requestStage: "Request" }] });
+  cdp.on("Fetch.requestPaused", (event) => {
+    let answer: { responseCode: number; responseHeaders: Array<{ name: string; value: string }> };
+    try {
+      answer = { responseCode: 302, responseHeaders: [{ name: "Location", value: authorize(event.request.url, account) }] };
+    } catch (error) {
+      // A request Google would refuse to show: the test fails on the page it lands on.
+      answer = { responseCode: 400, responseHeaders: [{ name: "X-Refused", value: String(error) }] };
+    }
+    void cdp.send("Fetch.fulfillRequest", { requestId: event.requestId, ...answer, body: "" });
+  });
+}
 
 test.describe("password gate", () => {
   test("every page redirects to the login form until the password is given", async ({ page }) => {
@@ -122,6 +149,41 @@ test.describe("password gate", () => {
     await expect(page).toHaveURL(/\/login/);
     await page.goto("/collection");
     await expect(page).toHaveURL(/\/login/);
+  });
+});
+
+test.describe("sign-in with Google beside the password", () => {
+  // This server also has APP_URL, a Google client and one account on its list
+  // (playwright.config.ts); the password still works as it did (above).
+  test("the owner's account signs in, lands on the page asked for, and signs out like any session", async ({ page }) => {
+    await googleSignsIn(page, E2E_ACCOUNTS.owner);
+    await page.goto("/collection");
+    await expect(page).toHaveURL(/\/login\?next=%2Fcollection$/);
+    await expect(page.getByLabel("Password")).toBeVisible();
+    await page.getByRole("link", { name: "Sign in with Google" }).click();
+    await page.waitForURL(/\/collection$/);
+    await expect(page.getByPlaceholder("Search name, set, number…")).toBeVisible();
+
+    await page.goto("/settings");
+    await expect(page.getByText(/^A password is set and sign-in with Google is on, and every device signed in stays signed in for 30 days/)).toBeVisible();
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect(page).toHaveURL(/\/login/);
+    await page.goto("/collection");
+    await expect(page).toHaveURL(/\/login/);
+    expect((await page.request.get("/api/cards")).status()).toBe(401);
+  });
+
+  test("an account not on the list is turned back to the login page, told once, and signed in nowhere", async ({ page }) => {
+    await googleSignsIn(page, E2E_ACCOUNTS.stranger);
+    await page.goto("/login");
+    await page.getByRole("link", { name: "Sign in with Google" }).click();
+    await expect(page.getByText("Sign-in didn't complete.")).toBeVisible();
+    // Said once: the address no longer carries it, so a reload does not say it again.
+    await expect(page).toHaveURL(/\/login$/);
+    await page.reload();
+    await expect(page.getByLabel("Password")).toBeVisible();
+    await expect(page.getByText("Sign-in didn't complete.")).toHaveCount(0);
+    expect((await page.request.get("/api/cards")).status()).toBe(401);
   });
 });
 

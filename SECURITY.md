@@ -21,7 +21,8 @@ In scope: the code in this repository — both apps (`apps/cards`, `apps/skins`)
 and the shared package (`packages/core`) — including anything it does with
 input that comes from outside it: uploaded photos, imported spreadsheets and
 Markdown folders, backup archives, Steam inventories, price-source responses,
-webhook addresses, and user-supplied text rendered into a page — and each
+webhook addresses, what Google sends back to a sign-in (and who the gate then
+lets in), and user-supplied text rendered into a page — and each
 app as a website: the response headers it sends on every answer, a page that
 runs or loads something its content security policy should refuse, and any
 file it serves that is not part of the site (README, "The website"). Anything

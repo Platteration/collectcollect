@@ -14,7 +14,8 @@
   },
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.kit.json",
+    "test": "node --test src/kit/selftest.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

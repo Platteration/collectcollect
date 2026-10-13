@@ -1,5 +1,5 @@
 import { SettingsForm } from "@/components/SettingsForm";
-import { SESSION_DAYS, authEnabled } from "@/lib/auth";
+import { SESSION_DAYS, auth, authEnabled } from "@/lib/auth";
 import { SignOut } from "@collectcollect/core/components/SignOut";
 import { ColorSchemePicker } from "@collectcollect/core/components/ColorSchemePicker";
 import { getSettings } from "@/lib/settings";
@@ -55,8 +55,9 @@ export default function SettingsPage() {
         <section className="card-surface p-4">
           <h2 className="font-semibold">Sessions</h2>
           <p className="mt-1 text-sm text-neutral-500">
-            A password is set, and every device that gave it stays signed in for {SESSION_DAYS} days. If one of them is
-            lost, or was left signed in somewhere, end every session at once; each will ask for the password again.
+            {auth.google().settings === null
+              ? `A password is set, and every device that gave it stays signed in for ${SESSION_DAYS} days. If one of them is lost, or was left signed in somewhere, end every session at once; each will ask for the password again.`
+              : `${auth.passwordEnabled() ? "A password is set and sign-in with Google is on" : "Sign-in with Google is on"}, and every device signed in stays signed in for ${SESSION_DAYS} days. If one of them is lost, or was left signed in somewhere, end every session at once; each will have to sign in again.`}
           </p>
           <div className="mt-3">
             <SignOut everywhere />

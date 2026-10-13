@@ -28,7 +28,7 @@ export async function stopTestServers(directory: string, prefix: string, childre
   if (!root) return;
   if (!root.isDirectory() || root.isSymbolicLink()) throw new Error("Invalid test root: " + target);
   for (const child of children) {
-    if (!/^(open|locked|read|write)$/.test(child)) throw new Error("Invalid test data directory");
+    if (!/^(open|locked|read|write|google)$/.test(child)) throw new Error("Invalid test data directory");
     const folder = path.join(target, child);
     const stat = await fs.lstat(folder).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
     if (!stat) continue;

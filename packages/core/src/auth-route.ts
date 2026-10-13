@@ -5,6 +5,7 @@ import { createThrottle } from "./throttle";
 import { BodyLimitError, jsonError, readJsonLimited } from "./http";
 import { cookieSecure } from "./net";
 import { clientKey } from "./throttle";
+import { createGoogleRoutes, type GoogleRouteOptions } from "./google-signin";
 
 /**
  * The sign-in and sign-out handlers.
@@ -14,8 +15,10 @@ import { clientKey } from "./throttle";
  * gets its own attempt counter, so two apps in one process would still be
  * limited separately.
  */
-export function createAuthRoutes(auth: Auth, opts: { sessions?: SessionStore } = {}) {
+export function createAuthRoutes(auth: Auth, opts: { sessions?: SessionStore } & GoogleRouteOptions = {}) {
   const { sessions } = opts;
+  // Sign-in with Google (google-signin.ts): a 404 for an app or a deployment that offers none.
+  const google = createGoogleRoutes(auth, { fetch: opts.fetch, now: opts.now });
   /** Ending every session is a deliberate act; six a minute is already five more than anyone means. */
   const revokeThrottle = createThrottle(6, 60_000, "sign-outs");
 
@@ -32,7 +35,8 @@ export function createAuthRoutes(auth: Auth, opts: { sessions?: SessionStore } =
   }
 
   async function POST(request: Request) {
-    if (!auth.authEnabled()) return jsonError("This app has no password set", 400);
+    // Sign-in with Google can turn the gate on with no password set: then there is no password to try.
+    if (!auth.passwordEnabled()) return jsonError("This app has no password set", 400);
 
     const now = Date.now();
     prune(now);
@@ -118,7 +122,7 @@ export function createAuthRoutes(auth: Auth, opts: { sessions?: SessionStore } =
     return clearCookie(NextResponse.json({ ok: true }));
   }
 
-  return { POST, DELETE, revokeAll };
+  return { POST, DELETE, revokeAll, googleStart: google.start, googleCallback: google.callback };
 }
 
 /** One cookie out of a plain Request, which has no cookie jar of its own. */

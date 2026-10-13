@@ -1,0 +1,14 @@
+{
+  // The kit (src/kit, copied byte for byte from the canonical copy and never edited
+  // here) is JavaScript with JSDoc types. tsconfig.json type-checks its declarations,
+  // which is what the rest of this package imports; this checks the JavaScript itself
+  // under the same options, strict and noUncheckedIndexedAccess included, with Node's
+  // types for the Node adapter and the self-test.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "types": ["node"]
+  },
+  "include": ["src/kit/*.js", "src/kit/*.mjs"]
+}

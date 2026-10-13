@@ -1,11 +1,13 @@
 import path from "node:path";
 import { createAuth } from "@collectcollect/core/auth";
 import { createSessionSeed } from "@collectcollect/core/session-seed";
+import { googleVariables } from "@collectcollect/core/google-config";
 import { dataDir } from "./paths";
 
 /**
- * This app's password gate. Set SKINS_APP_PASSWORD to require a login; leave it
- * unset and the app behaves as if there were no gate at all.
+ * This app's gate. Set SKINS_APP_PASSWORD, or set up sign-in with Google
+ * (SKINS_APP_URL and SKINS_GOOGLE_*), or both, to require a login; leave them
+ * all unset and the app behaves as if there were no gate at all.
  *
  * Its own variable and its own cookie, not the card app's. Cookies are scoped
  * to a host and not to a port, so two of these served from localhost would
@@ -20,6 +22,10 @@ export const auth = createAuth({
   // cookie is no help in guessing the password. Resolved on first use, like
   // the session file, so loading the proxy at build time creates nothing.
   seed: createSessionSeed(() => path.join(dataDir(), "session-secret")),
+  // Sign-in with Google beside the password, or in its place: SKINS_APP_URL and
+  // SKINS_GOOGLE_*, its own variables like the password, and a state cookie of
+  // its own name (packages/core/src/google-config.ts).
+  google: { variables: googleVariables("SKINS_"), cookie: "__Host-collectcollect-skins-oauth" },
 });
 
 export const { SESSION_COOKIE, SESSION_DAYS } = auth;

@@ -8,7 +8,8 @@ import { test as base, expect, type Browser, type BrowserContext, type Page } fr
  * Every spec imports `test` from here, so every page any test drives fails it
  * on a content security policy violation (the `securitypolicyviolation` event
  * in the page and the browser's console report), on an uncaught exception, and
- * on a request that leaves this site other than an image the policy allows.
+ * on a request that leaves this site other than an image the policy allows
+ * (or the one navigation to Google's sign-in page, which the suite answers).
  * The policy was measured this way: a source something real needs cannot be
  * missing without some test going red. A context a test makes for itself with
  * `browser.newContext()` is held to the same rules; only `unwatchedContext`
@@ -19,11 +20,19 @@ import { test as base, expect, type Browser, type BrowserContext, type Page } fr
 /** Which app's block of the README this suite reads. */
 export const APP = "skins";
 
-/** Item images come from Steam's two image hosts, as img-src says, and nothing else does. */
+/**
+ * Item images come from Steam's two image hosts, as img-src says, and nothing
+ * else does. And one page is visited: Google's sign-in page, as a top-level
+ * navigation and at that one address, which is how sign-in with Google starts;
+ * the suite answers it itself (googleSignsIn), so nothing reaches Google.
+ */
 const STEAM_IMAGES = new Set(["https://community.cloudflare.steamstatic.com", "https://steamcommunity-a.akamaihd.net"]);
 export function allowedOutside(url: URL, resourceType: string): boolean {
+  if (resourceType === "document" && `${url.origin}${url.pathname}` === GOOGLE_SIGN_IN) return true;
   return resourceType === "image" && STEAM_IMAGES.has(url.origin);
 }
+
+const GOOGLE_SIGN_IN = "https://accounts.google.com/o/oauth2/v2/auth";
 
 /**
  * The headers as the README writes them for this app (lower-case names), for
