@@ -103,7 +103,9 @@ export default function SettingsPage() {
           Your inventory stays in this server&apos;s data directory. An item&apos;s market name goes to the markets you price
           against (Skinport, Steam and, with a key, CSFloat) when it is priced, and a SteamID64 to Steam when you import
           an inventory from it; an alert is posted to the webhook URL you set. Item pictures are loaded by your browser
-          from Steam. Nothing else leaves this server.
+          from Steam.
+          {auth.google().settings !== null && " Signing in with Google takes your browser to Google, which learns of the sign-in, and this server then asks Google which account it was."}{" "}
+          Nothing else leaves this server.
         </p>
       </footer>
     </div>

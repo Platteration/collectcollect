@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./fixtures";
+import { expect, GOOGLE_SIGN_IN, test, unwatchedContext, watch } from "./fixtures";
 import { authorize, E2E_ACCOUNTS, type FakeAccount } from "../../../scripts/fake-google.mjs";
 
 /**
@@ -46,11 +46,34 @@ test.describe("sign-in with Google, and no password", () => {
     await page.waitForURL(/\/settings$/);
     await expect(page.getByText("Sign-in with Google is on, so this app asks you to sign in once and then remembers the session.")).toBeVisible();
     await expect(page.getByText(/^Every device signed in stays signed in for 30 days/)).toBeVisible();
+    // What leaves the server says Google is among it.
+    await expect(page.locator("footer").filter({ has: page.getByRole("heading", { name: "About" }) })).toContainText("Signing in with Google takes your browser to Google, which learns of the sign-in, and this server then asks Google which account it was. Nothing else leaves this server.");
 
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(page).toHaveURL(/\/login/);
     await page.goto("/inventory");
     await expect(page).toHaveURL(/\/login/);
+  });
+
+  test("with the service worker in control, the way to Google and back reaches the server, never the worker", async ({ page }) => {
+    await googleSignsIn(page, E2E_ACCOUNTS.owner);
+    await page.goto("/login");
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    // The worker claims open pages when it activates; a reload is the other way in.
+    if (!(await page.evaluate(() => navigator.serviceWorker.controller !== null))) await page.reload();
+    expect(await page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
+    const signIn: Array<{ path: string; status: number; fromWorker: boolean }> = [];
+    page.on("response", (response) => {
+      const url = new URL(response.url());
+      if (url.pathname.startsWith("/api/auth/google/")) signIn.push({ path: url.pathname, status: response.status(), fromWorker: response.fromServiceWorker() });
+    });
+    await page.getByRole("link", { name: "Sign in with Google" }).click();
+    await page.waitForURL(/\/$/);
+    expect(signIn).toEqual([
+      { path: "/api/auth/google/start", status: 302, fromWorker: false },
+      { path: "/api/auth/google/callback", status: 302, fromWorker: false },
+    ]);
+    expect((await page.request.get("/api/settings")).status()).toBe(200);
   });
 
   test("an account not on the list is turned back, told once, and signed in nowhere", async ({ page }) => {
@@ -107,5 +130,24 @@ test.describe("sign-in with Google, and no password", () => {
     expect(back.headers()["location"]).toMatch(/\/login\?signin=failed$/);
     expect((await request.post("/api/auth", { data: { password: "anything" } })).status()).toBe(400);
     expect((await request.get("/api/items")).status()).toBe(401);
+  });
+
+  test("the suite's watch lets Google's sign-in page in as the page itself, never in a frame", async ({ browser }) => {
+    // The rules every page is held to (fixtures.ts), applied to a context of the
+    // test's own: a page framing Google's sign-in would be a regression the
+    // browser and Google refuse, and the watch has to see it too.
+    const context = await unwatchedContext(browser);
+    try {
+      const problems: string[] = [];
+      await watch(context, "http://127.0.0.1:9", problems);
+      const page = await context.newPage();
+      await page.route((url) => url.href.startsWith(GOOGLE_SIGN_IN), (route) => route.fulfill({ contentType: "text/html", body: "<p>Google</p>" }));
+      await page.setContent(`<iframe src="${GOOGLE_SIGN_IN}?client_id=framed"></iframe>`);
+      await expect.poll(() => problems).toEqual([`a request left the site: GET document ${GOOGLE_SIGN_IN}?client_id=framed`]);
+      await page.goto(`${GOOGLE_SIGN_IN}?client_id=top`);
+      expect(problems).toHaveLength(1);
+    } finally {
+      await context.close();
+    }
   });
 });

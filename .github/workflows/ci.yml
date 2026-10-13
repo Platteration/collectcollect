@@ -26,8 +26,13 @@ permissions:
 jobs:
   # Every workspace's lint, types and unit tests, the conventions test, a production
   # build of both apps, and both end-to-end suites against those builds.
+  # On a named Ubuntu release, not ubuntu-latest, which is Ubuntu 26.04 from 2026-10-19:
+  # Playwright 1.56.1 has no Chromium build for 26.04, so the browser install below
+  # would fail there with nothing in the repository changed. Raising Playwright is the
+  # way to a newer runner; apps/cards/tests/ci-runner.test.ts asks the locked
+  # Playwright whether it has a build for the release named here.
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

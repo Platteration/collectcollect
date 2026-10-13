@@ -41,22 +41,26 @@ interface Flow {
 }
 
 /**
- * The flow, sealed with an HMAC under the session signing key. What it signs is
- * base64url text, which no session message (a JSON array) and no token body
- * (numbers and an id joined by dots) can be.
+ * The flow, signed (not encrypted: it holds only the visitor's own state, nonce
+ * and verifier, in a cookie no script can read) with an HMAC under the random
+ * key auth.flowKey() makes once per process, over the cookie's name and the
+ * payload. Never under the session signing key: the start route answers anyone,
+ * so it would hand every visitor a MAC of known text under that key, to guess
+ * it offline, and a guessed key signs sessions. The cookie's name keeps one
+ * app's flow from being read as another's.
  */
-async function seal(flow: Flow, key: string): Promise<string> {
+async function seal(flow: Flow, key: Uint8Array, cookie: string): Promise<string> {
   const payload = base64url(utf8(JSON.stringify(flow)));
-  return `${payload}.${base64url(await hmacSha256(key, payload))}`;
+  return `${payload}.${base64url(await hmacSha256(key, `${cookie}.${payload}`))}`;
 }
 
-/** The flow a cookie carries, when this app sealed it and it has not run out; null otherwise. */
-async function open(value: string, key: string, now: number): Promise<Flow | null> {
+/** The flow a cookie carries, when this process sealed it for this cookie and it has not run out; null otherwise. */
+async function open(value: string, key: Uint8Array, cookie: string, now: number): Promise<Flow | null> {
   const dot = value.indexOf(".");
   if (dot < 0) return null;
   const payload = value.slice(0, dot);
   const mac = fromBase64url(value.slice(dot + 1));
-  if (!mac || mac.length !== 32 || !(await hmacVerify(key, payload, mac))) return null;
+  if (!mac || mac.length !== 32 || !(await hmacVerify(key, `${cookie}.${payload}`, mac))) return null;
   const bytes = fromBase64url(payload);
   const text = bytes && fromUtf8(bytes);
   if (!text) return null;
@@ -98,6 +102,8 @@ export function createGoogleRoutes(auth: Auth, opts: GoogleRouteOptions = {}) {
    * against the app's own client).
    */
   const exchanges = createThrottle(10, 60_000, "sign-in attempts");
+  /** Accounts let in by their address alone, each named in the log once (see the callback). */
+  const byAddress = new Set<string>();
 
   const notSetUp = () => Response.json({ error: "Sign-in with Google is not set up" }, { status: 404 });
 
@@ -107,8 +113,8 @@ export function createGoogleRoutes(auth: Auth, opts: GoogleRouteOptions = {}) {
     const cookie = auth.GOOGLE_COOKIE;
     if (!settings || !cookie) return notSetUp();
     const key = await auth.flowKey();
-    // No key to seal the state with is no key to sign a session with either
-    // (auth.ts says so in the log): there is no point sending anyone to Google.
+    // No key to seal the state with means no key to sign a session with
+    // (auth.ts says why in the log): there is no point sending anyone to Google.
     if (!key) return redirect(`${settings.origin}/login?signin=failed`, [clearCookie(cookie)]);
     const state = randomId();
     const nonce = randomId();
@@ -116,14 +122,15 @@ export function createGoogleRoutes(auth: Auth, opts: GoogleRouteOptions = {}) {
     const back = returnPath(new URL(request.url).searchParams.get("return"), settings.origin);
     const flow: Flow = { s: state, n: nonce, v: verifier, r: back, e: now() + FLOW_SECONDS * 1000 };
     const location = authorizeUrl({ clientId: settings.clientId, redirectUri: `${settings.origin}/api/auth/google/callback`, state, nonce, challenge });
-    return redirect(location, [serializeCookie(cookie, await seal(flow, key), FLOW_SECONDS)]);
+    return redirect(location, [serializeCookie(cookie, await seal(flow, key, cookie), FLOW_SECONDS)]);
   }
 
   /** GET /api/auth/google/callback — Google sends the browser back here. */
   async function callback(request: Request): Promise<Response> {
     const settings = auth.google().settings;
     const cookie = auth.GOOGLE_COOKIE;
-    if (!settings || !cookie) return notSetUp();
+    const names = auth.GOOGLE_VARIABLES;
+    if (!settings || !cookie || !names) return notSetUp();
     const failed = (reason: string | null) => {
       if (reason) console.warn(`[auth] Sign-in with Google refused: ${reason}.`);
       return redirect(`${settings.origin}/login?signin=failed`, [clearCookie(cookie)]);
@@ -133,7 +140,7 @@ export function createGoogleRoutes(auth: Auth, opts: GoogleRouteOptions = {}) {
       const key = await auth.flowKey();
       if (!key) return failed("there is no key to sign sessions with");
       const sealed = parseCookies(request.headers.get("cookie")).get(cookie);
-      const flow = sealed ? await open(sealed, key, now()) : null;
+      const flow = sealed ? await open(sealed, key, cookie, now()) : null;
       if (!flow) return failed("no sign-in under way in this browser, or it took longer than ten minutes");
       // The visitor said no at Google, or Google could not ask them: nothing to log.
       if (url.searchParams.has("error")) return failed(null);
@@ -148,6 +155,15 @@ export function createGoogleRoutes(auth: Auth, opts: GoogleRouteOptions = {}) {
       // The account id is Google's number for it, never its address: the owner
       // reads it here to add it to the list.
       if (!allowed(settings, identity)) return failed(`Google account ${identity.sub} is not on this app's list of who may sign in`);
+      // An address on the list is only as good as Google's check of it, which for
+      // an address outside gmail.com and outside a Google Workspace domain was made
+      // once, when the account was created: a lapsed domain registered again, or
+      // a recycled mailbox, can stand behind another account with the same verified
+      // address. The account's id names this one alone, so the log offers it.
+      if (!settings.subs.includes(identity.sub) && !byAddress.has(identity.sub)) {
+        byAddress.add(identity.sub);
+        console.warn(`[auth] Google account ${identity.sub} signed in by its address on ${names.allowedEmails}. To let in this account and no other with that address, add ${identity.sub} to ${names.allowedSubs} and take the address off.`);
+      }
       const token = await auth.createToken(now());
       const secure = settings.origin.startsWith("https:") || cookieSecure(request);
       const session = `${auth.SESSION_COOKIE}=${token}; Path=/; Max-Age=${auth.SESSION_DAYS * 86400}; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;

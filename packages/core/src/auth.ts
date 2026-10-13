@@ -56,12 +56,16 @@ export interface Auth {
   google(): GoogleState;
   /** The cookie a Google sign-in keeps its state in, or null when the app offers none. */
   GOOGLE_COOKIE: string | null;
+  /** The names of the app's Google variables, for the log; null when the app offers none. */
+  GOOGLE_VARIABLES: GoogleVariables | null;
   /**
-   * The key that seals a Google sign-in's state cookie: the session signing
-   * key (google-signin.ts says why that is safe), or null when there is none
-   * (see createToken).
+   * The key that seals a Google sign-in's state cookie: a random one this
+   * process made, never the session signing key, since anybody can have a
+   * state cookie for the asking (google-signin.ts). Null when there is no key
+   * to sign a session with (see createToken), so no sign-in is started that
+   * could not end in one.
    */
-  flowKey(): Promise<string | null>;
+  flowKey(): Promise<Uint8Array | null>;
   passwordMatches(submitted: string): Promise<boolean>;
   createToken(now?: number): Promise<string>;
   verifyToken(token: string | undefined | null, now?: number, revoked?: Revoked): Promise<boolean>;
@@ -96,6 +100,35 @@ async function hmac(message: string, key: string): Promise<string> {
   const cryptoKey = await crypto.subtle.importKey("raw", enc.encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const sig = await crypto.subtle.sign("HMAC", cryptoKey, enc.encode(message));
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * How long an explicit signing secret must be, in bytes, where nothing else
+ * secret goes into a session's signature: a gate with no password, which only
+ * sign-in with Google makes (see signingKey). The kit asks the same of its own
+ * SESSION_SECRET (kit/app.js).
+ */
+export const MIN_SECRET_BYTES = 32;
+
+/**
+ * The random key Google sign-in state cookies are sealed with, made once per
+ * process. Kept on the global object rather than in a module variable, so
+ * that if this module is ever evaluated twice in one process (a development
+ * reload evaluates it again; the production build was measured to share one
+ * copy between the start and the callback routes), every copy seals and opens
+ * with the same key. A sign-in under way when the process restarts finds its
+ * cookie unreadable and goes back to the login page.
+ */
+const FLOW_KEY = Symbol.for("collectcollect.google-sign-in.flow-key");
+function processFlowKey(): Uint8Array {
+  const holder = globalThis as unknown as Record<symbol, Uint8Array | undefined>;
+  let key = holder[FLOW_KEY];
+  if (!key) {
+    key = new Uint8Array(32);
+    crypto.getRandomValues(key);
+    holder[FLOW_KEY] = key;
+  }
+  return key;
 }
 
 /** Constant-time equality that does not leak length through early exit. */
@@ -135,12 +168,25 @@ export function createAuth(config: AuthConfig): Auth {
   /**
    * The key sessions are signed with: the explicit secret, else the random seed
    * kept beside the data, else one derived from the password. Null when there
-   * is none of the three, which only a gate with no password can reach: Google
-   * alone, and a data directory where no seed can be kept.
+   * is none of the three, or the explicit secret is too short to be the only
+   * secret, both of which only a gate with no password can reach: Google
+   * alone, with a short secret or a data directory where no seed can be kept.
    */
   function signingKey(): string | null {
     const explicit = process.env[config.secretEnv];
-    if (explicit) return explicit;
+    if (explicit) {
+      // With no password, the key is the only secret in a session's signature:
+      // what it signs is this app's name and who may sign in with Google, which
+      // can be guessed. A key a person chose can be too, and then one session
+      // cookie, seen once, lets anybody guess it offline and sign sessions of
+      // their own, which Sign out everywhere cannot end. With a password the
+      // password is in every signature as well, as it always was.
+      if (!password() && new TextEncoder().encode(explicit).length < MIN_SECRET_BYTES) {
+        warnOnce(`Nobody can sign in: with no password, ${config.secretEnv} is the only secret a session is signed with, and it is shorter than ${MIN_SECRET_BYTES} bytes. Set it to a random value (openssl rand -hex 32), or unset it so a random key is kept in the data directory.`);
+        return null;
+      }
+      return explicit;
+    }
     const seed = config.seed?.() ?? null;
     if (seed) return seed;
     if (password()) {
@@ -169,13 +215,14 @@ export function createAuth(config: AuthConfig): Auth {
     SESSION_COOKIE: config.cookie,
     SESSION_DAYS,
     GOOGLE_COOKIE: config.google?.cookie ?? null,
+    GOOGLE_VARIABLES: config.google?.variables ?? null,
 
     authEnabled: enabled,
     passwordEnabled: () => Boolean(password()),
     google,
 
-    async flowKey(): Promise<string | null> {
-      return signingKey();
+    async flowKey(): Promise<Uint8Array | null> {
+      return signingKey() === null ? null : processFlowKey();
     },
 
     /**

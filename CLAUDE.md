@@ -31,14 +31,21 @@ the accounts the app lists: `google-config.ts` reads the app's variables (`APP_U
 in each app's `src/lib/auth.ts`), and `google-signin.ts` is the start and callback routes.
 An allowed account gets the app's own session cookie (`cc_session`, `cc_skins_session`),
 the one the password gives, so revocation, *Sign out everywhere* and the proxy need nothing
-new; the state between leaving for Google and coming back is a sealed
+new; the state between leaving for Google and coming back is a signed
 `__Host-collectcollect-<app>-oauth` cookie. The rules that hold it: any `GOOGLE_` variable
 turns the gate on, and a configuration that does not hold (an empty list included) lets
-nobody in rather than opening the app; with no password, sessions are signed with the seed
-or `APP_SECRET`, never a key derived from nothing; a session is bound to the list, so
+nobody in rather than opening the app; that cookie is signed with a random key made once
+per process (`flowKey` in `auth.ts`, kept on `globalThis` so any second copy of the module
+in the process shares it), never the session key, because the start route answers
+anyone and a MAC of known text under the session key was an offline oracle for it; with
+no password, sessions are signed with the seed or an `APP_SECRET` of at least
+`MIN_SECRET_BYTES`, never a key derived from nothing; a session is bound to the list, so
 changing it ends every session, and a gate with no Google variables signs exactly what it
-signed before. `apps/cards/tests/google-signin.test.ts` drives the routes against the fake
-Google in `scripts/fake-google.mjs`, handed in through `createAuthRoutes({ fetch })`; the
+signed before. An account let in by its address alone is named by id in the log, once: an
+address is Google's say-so for itself only at gmail.com and in a Workspace domain, and the
+kit's identity does not carry `hd`, so README tells the owner to prefer ids.
+`apps/cards/tests/google-signin.test.ts` drives the routes against the fake Google in
+`scripts/fake-google.mjs`, handed in through `createAuthRoutes({ fetch })`; the
 browser suites' Google servers (cards' locked server, skins' `google` project on 3223) get
 the same fake through `scripts/e2e-google.mjs`, and the specs answer Google's sign-in page
 at the protocol (`googleSignsIn`): Playwright passes a redirected request to the network

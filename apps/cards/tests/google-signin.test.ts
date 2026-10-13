@@ -19,6 +19,8 @@ import { authorize, createFakeGoogle, type FakeAccount } from "../../../scripts/
 const CLIENT = { id: "test-client.apps.googleusercontent.com", secret: "test-client-secret" };
 const OWNER: FakeAccount = { sub: "1001", email: "owner@example.com", email_verified: true };
 const COOKIE = "__Host-test-oauth";
+/** A signing secret long enough to sign sessions with no password beside it (MIN_SECRET_BYTES). */
+const SECRET = "a-signing-key-for-tests-at-least-32-bytes";
 const ENV = ["G_APP_URL", "G_GOOGLE_CLIENT_ID", "G_GOOGLE_CLIENT_SECRET", "G_GOOGLE_ALLOWED_SUBS", "G_GOOGLE_ALLOWED_EMAILS", "G_PASSWORD", "G_SECRET"];
 
 /** The routes' own gate, with no seed: the key is G_SECRET, or none. */
@@ -36,7 +38,7 @@ function configure(over: Record<string, string | undefined> = {}) {
     G_GOOGLE_CLIENT_ID: CLIENT.id,
     G_GOOGLE_CLIENT_SECRET: CLIENT.secret,
     G_GOOGLE_ALLOWED_SUBS: "1001",
-    G_SECRET: "a-signing-key-for-tests",
+    G_SECRET: SECRET,
     ...over,
   };
   for (const [name, value] of Object.entries(values)) {
@@ -61,6 +63,22 @@ const cookieValue = (res: Response, name: string) => {
   for (const line of setCookies(res)) if (line.startsWith(`${name}=`)) return line.slice(name.length + 1).split(";")[0] ?? "";
   return null;
 };
+
+const encoder = new TextEncoder();
+/** HMAC-SHA256, worked out here rather than by the code under test. */
+async function hmac(key: string, message: string): Promise<Buffer> {
+  const k = await crypto.subtle.importKey("raw", encoder.encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return Buffer.from(await crypto.subtle.sign("HMAC", k, encoder.encode(message)));
+}
+/** A session token as auth.ts signs one, made by hand from a signing key and the message it is bound to. */
+async function forge(signingKey: string, bound: unknown[]): Promise<string> {
+  const key = (await hmac(signingKey, JSON.stringify(bound))).toString("hex");
+  const now = Date.now();
+  const body = `${now + 86_400_000}.${now}.${crypto.randomUUID()}`;
+  return `v3.${body}.${(await hmac(key, body)).toString("hex")}`;
+}
+/** What a session is bound to with sign-in with Google, no password, and the list configure() writes. */
+const GOOGLE_ALONE = ["session-v3", "g:", "", "google", ["1001"], []];
 
 /** One sign-in, start to finish: the start route, Google's consent screen, and the callback with the cookie the start set. */
 async function signIn(account: FakeAccount, opts: { back?: string; google?: Awaited<ReturnType<typeof createFakeGoogle>>; routes?: ReturnType<typeof createAuthRoutes>; tamper?: (callback: URL, flow: string) => { url: URL; flow: string } } = {}) {
@@ -137,19 +155,30 @@ describe("what the environment says", () => {
 });
 
 describe("the gate, with sign-in with Google", () => {
-  it("is on as soon as a GOOGLE_ variable is set, even when the rest is missing, and then nobody gets in", async () => {
-    expect(auth.authEnabled()).toBe(false);
-    process.env.G_GOOGLE_CLIENT_ID = CLIENT.id;
-    expect(auth.authEnabled()).toBe(true);
-    expect(auth.passwordEnabled()).toBe(false);
-    expect(auth.google().settings).toBeNull();
-    // A token signed while the gate was off cannot exist; one made by hand is refused.
-    process.env.G_SECRET = "a-signing-key-for-tests";
-    const { googleStart, googleCallback, POST } = createAuthRoutes(auth);
-    expect((await googleStart(new Request("https://cards.example/api/auth/google/start"))).status).toBe(404);
-    expect((await googleCallback(new Request("https://cards.example/api/auth/google/callback?code=x&state=y"))).status).toBe(404);
-    // There is no password to try either.
-    expect((await POST(new Request("https://cards.example/api/auth", { method: "POST", body: JSON.stringify({ password: "" }), headers: { "Content-Type": "application/json" } }))).status).toBe(400);
+  it("is on as soon as any one GOOGLE_ variable is set, even when the rest is missing, and then nobody gets in", async () => {
+    // Each alone: an owner who set only the list, or only the secret, meant the
+    // collection to be private, and a gate that stayed off would leave it open.
+    const alone: Array<[string, string]> = [
+      ["G_GOOGLE_CLIENT_ID", CLIENT.id],
+      ["G_GOOGLE_CLIENT_SECRET", CLIENT.secret],
+      ["G_GOOGLE_ALLOWED_SUBS", "1001"],
+      ["G_GOOGLE_ALLOWED_EMAILS", "owner@example.com"],
+    ];
+    for (const [name, value] of alone) {
+      for (const each of ENV) delete process.env[each];
+      expect(auth.authEnabled(), name).toBe(false);
+      process.env[name] = value;
+      expect(auth.authEnabled(), name).toBe(true);
+      expect(auth.passwordEnabled(), name).toBe(false);
+      expect(auth.google().settings, name).toBeNull();
+      // A token signed while the gate was off cannot exist; one made by hand is refused.
+      process.env.G_SECRET = SECRET;
+      const { googleStart, googleCallback, POST } = createAuthRoutes(auth);
+      expect((await googleStart(new Request("https://cards.example/api/auth/google/start"))).status, name).toBe(404);
+      expect((await googleCallback(new Request("https://cards.example/api/auth/google/callback?code=x&state=y"))).status, name).toBe(404);
+      // There is no password to try either.
+      expect((await POST(new Request("https://cards.example/api/auth", { method: "POST", body: JSON.stringify({ password: "" }), headers: { "Content-Type": "application/json" } }))).status, name).toBe(400);
+    }
     expect(warned()).toMatch(/Sign-in with Google is off/);
   });
 
@@ -177,6 +206,22 @@ describe("the gate, with sign-in with Google", () => {
     const unverified = await signIn({ sub: "5005", email: "owner@example.com", email_verified: false });
     expect(unverified.back.headers.get("location")).toBe(failedTo);
     expect(cookieValue(unverified.back, "g_session")).toBeNull();
+  });
+
+  it("names, once, the account id of one let in by its address alone, so the owner can pin it, and never the address", async () => {
+    configure({ G_GOOGLE_ALLOWED_EMAILS: "friend@example.com" });
+    const google = await createFakeGoogle({ clientId: CLIENT.id, clientSecret: CLIENT.secret });
+    const routes = createAuthRoutes(auth, { fetch: google.fetch });
+    const byAddress = () => warn.mock.calls.map((call) => String(call[0])).filter((line) => line.includes("by its address"));
+    // Let in by its id, which names that account alone: nothing to say.
+    expect((await signIn(OWNER, { google, routes })).back.headers.get("location")).toBe("https://cards.example/");
+    expect(byAddress()).toEqual([]);
+    const friend: FakeAccount = { sub: "7007", email: "friend@example.com", email_verified: true };
+    for (let i = 0; i < 2; i++) expect((await signIn(friend, { google, routes })).back.headers.get("location")).toBe("https://cards.example/");
+    expect(byAddress()).toEqual([
+      "[auth] Google account 7007 signed in by its address on G_GOOGLE_ALLOWED_EMAILS. To let in this account and no other with that address, add 7007 to G_GOOGLE_ALLOWED_SUBS and take the address off.",
+    ]);
+    expect(warned()).not.toContain("friend@example.com");
   });
 
   it("refuses an account not on the list, and names Google's number for it in the log for the owner", async () => {
@@ -228,6 +273,33 @@ describe("the gate, with sign-in with Google", () => {
     const forged = await createAuth({ cookie: "g_session", passwordEnv: "G_PASSWORD", secretEnv: "G_SECRET", secretPrefix: "g:", seed: () => "g:" }).createToken().catch(() => null);
     expect(await auth.verifyToken(forged)).toBe(false);
     expect(warned()).toMatch(/Nobody can sign in: there is no key to sign sessions with.*G_SECRET/);
+  });
+
+  it("signs nobody in with no password and a secret shorter than 32 bytes, which a guess could find, and says so", async () => {
+    const short = "s".repeat(31);
+    configure({ G_SECRET: short });
+    const start = await createAuthRoutes(auth).googleStart(new Request("https://cards.example/api/auth/google/start"));
+    expect(start.headers.get("location")).toBe(failedTo);
+    expect(cookieValue(start, COOKIE)).toBe("");
+    await expect(auth.createToken()).rejects.toThrow(/no key/);
+    // Whoever guessed it could sign a session by hand: none verifies.
+    expect(await auth.verifyToken(await forge(short, GOOGLE_ALONE))).toBe(false);
+    expect(warned()).toMatch(/Nobody can sign in: with no password, G_SECRET is the only secret a session is signed with, and it is shorter than 32 bytes/);
+    expect(warned()).not.toContain(short);
+
+    // 32 bytes is enough, counted as bytes: sixteen two-byte characters are 32.
+    for (const enough of ["s".repeat(32), "é".repeat(16)]) {
+      configure({ G_SECRET: enough });
+      expect((await signIn(OWNER)).back.headers.get("location"), enough).toBe("https://cards.example/");
+      // The same forgery, made with the right key, is one the gate takes: the check above refused it for its key alone.
+      expect(await auth.verifyToken(await forge(enough, GOOGLE_ALONE)), enough).toBe(true);
+    }
+  });
+
+  it("takes any secret beside a password, as it always did, since the password is signed into every session too", async () => {
+    configure({ G_SECRET: "short", G_PASSWORD: "hunter2" });
+    expect((await signIn(OWNER)).back.headers.get("location")).toBe("https://cards.example/");
+    expect(await auth.verifyToken(await auth.createToken())).toBe(true);
   });
 
   it("marks the session cookie Secure for an https APP_URL, and not for this machine's plain http", async () => {
@@ -284,8 +356,12 @@ describe("leaving for Google", () => {
     const cookie = setCookies(start).find((c) => c.startsWith(`${COOKIE}=`)) ?? "";
     expect(cookie).toMatch(/; Max-Age=600; Path=\/; HttpOnly; Secure; SameSite=Lax$/);
     expect(cookie).not.toMatch(/Domain=/i);
-    // What it seals is not readable as the state or nonce in the address.
-    expect(cookie).not.toContain(p.get("state"));
+    // It is signed, not encrypted: what it carries is the visitor's own state,
+    // nonce, PKCE verifier and return path, readable by whoever holds the
+    // cookie, which no script on the page can (HttpOnly, above).
+    const [payload] = (cookieValue(start, COOKIE) ?? "").split(".");
+    const flow = JSON.parse(Buffer.from(payload ?? "", "base64url").toString("utf8")) as Record<string, unknown>;
+    expect(flow).toMatchObject({ s: p.get("state"), n: p.get("nonce"), r: "/collection" });
     // Nothing went to Google from the server yet.
     expect(warned()).toBe("");
   });
@@ -328,6 +404,66 @@ describe("leaving for Google", () => {
   });
 });
 
+describe("the sign-in's own cookie", () => {
+  /** The start route's cookie, which it hands to anyone who asks: its payload and its MAC. */
+  async function startCookie() {
+    const start = await createAuthRoutes(auth).googleStart(new Request("https://cards.example/api/auth/google/start"));
+    const [payload = "", mac = ""] = (cookieValue(start, COOKIE) ?? "").split(".");
+    expect(payload).not.toBe("");
+    return { payload, mac };
+  }
+
+  it("is sealed with a key no session is signed with, so the start route, which answers anyone, is no way to guess one", async () => {
+    // Google alone, sessions signed with the secret.
+    configure();
+    const underSecret = await startCookie();
+    // A password and no seed and no secret: sessions are signed with a key made of the password.
+    configure({ G_SECRET: undefined, G_PASSWORD: "hunter2" });
+    const underPassword = await startCookie();
+    for (const [what, { payload, mac }, key] of [["the secret", underSecret, SECRET], ["the password's key", underPassword, "g:hunter2"]] as const) {
+      for (const message of [payload, `${COOKIE}.${payload}`]) expect((await hmac(key, message)).toString("base64url"), what).not.toBe(mac);
+    }
+
+    // Nor does the sign-in depend on that key at all: one started under one secret finishes under another.
+    configure();
+    const google = await createFakeGoogle({ clientId: CLIENT.id, clientSecret: CLIENT.secret });
+    const routes = createAuthRoutes(auth, { fetch: google.fetch });
+    const start = await routes.googleStart(new Request("https://cards.example/api/auth/google/start"));
+    const url = authorize(start.headers.get("location") ?? "", OWNER, { clientId: CLIENT.id });
+    process.env.G_SECRET = `${SECRET}, and another one`;
+    const back = await routes.googleCallback(new Request(url, { headers: { cookie: `${COOKIE}=${cookieValue(start, COOKIE)}` } }));
+    expect(back.headers.get("location")).toBe("https://cards.example/");
+    expect(await auth.verifyToken(cookieValue(back, "g_session"))).toBe(true);
+  });
+
+  it("is read only by the app that set it, under its own name", async () => {
+    configure();
+    const other = createAuth({ cookie: "o_session", passwordEnv: "G_PASSWORD", secretEnv: "G_SECRET", secretPrefix: "o:", google: { variables: googleVariables("G_"), cookie: "__Host-other-oauth" } });
+    const google = await createFakeGoogle({ clientId: CLIENT.id, clientSecret: CLIENT.secret });
+    const start = await createAuthRoutes(auth, { fetch: google.fetch }).googleStart(new Request("https://cards.example/api/auth/google/start"));
+    const url = authorize(start.headers.get("location") ?? "", OWNER, { clientId: CLIENT.id });
+    const back = await createAuthRoutes(other, { fetch: google.fetch }).googleCallback(new Request(url, { headers: { cookie: `__Host-other-oauth=${cookieValue(start, COOKIE)}` } }));
+    expect(back.headers.get("location")).toBe(failedTo);
+    expect(cookieValue(back, "o_session")).toBeNull();
+    expect(google.calls.token).toBe(0);
+  });
+
+  it("is not read once the process that sealed it has gone: that sign-in starts again", async () => {
+    configure();
+    const google = await createFakeGoogle({ clientId: CLIENT.id, clientSecret: CLIENT.secret });
+    const routes = createAuthRoutes(auth, { fetch: google.fetch });
+    const start = await routes.googleStart(new Request("https://cards.example/api/auth/google/start"));
+    const url = authorize(start.headers.get("location") ?? "", OWNER, { clientId: CLIENT.id });
+    // A restart, as far as the key is concerned: the process's key is made anew.
+    delete (globalThis as unknown as Record<symbol, unknown>)[Symbol.for("collectcollect.google-sign-in.flow-key")];
+    const back = await routes.googleCallback(new Request(url, { headers: { cookie: `${COOKIE}=${cookieValue(start, COOKIE)}` } }));
+    expect(back.headers.get("location")).toBe(failedTo);
+    expect(google.calls.token).toBe(0);
+    // And the next one goes through.
+    expect((await signIn(OWNER, { google, routes })).back.headers.get("location")).toBe("https://cards.example/");
+  });
+});
+
 describe("coming back from Google", () => {
   beforeEach(() => configure());
 
@@ -350,6 +486,23 @@ describe("coming back from Google", () => {
       expect(setCookies(back).find((c) => c.startsWith(`${COOKIE}=`)), what).toMatch(/Max-Age=0/);
     }
     expect(google.calls.token).toBe(0);
+  });
+
+  it("sends Google no code longer than 4096 characters", async () => {
+    const google = await createFakeGoogle({ clientId: CLIENT.id, clientSecret: CLIENT.secret });
+    const routes = createAuthRoutes(auth, { fetch: google.fetch });
+    const withCode = (code: string) => (url: URL, flow: string) => {
+      url.searchParams.set("code", code);
+      return { url, flow };
+    };
+    const long = await signIn(OWNER, { google, routes, tamper: withCode("c".repeat(4097)) });
+    expect(long.back.headers.get("location")).toBe(failedTo);
+    expect(google.calls.token).toBe(0);
+    expect(warned()).toContain("refused: code.");
+    // One character fewer is Google's to answer (and this one it refuses).
+    const longest = await signIn(OWNER, { google, routes, tamper: withCode("c".repeat(4096)) });
+    expect(longest.back.headers.get("location")).toBe(failedTo);
+    expect(google.calls.token).toBe(1);
   });
 
   it("refuses a sign-in cookie older than ten minutes", async () => {

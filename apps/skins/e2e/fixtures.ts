@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { test as base, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { test as base, expect, type Browser, type BrowserContext, type Page, type Request } from "@playwright/test";
 
 /**
  * The website's rules, held in every test.
@@ -22,17 +22,28 @@ export const APP = "skins";
 
 /**
  * Item images come from Steam's two image hosts, as img-src says, and nothing
- * else does. And one page is visited: Google's sign-in page, as a top-level
- * navigation and at that one address, which is how sign-in with Google starts;
- * the suite answers it itself (googleSignsIn), so nothing reaches Google.
+ * else does. And one page is visited: Google's sign-in page, at that one
+ * address and as the page itself, never in a frame, which is how sign-in with
+ * Google starts; the suite answers it itself (googleSignsIn), so nothing
+ * reaches Google.
  */
 const STEAM_IMAGES = new Set(["https://community.cloudflare.steamstatic.com", "https://steamcommunity-a.akamaihd.net"]);
-export function allowedOutside(url: URL, resourceType: string): boolean {
-  if (resourceType === "document" && `${url.origin}${url.pathname}` === GOOGLE_SIGN_IN) return true;
-  return resourceType === "image" && STEAM_IMAGES.has(url.origin);
+export function allowedOutside(request: Request): boolean {
+  const url = new URL(request.url());
+  if (`${url.origin}${url.pathname}` === GOOGLE_SIGN_IN) return request.resourceType() === "document" && request.isNavigationRequest() && topLevel(request);
+  return request.resourceType() === "image" && STEAM_IMAGES.has(url.origin);
 }
 
-const GOOGLE_SIGN_IN = "https://accounts.google.com/o/oauth2/v2/auth";
+export const GOOGLE_SIGN_IN = "https://accounts.google.com/o/oauth2/v2/auth";
+
+/** Whether a request is for the page itself, not for a frame inside it (a service worker's request has no frame). */
+function topLevel(request: Request): boolean {
+  try {
+    return request.frame().parentFrame() === null;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The headers as the README writes them for this app (lower-case names), for
@@ -112,7 +123,7 @@ export async function watch(context: BrowserContext, origin: string, problems: s
     page.on("request", (request) => {
       const url = new URL(request.url());
       if (!/^(https?|wss?):$/.test(url.protocol) || url.origin === origin) return;
-      if (!allowedOutside(url, request.resourceType())) problems.push(`a request left the site: ${request.method()} ${request.resourceType()} ${url.href}`);
+      if (!allowedOutside(request)) problems.push(`a request left the site: ${request.method()} ${request.resourceType()} ${url.href}`);
     });
   };
   context.pages().forEach(attach);

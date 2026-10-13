@@ -195,4 +195,6 @@ test("Settings says what this is, which version, under what licence, and what le
   await expect(about.getByRole("link", { name: "MIT licence" })).toHaveAttribute("href", /\/LICENSE$/);
   await expect(about.getByRole("link", { name: "source" })).toHaveAttribute("href", /^https:\/\/github\.com\//);
   await expect(about).toContainText("Nothing else leaves this server.");
+  // This server offers no sign-in with Google, so Google is not among them.
+  await expect(about).not.toContainText("Google");
 });

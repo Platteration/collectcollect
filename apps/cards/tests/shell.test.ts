@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 import { buildVersion } from "@collectcollect/core/build-id";
 import { buildManifest } from "@collectcollect/core/manifest";
@@ -33,6 +34,41 @@ describe("the installable shell shared by both apps", () => {
     expect(res.headers.get("Content-Type")).toContain("javascript");
     expect(res.headers.get("Service-Worker-Allowed")).toBe("/");
     expect(await res.text()).toBe(cards);
+  });
+
+  it("answers no request under /api/ itself, a navigation included: sign-in with Google comes back to one", () => {
+    // The worker as a browser runs it, with what it reaches stubbed: whether it
+    // calls respondWith is whether the request is the worker's to answer.
+    const origin = "https://cards.example";
+    let onFetch: ((event: unknown) => void) | undefined;
+    const fetched: string[] = [];
+    vm.runInNewContext(serviceWorkerSource("collectcollect", "abc123"), {
+      URL,
+      self: {
+        location: new URL(`${origin}/sw.js`),
+        addEventListener: (type: string, listener: (event: unknown) => void) => {
+          if (type === "fetch") onFetch = listener;
+        },
+      },
+      caches: { match: async () => undefined, open: async () => ({ put: async () => undefined }) },
+      fetch: async (request: { url: string }) => {
+        fetched.push(request.url);
+        return new Response("from the network");
+      },
+    });
+    const answers = (pathname: string, mode: string, method = "GET") => {
+      let answered = false;
+      onFetch?.({ request: { url: `${origin}${pathname}`, method, mode }, respondWith: () => { answered = true; } });
+      return answered;
+    };
+    // The way back from Google, and the way there, reach the server as they are.
+    expect(answers("/api/auth/google/callback?code=c&state=s", "navigate")).toBe(false);
+    expect(answers("/api/auth/google/start?return=%2F", "navigate")).toBe(false);
+    expect(answers("/api/cards", "cors")).toBe(false);
+    // Pages are the worker's (network first, then the offline notice), and so are the hashed build files.
+    expect(answers("/collection", "navigate")).toBe(true);
+    expect(answers("/_next/static/chunks/app.js", "no-cors")).toBe(true);
+    expect(fetched).toEqual([`${origin}/collection`]);
   });
 
   it("changes the worker with every build, so the offline shell is refreshed after a deploy", () => {

@@ -1,8 +1,10 @@
 import { building, databaseExists, getDb } from "./db";
-import { authEnabled } from "./auth";
+import { auth } from "./auth";
 import { isClaudeConfigured } from "./identify/claude";
 export function setupStatus() {
-  const defaults = { dismissed: false, hasCards: false, identificationConfigured: isClaudeConfigured(), passwordSet: authEnabled() };
+  // The two ways in, each as it is set up: sign-in with Google also turns the
+  // gate on, and with it alone there is no password to speak of.
+  const defaults = { dismissed: false, hasCards: false, identificationConfigured: isClaudeConfigured(), passwordSet: auth.passwordEnabled(), googleSignIn: auth.google().settings !== null };
   if (building() || !databaseExists()) return defaults;
   const db = getDb();
   const dismissed = db.prepare("SELECT value FROM settings WHERE key = 'setup_checklist_dismissed'").get() as { value: string } | undefined;

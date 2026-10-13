@@ -1,6 +1,6 @@
 import http from "node:http";
 import type { Page } from "@playwright/test";
-import { documentedHeaders, expect, headerProblems, test, watch } from "./fixtures";
+import { documentedHeaders, expect, GOOGLE_SIGN_IN, headerProblems, test, unwatchedContext, watch } from "./fixtures";
 import { authorize, E2E_ACCOUNTS, type FakeAccount } from "../../../scripts/fake-google.mjs";
 
 /**
@@ -166,6 +166,8 @@ test.describe("sign-in with Google beside the password", () => {
 
     await page.goto("/settings");
     await expect(page.getByText(/^A password is set and sign-in with Google is on, and every device signed in stays signed in for 30 days/)).toBeVisible();
+    // What leaves the server says Google is among it.
+    await expect(page.locator("footer").filter({ has: page.getByRole("heading", { name: "About" }) })).toContainText("Signing in with Google takes your browser to Google, which learns of the sign-in, and this server then asks Google which account it was. Nothing else leaves this server.");
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(page).toHaveURL(/\/login/);
     await page.goto("/collection");
@@ -184,6 +186,25 @@ test.describe("sign-in with Google beside the password", () => {
     await expect(page.getByLabel("Password")).toBeVisible();
     await expect(page.getByText("Sign-in didn't complete.")).toHaveCount(0);
     expect((await page.request.get("/api/cards")).status()).toBe(401);
+  });
+
+  test("the suite's watch lets Google's sign-in page in as the page itself, never in a frame", async ({ browser }) => {
+    // The rules every page is held to (fixtures.ts), applied to a context of the
+    // test's own: a page framing Google's sign-in would be a regression the
+    // browser and Google refuse, and the watch has to see it too.
+    const context = await unwatchedContext(browser);
+    try {
+      const problems: string[] = [];
+      await watch(context, "http://127.0.0.1:9", problems);
+      const page = await context.newPage();
+      await page.route((url) => url.href.startsWith(GOOGLE_SIGN_IN), (route) => route.fulfill({ contentType: "text/html", body: "<p>Google</p>" }));
+      await page.setContent(`<iframe src="${GOOGLE_SIGN_IN}?client_id=framed"></iframe>`);
+      await expect.poll(() => problems).toEqual([`a request left the site: GET document ${GOOGLE_SIGN_IN}?client_id=framed`]);
+      await page.goto(`${GOOGLE_SIGN_IN}?client_id=top`);
+      expect(problems).toHaveLength(1);
+    } finally {
+      await context.close();
+    }
   });
 });
 

@@ -191,8 +191,9 @@ export default function SettingsPage() {
           goes to Anthropic when you ask for identification; a card&apos;s name, set and number go to the price sources you
           have configured when it is priced, a set&apos;s name or code to its game&apos;s card database when you fetch a
           checklist, and a cert number to PSA when you look one up; an alert is posted to the webhook URL you set. A
-          price source&apos;s picture of a card is loaded by your browser from that source. Nothing else leaves this
-          server.
+          price source&apos;s picture of a card is loaded by your browser from that source.
+          {auth.google().settings !== null && " Signing in with Google takes your browser to Google, which learns of the sign-in, and this server then asks Google which account it was."}{" "}
+          Nothing else leaves this server.
         </p>
       </footer>
     </div>

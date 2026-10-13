@@ -3,7 +3,14 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { api } from "@/lib/api-client";
-interface Status { dismissed: boolean; hasCards: boolean; identificationConfigured: boolean; passwordSet: boolean }
+interface Status { dismissed: boolean; hasCards: boolean; identificationConfigured: boolean; passwordSet: boolean; googleSignIn: boolean }
+/** The checklist's line about who may reach the collection: the gate as it is set up, by the ways in it offers. */
+export function accessStep(status: Pick<Status, "passwordSet" | "googleSignIn">): string {
+  if (status.passwordSet && status.googleSignIn) return "✓ Sign-in required: a password or Google";
+  if (status.passwordSet) return "✓ Password protection enabled";
+  if (status.googleSignIn) return "✓ Sign-in with Google required";
+  return "3. Local access: password not set";
+}
 export function SetupChecklist({ status, reopen = false }: { status: Status; reopen?: boolean }) {
   const router = useRouter(), pathname = usePathname();
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
@@ -21,7 +28,7 @@ export function SetupChecklist({ status, reopen = false }: { status: Status; reo
     <ol className="grid gap-2 text-sm sm:grid-cols-2">
       <li>{status.hasCards ? "✓ First card added" : "1. Add your first card"} · <Link className="underline" href="/add">Add card</Link> / <Link className="underline" href="/import">Import CSV</Link></li>
       <li>{status.identificationConfigured ? "✓ Photo identification configured" : "2. Optional photo identification"} · <Link className="underline" href="/settings#data-sources">Check data sources</Link></li>
-      <li>{status.passwordSet ? "✓ Password protection enabled" : "3. Local access: password not set"} · <Link className="underline" href="/settings#data-sources">Hosting setup</Link></li>
+      <li>{accessStep(status)} · <Link className="underline" href="/settings#data-sources">Hosting setup</Link></li>
       <li>4. Keep a backup · <Link className="underline" href="/settings#backup">Download and restore</Link></li>
     </ol>
     {error && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{error}</p>}
