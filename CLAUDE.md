@@ -32,12 +32,24 @@ included; `next.config.ts` sets none, since a header frozen into the build could
 contradict it. The values are written out once more, in the README's two machine-read
 blocks (`<!-- headers:cards:begin -->`, `headers:skins`): each app's
 `tests/website.test.ts` holds the proxy's output equal to its block word for word, and
-`e2e/website.spec.ts` holds every live response to it. Change one, change both. Every
-source in the policy was measured in Chromium against the production build; add one only
-when a spec shows something real needs it. Every spec imports `test` from
-`e2e/fixtures.ts`, not `@playwright/test`, so every page any test drives fails on a policy
-violation, an uncaught exception or a request that leaves the site; a new spec does the
-same. API answers are `no-store` unless their path is on the app's `cachedPaths` (the
+`e2e/website.spec.ts` holds every live response to it. Change one, change both. An
+address with a trailing slash is redirected by the proxy (each `next.config.ts` sets
+`skipTrailingSlashRedirect`, since Next's own redirect runs before the proxy and carried
+no header); Next's repeated-slash redirect and its 500 for `TRACE` still leave without
+them, and `website.spec.ts` pins both, so the README's sentence about them changes when
+Next does. Every source in the policy was measured in Chromium against the production
+build, by taking it out and seeing a spec go red (but `script-src`'s `'self'`, a fallback
+Chromium ignores beside `'strict-dynamic'`, and `worker-src`, which it fills from
+`script-src`: README, "The website"); add one only when a spec shows something real
+needs it. Every spec imports `test` from `e2e/fixtures.ts`, not
+`@playwright/test` (`tests/website.test.ts` fails on one that does not), so every page any
+test drives, in a context the test makes for itself too, fails on a policy violation, an
+uncaught exception or a request that leaves the site; `unwatchedContext` is for a test
+whose pages break those rules on purpose. `website.spec.ts` starts every page the app
+has, read off `src/app`: a new page fails it until the walk has an address for it. In
+skins an item's picture is drawn only from the hosts `IMAGE_SOURCES` names
+(`src/lib/images.ts`), which is also the policy's `img-src`, so a host added to one is in
+the other. API answers are `no-store` unless their path is on the app's `cachedPaths` (the
 proxy's header wins over a route's own). Without a session, only each app's
 `publicPaths` and the proxy's `SITE_PATHS` answer (`/_next/static`, `/robots.txt`,
 `/.well-known/security.txt`, `/guard.js`). `/guard.js` is the safety net

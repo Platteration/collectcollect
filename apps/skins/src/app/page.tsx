@@ -8,6 +8,7 @@ import { listSales } from "@/lib/sales";
 import { valuedTheOldWay, valueOf } from "@/lib/valuation";
 import { CATEGORIES, EXTERIORS } from "@/lib/types";
 import { Portfolio, type Holding } from "@/components/Portfolio";
+import { shownImage } from "@/lib/images";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,7 @@ export default function HomePage() {
       id: item.id,
       name: item.marketHashName,
       detail: detailOf(item),
-      image: item.imageUrl,
+      image: shownImage(item.imageUrl),
       rarity: item.rarity,
       quantity: item.quantity,
       stackable: item.stackable,

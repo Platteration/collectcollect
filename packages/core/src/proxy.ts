@@ -119,6 +119,8 @@ export function contentSecurityPolicy(nonce: string, imageSources: string[] = []
     "font-src 'self'",
     // Hot reloading in development runs over a websocket to the same host.
     `connect-src 'self'${dev ? " ws: wss:" : ""}`,
+    // Stated, though Chromium would take it from script-src if it were missing:
+    // the policy names where the service worker comes from.
     "worker-src 'self'",
     "manifest-src 'self'",
     "object-src 'none'",
@@ -221,9 +223,13 @@ function servesHttps(env: Record<string, string | undefined> = process.env): boo
  * nothing but the public paths is reachable without a session, and an API call
  * without one gets a status rather than a redirect. And every response leaves
  * with the security headers — pages, API answers, the framework's own files,
- * the not-found page and every refusal — with every page render handed a
- * nonce for its inline scripts: Next reads it back out of the policy on the
- * request and applies it to its own scripts as well.
+ * the not-found page, every refusal and every redirect — with every page render
+ * handed a nonce for its inline scripts: Next reads it back out of the policy
+ * on the request and applies it to its own scripts as well. Two answers never
+ * reach this function, because Next makes them first: its redirect for an
+ * address with a repeated slash or a backslash, and its 500 for a TRACE
+ * request, a method the fetch standard will not build a Request for (README,
+ * "The website").
  */
 export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
   const opts: ProxyOptions = Array.isArray(options) ? { publicPaths: options } : options;
@@ -270,6 +276,18 @@ export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
     // owner behind a proxy the app was not told about says so.
     const refused = requestSecurityError(request, { https: https || cookieSecure(request), anyHost: pathname === healthPath });
     if (refused) return refuse(refused);
+
+    // An address with a trailing slash goes to the same one without it, as Next
+    // would send it. Next's own redirect runs before this proxy and so left with
+    // none of the headers above; each app's next.config.ts turns it off
+    // (skipTrailingSlashRedirect) so that it is made here, the same 308 to the
+    // same place, query included.
+    if (pathname.length > 1 && pathname.endsWith("/")) {
+      // A plain URL: a NextURL puts back the trailing slash it saw on the request.
+      const url = new URL(request.url);
+      url.pathname = pathname.replace(/\/+$/, "") || "/";
+      return secure(NextResponse.redirect(url, 308));
+    }
 
     if (!auth.authEnabled()) return next();
 

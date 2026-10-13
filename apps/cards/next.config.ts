@@ -14,6 +14,10 @@ const nextConfig: NextConfig = {
     // constant the routes enforce (packages/core/src/limits.ts).
     proxyClientMaxBodySize: MAX_REQUEST_SIZE,
   },
+  // Next answers an address with a trailing slash with a redirect of its own,
+  // made before the proxy runs and so carrying none of its headers. The proxy
+  // makes the same redirect instead (packages/core/src/proxy.ts).
+  skipTrailingSlashRedirect: true,
   // Native modules must stay external to the server bundle.
   serverExternalPackages: ["better-sqlite3", "sharp"],
   // The shared package ships TypeScript source rather than a build step.

@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { createProxy } from "@collectcollect/core/proxy";
 import { sessions } from "@/lib/sessions";
+import { IMAGE_SOURCES } from "@/lib/images";
 
 export const proxy = createProxy(auth, {
   // A cookie this app signed is still refused once its session was ended.
@@ -8,8 +9,9 @@ export const proxy = createProxy(auth, {
   // Paths that must stay reachable without a session, or the login page (and
   // the installed app's shell) cannot load.
   publicPaths: ["/login", "/api/auth", "/api/health", "/offline", "/manifest.webmanifest", "/icons", "/sw.js"],
-  // Steam serves every item image, and only Steam.
-  imageSources: ["https://community.cloudflare.steamstatic.com", "https://steamcommunity-a.akamaihd.net"],
+  // Steam's two image hosts, and only those (src/lib/images.ts): a page draws
+  // no item picture from anywhere else.
+  imageSources: IMAGE_SOURCES,
 });
 
 export const config = {

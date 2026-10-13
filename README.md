@@ -322,6 +322,17 @@ every script and stylesheet to an https port nothing listens on. `{nonce}` is
 each app's `tests/website.test.ts` holds its proxy's output equal to its block
 word for word, and its browser suite holds every live response to it.
 
+Redirects and refusals carry them too. An address with a trailing slash is
+redirected to the one without by the proxy itself: Next's own redirect, made
+before the proxy runs, left with none of them, so each app's `next.config.ts`
+turns it off (`skipTrailingSlashRedirect`). Two answers still leave without
+them, because Next makes them before the proxy runs, and neither is something
+a browser draws: the redirect from an address with a repeated slash or a
+backslash (`//collection`) to the one without, and the 500 for a `TRACE`
+request — a method no page can make a browser send — for which Next cannot
+build the request the proxy reads. The browser suite pins both, so a Next that
+changes either fails it.
+
 The card app:
 
 <!-- headers:cards:begin -->
@@ -354,16 +365,27 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains
 
 Every source in the policy was measured, by driving each app's production build
 in Chromium under exactly this header (`npm run test:e2e`: every spec fails on a
-policy violation, and `e2e/website.spec.ts` drives the main flow and checks the
-headers of every response), not copied from anywhere:
+policy violation, a page error or a request that leaves the site, and
+`e2e/website.spec.ts` drives the main flow, starts every page the app has and
+checks the headers of every response), not copied from anywhere: taken out, each
+one turns a spec red, but `script-src`'s `'self'`, which only a browser that
+predates `'strict-dynamic'` reads, and `worker-src`, which Chromium fills from
+`script-src` when it is missing — it is stated so the policy names where the
+service worker comes from, and set to `'none'` it refuses the worker on every
+page. The refusals are checked the other way round:
+the suite serves a page under the real policy carrying an inline script, one of
+the site's own scripts without the nonce, a `<style>`, a `<base>`, an outside
+image, an `<object>`, a frame, a fetch elsewhere and a form posting elsewhere,
+and requires each to be refused by the directive meant to refuse it, and frames
+a page from another origin to see it refused.
 
 | Directive | Why |
 | --- | --- |
 | `default-src 'none'` | Nothing loads unless it is named below. |
 | `script-src` | This origin's files, and an inline script only with this response's nonce: Next stamps it on its bootstrap and page data, the layout on the theme script and the safety net. `'strict-dynamic'` lets those load Next's chunks and makes a modern browser ignore `'self'`, so markup injected into a page cannot load even one of this origin's own files. No `'unsafe-inline'`, and `'unsafe-eval'` only under `next dev`. |
 | `style-src 'self'`, `style-src-attr 'unsafe-inline'` | The app's own stylesheets, and `style` attributes, which React writes for the theme's variables, the charts and each card's colour. An injected `<style>` element is refused. `next dev` adds `'unsafe-inline'` for its overlay. |
-| `img-src` | Cards: uploaded photos (this origin), a photo's preview while it uploads (`blob:`), and reference images from whichever price source matched (`https:`). Skins: Steam's image hosts. No `data:`: nothing uses one. |
-| `font-src`, `connect-src`, `worker-src`, `manifest-src` | The display face, the app's own API, its service worker and its manifest — all this origin. `next dev` adds its websocket. |
+| `img-src` | Both: the app's icons and uploaded photos (this origin). Cards: a photo's preview while it uploads (`blob:`), and reference images from whichever price source matched (`https:`). Skins: Steam's two image hosts, and a page draws an item's picture from those alone (`src/lib/images.ts`): one whose address names another host, from a spreadsheet's image column say, keeps it but shows "No image" rather than ask for a picture the policy refuses. No `data:`: nothing uses one. |
+| `font-src`, `connect-src`, `worker-src`, `manifest-src` | The display face, the app's own API, its service worker and its manifest — all this origin. A browser reads the manifest only when something asks for it, installing the app say, so the suite asks for it the way an install does. `next dev` adds its websocket. |
 | `form-action 'self'` | The collection and inventory search boxes are plain forms that reload their own page, so they work before the scripts arrive. |
 | media | None: the scan screen's camera preview is a stream handed to `<video>` as an object, which no fetch directive governs. |
 | `frame-ancestors 'none'`, `X-Frame-Options: DENY` | Nothing here is meant to be framed; Settings has one-click buttons (sign out everywhere) that a framing page would like to steer. |
@@ -460,11 +482,14 @@ call Anthropic or a price API, but everything else, including the database,
 runs for real. It covers adding a card by hand, duplicate
 merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
 grading submission from draft to booked outcome, and the password gate.
-Every spec imports its `test` from `e2e/fixtures.ts`, so any page a test drives
-fails it on a content security policy violation, an uncaught exception or a
-request that leaves the site, and `e2e/website.spec.ts` drives each app's main
-flow holding every response to the README's headers (see
-[The website](#the-website)).
+Every spec imports its `test` from `e2e/fixtures.ts` (each app's
+`tests/website.test.ts` fails on one that does not), so any page a test drives,
+in a browser context of the test's own making too, fails it on a content
+security policy violation, an uncaught exception or a request that leaves the
+site; only `unwatchedContext` makes a context outside those rules, for the two
+tests whose pages break them on purpose. `e2e/website.spec.ts` drives each app's
+main flow and starts every page it has, holding every response to the README's
+headers (see [The website](#the-website)).
 
 The type checker runs strict, with `noUncheckedIndexedAccess` on in every
 workspace: an element read out of an array or a table is `undefined` until the

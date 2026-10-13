@@ -153,6 +153,31 @@ describe("the headers every response carries", () => {
   it("are not written in next.config too, where a header frozen into the build could only contradict them", () => {
     expect(nextConfig.headers).toBeUndefined();
   });
+
+  it("go out on the redirect from an address with a trailing slash, which the proxy makes because Next's own left with none", async () => {
+    // Next's redirect runs before the proxy; turned off, the proxy makes the same one.
+    expect(nextConfig.skipTrailingSlashRedirect).toBe(true);
+    for (const [from, to] of [
+      ["/collection/", "/collection"],
+      ["/collection/?q=Redline", "/collection?q=Redline"],
+      ["/api/cards/", "/api/cards"],
+      ["/robots.txt/", "/robots.txt"],
+      ["/.well-known/security.txt/", "/.well-known/security.txt"],
+    ]) {
+      const res = await proxy(request(`http://localhost:3000${from}`));
+      expect(res.status, from).toBe(308);
+      expect(res.headers.get("Location"), from).toBe(`http://localhost:3000${to}`);
+      expect(await served(`http://localhost:3000${from}`), from).toEqual(overHttp(documented()));
+    }
+    // The root is not an address with a trailing slash.
+    expect((await proxy(request("http://localhost:3000/"))).status).toBe(200);
+    // The rules ahead of it still hold: a name this instance does not answer to is refused, not redirected.
+    expect((await proxy(request("http://localhost:3000/collection/", { host: "rebind.attacker.example" }))).status).toBe(403);
+    // Behind a password the address is put right first, and the gate answers the next request.
+    process.env[PASSWORD] = "hunter2";
+    expect((await proxy(request("http://localhost:3000/collection/"))).status).toBe(308);
+    expect((await proxy(request("http://localhost:3000/collection"))).status).toBe(307);
+  });
 });
 
 describe("what is served without a session", () => {
@@ -232,5 +257,33 @@ describe("the safety net", () => {
   it("does not report a failure to a page that started before it arrived", () => {
     // Started (packages/core/src/components/Started.tsx) leaves this flag; the guard reads it first.
     expect(guardSource(APP_NAME)).toContain("var started = !!window.__collectcollectStarted;");
+  });
+});
+
+describe("the browser suite", () => {
+  const E2E = path.join(import.meta.dirname, "../e2e");
+
+  /** Where a suite file takes its `test` from, if it imports one. */
+  function testSource(file: string): string | undefined {
+    const text = fs.readFileSync(path.join(E2E, file), "utf8");
+    for (const [, names = "", from] of text.matchAll(/import\s*\{([^}]*)\}\s*from\s*"([^"]+)"/g)) {
+      if (names.split(",").some((name) => /^\s*test(\s+as\s+\w+)?\s*$/.test(name))) return from;
+    }
+    return undefined;
+  }
+
+  /** Whether a file's `test` is fixtures.ts's, directly or through a fixture of its own built on it. */
+  function heldToTheRules(file: string, seen = new Set<string>()): boolean {
+    const from = testSource(file);
+    if (from === "./fixtures") return true;
+    if (!from?.startsWith("./") || seen.has(from)) return false;
+    seen.add(from);
+    return heldToTheRules(`${from.slice(2)}.ts`, seen);
+  }
+
+  it("takes every spec's test from e2e/fixtures.ts, so every page a spec drives fails it on a violation, a page error or a request off the site", () => {
+    const specs = fs.readdirSync(E2E).filter((file) => file.endsWith(".spec.ts"));
+    expect(specs).toContain("website.spec.ts");
+    for (const spec of specs) expect(heldToTheRules(spec), spec).toBe(true);
   });
 });

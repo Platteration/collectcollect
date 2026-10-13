@@ -22,7 +22,7 @@ const LOCKED_PORT = 3222;
 const offline = [process.env.NODE_OPTIONS, `--import=${pathToFileURL(path.join(import.meta.dirname, "../../scripts/e2e-offline.mjs")).href}`].filter(Boolean).join(" ");
 
 /** Specs that write. Everything else reads the seeded inventory. */
-const WRITES = /(add|backup|edit|import|money|offline)\.spec\.ts/;
+const WRITES = /(add|backup|edit|import|money|offline|pictures)\.spec\.ts/;
 const AUTH = /auth\.spec\.ts/;
 
 export default defineConfig({

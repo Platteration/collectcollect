@@ -4,6 +4,7 @@ import { day, money } from "@collectcollect/core/format";
 import type { ItemRecord } from "@/lib/types";
 import { CATEGORIES, EXTERIORS, RARITIES } from "@/lib/types";
 import { isTradeLocked } from "@/lib/items";
+import { shownImage } from "@/lib/images";
 
 /**
  * One item in a grid.
@@ -20,6 +21,7 @@ import { isTradeLocked } from "@/lib/items";
 export function ItemTile({ item, value }: { item: ItemRecord; value: number | null }) {
   const rarity = item.rarity ? RARITIES[item.rarity] : null;
   const locked = isTradeLocked(item);
+  const image = shownImage(item.imageUrl);
   return (
     <Link
       href={`/items/${item.id}`}
@@ -28,8 +30,8 @@ export function ItemTile({ item, value }: { item: ItemRecord; value: number | nu
     >
       <span aria-hidden className="rarity-bar absolute inset-y-0 left-0 w-1" />
       <div className="well flex aspect-[4/3] items-center justify-center overflow-hidden">
-        {item.imageUrl ? (
-          <img src={item.imageUrl} alt="" loading="lazy" className="h-full w-full object-contain p-2" />
+        {image ? (
+          <img src={image} alt="" loading="lazy" className="h-full w-full object-contain p-2" />
         ) : (
           <span className="text-xs" style={{ color: "var(--muted)" }}>
             No image

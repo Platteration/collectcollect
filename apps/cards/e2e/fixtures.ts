@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { test as base, expect, type BrowserContext, type Page } from "@playwright/test";
+import { test as base, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
 /**
  * The website's rules, held in every test.
@@ -10,9 +10,10 @@ import { test as base, expect, type BrowserContext, type Page } from "@playwrigh
  * in the page and the browser's console report), on an uncaught exception, and
  * on a request that leaves this site other than an image the policy allows.
  * The policy was measured this way: a source something real needs cannot be
- * missing without some test going red. A test that makes contexts of its own
- * with `browser.newContext()` is not covered; `website.spec.ts` holds the
- * headers themselves to the README.
+ * missing without some test going red. A context a test makes for itself with
+ * `browser.newContext()` is held to the same rules; only `unwatchedContext`
+ * makes one that is not, for a test whose pages break them on purpose.
+ * `website.spec.ts` holds the headers themselves to the README.
  */
 
 /** Which app's block of the README this suite reads. */
@@ -108,12 +109,42 @@ export async function watch(context: BrowserContext, origin: string, problems: s
   context.on("page", attach);
 }
 
+/** The browser's own `newContext`, while a test has it, for `unwatchedContext`. */
+const plainNewContext = new WeakMap<Browser, Browser["newContext"]>();
+
+/**
+ * A context outside the rules, for the few tests whose pages break them on
+ * purpose: the safety net's failing and throwing scripts, and the probe that
+ * shows the policy refusing what it should. Every other context is watched.
+ */
+export function unwatchedContext(browser: Browser, options?: Parameters<Browser["newContext"]>[0]): Promise<BrowserContext> {
+  return (plainNewContext.get(browser) ?? browser.newContext.bind(browser))(options);
+}
+
 export const test = base.extend<{ siteRules: string[] }>({
   siteRules: [
-    async ({ context, baseURL }, use) => {
+    // The second argument is Playwright's `use`, named otherwise because the React
+    // hooks lint takes a call to `use` inside a try for React's.
+    async ({ context, baseURL, browser }, provide) => {
       const problems: string[] = [];
-      await watch(context, new URL(baseURL ?? "http://127.0.0.1").origin, problems);
-      await use(problems);
+      const origin = new URL(baseURL ?? "http://127.0.0.1").origin;
+      await watch(context, origin, problems);
+      // A context the test makes for itself (another colour scheme, a phone, a
+      // second browser signed in) is held to the same rules as its own.
+      const newContext = browser.newContext;
+      const plain = newContext.bind(browser);
+      plainNewContext.set(browser, plain);
+      browser.newContext = async (options) => {
+        const made = await plain(options);
+        await watch(made, origin, problems);
+        return made;
+      };
+      try {
+        await provide(problems);
+      } finally {
+        browser.newContext = newContext;
+        plainNewContext.delete(browser);
+      }
       expect(problems, "policy violations, page errors and requests that left the site").toEqual([]);
     },
     { auto: true },

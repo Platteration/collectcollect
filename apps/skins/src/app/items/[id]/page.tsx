@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { day, money, when } from "@collectcollect/core/format";
 import { ValueChart } from "@collectcollect/core/components/ValueChart";
 import { getItem, isTradeLocked, listSnapshots, listStorageUnits } from "@/lib/items";
+import { shownImage } from "@/lib/images";
 import { listLots } from "@/lib/acquisitions";
 import { listSalesForItem } from "@/lib/sales";
 import { valueOf } from "@/lib/valuation";
@@ -29,6 +30,7 @@ export default async function ItemPage({ params }: PageProps<"/items/[id]">) {
   const sales = listSalesForItem(item.id);
   const rarity = item.rarity ? RARITIES[item.rarity] : null;
   const locked = isTradeLocked(item);
+  const image = shownImage(item.imageUrl);
   const { cash, wallet } = proceedsByMarket(snapshots[0]?.summary.quotes ?? [], getSettings());
   // Newest first in the table, oldest first on the line.
   const valuePoints = [...snapshots]
@@ -51,8 +53,8 @@ export default async function ItemPage({ params }: PageProps<"/items/[id]">) {
 
       <header className="flex flex-wrap items-start gap-4">
         <div className="well flex h-32 w-44 shrink-0 items-center justify-center overflow-hidden rounded-lg">
-          {item.imageUrl ? (
-            <img src={item.imageUrl} alt="" className="h-full w-full object-contain p-2" />
+          {image ? (
+            <img src={image} alt="" className="h-full w-full object-contain p-2" />
           ) : (
             <span className="text-xs" style={{ color: "var(--muted)" }}>
               No image
