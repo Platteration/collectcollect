@@ -113,6 +113,18 @@ export interface ImportRow {
   warning: string | null;
 }
 
+/**
+ * How many rows one import may carry.
+ *
+ * Every row is an insert, a lookup and a Markdown file, run synchronously
+ * inside the request, so while an import runs the server answers nothing
+ * else: 20,000 rows (0.7 MB) held it for 45 seconds, and the route's 8 MB body
+ * is on the order of 200,000 rows, which is minutes of a frozen process and a
+ * 90 MB preview from one request. A file bigger than this is split rather than
+ * run, as the card app's importer does.
+ */
+export const MAX_IMPORT_ROWS = 5000;
+
 export interface ImportPreview {
   /** Header name found for each field the file supplies. */
   mapping: Record<string, string>;
@@ -120,6 +132,8 @@ export interface ImportPreview {
   rows: ImportRow[];
   total: number;
   usable: number;
+  /** Rows past MAX_IMPORT_ROWS, which were not read at all. */
+  skippedForSize: number;
   /**
    * A fingerprint of the file and the choices made about it. Applying has to
    * present the same one, so what goes in is what was previewed, and the
@@ -141,7 +155,7 @@ export function previewImport(text: string, defaults: { category?: Category } = 
     .map((cells, i) => ({ cells, line: i + 1 }))
     .filter((r) => r.cells.some((cell) => cell.trim() !== ""));
   const head = numbered[0];
-  if (!head) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0, token: importToken(text, defaults) };
+  if (!head) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0, skippedForSize: 0, token: importToken(text, defaults) };
 
   const headers = head.cells.map((h) => h.trim());
   const keys = headers.map(headerKey);
@@ -161,7 +175,11 @@ export function previewImport(text: string, defaults: { category?: Category } = 
 
   const value = (row: string[], field: string): string => (index[field] === undefined ? "" : (row[index[field]] ?? "").trim());
 
-  const rows: ImportRow[] = numbered.slice(1).map(({ cells: row, line }) => {
+  // Bounded here, where the rows are read, rather than where they are written:
+  // a preview of a pathological file should not be built either.
+  const body = numbered.slice(1);
+  const skippedForSize = Math.max(0, body.length - MAX_IMPORT_ROWS);
+  const rows: ImportRow[] = body.slice(0, MAX_IMPORT_ROWS).map(({ cells: row, line }) => {
     const name = value(row, "name");
     if (!name) return { line, input: null, problem: "No item name in this row", warning: null };
 
@@ -254,7 +272,7 @@ export function previewImport(text: string, defaults: { category?: Category } = 
     };
   });
 
-  return { mapping, unmapped, rows, total: rows.length, usable: rows.filter((r) => r.input).length, token: importToken(text, defaults) };
+  return { mapping, unmapped, rows, total: rows.length, usable: rows.filter((r) => r.input).length, skippedForSize, token: importToken(text, defaults) };
 }
 
 export interface ImportResult {

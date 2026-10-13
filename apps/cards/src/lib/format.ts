@@ -29,3 +29,15 @@ export function describeMissingPhotos(missing: Array<{ photo: string; cardId: nu
     .map((item) => (item.cardId !== null ? `${item.cardName} (card ${item.cardId}): ${item.photo}` : `scan draft ${item.draftId}: ${item.photo}`))
     .join("; ");
 }
+
+/**
+ * A caveat from a card's identification, without the punctuation and spaces
+ * it ended with, so the page can close the sentence itself. Trimmed rather
+ * than matched with `/[.;,]?\s*$/`, which tries every position in a run of
+ * spaces: the caveat is stored text, from the vision model or a file read
+ * back in, and the card page is drawn on the server.
+ */
+export function caveatSentence(caveat: string): string {
+  const trimmed = caveat.trimEnd();
+  return /[.;,]$/.test(trimmed) ? trimmed.slice(0, -1) : trimmed;
+}

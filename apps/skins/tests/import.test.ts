@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { openDatabase, setDb } from "@/lib/db";
 import { getItem, listItems } from "@/lib/items";
 import { listLots, verifyLotInvariant } from "@/lib/acquisitions";
-import { applyImport, exteriorFromName, guessCategory, previewImport } from "@/lib/import";
+import { MAX_IMPORT_ROWS, applyImport, exteriorFromName, guessCategory, previewImport } from "@/lib/import";
 import { POST, forgetAppliedImports, throttle } from "@/app/api/import/route";
 
 beforeEach(() => setDb(openDatabase(":memory:")));
@@ -219,6 +219,27 @@ describe("applying a file", () => {
     expect(item.purchasePrice).toBeNull();
     expect(listLots(item.id)[0]?.unitCost).toBeNull();
     expect(getItem(item.id)!.quantity).toBe(3);
+  });
+});
+
+describe("a file larger than one import", () => {
+  it("reads no more rows than the cap, and says how many it left", () => {
+    // Twenty thousand rows held the server for 45 seconds, and the route takes
+    // 8 MB, about two hundred thousand.
+    const rows = MAX_IMPORT_ROWS + 25;
+    const preview = previewImport(["name,qty", ...Array.from({ length: rows }, () => "Clutch Case,1")].join("\n"));
+    // Derived from the file, not from the constant: whatever the cap is, the
+    // rows read plus the rows reported must account for every row in the file.
+    expect(preview.rows.length + preview.skippedForSize).toBe(rows);
+    expect(preview.skippedForSize).toBeGreaterThan(0);
+    expect(preview.total).toBe(preview.rows.length);
+    const result = applyImport(preview);
+    expect(result.created + result.merged).toBe(preview.rows.length);
+    expect(at(listItems(), 0).quantity).toBe(preview.rows.length);
+  }, 120_000);
+
+  it("leaves a file under the cap alone", () => {
+    expect(previewImport(csv("name,qty", "Clutch Case,1", "Chroma Case,2")).skippedForSize).toBe(0);
   });
 });
 

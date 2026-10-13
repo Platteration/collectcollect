@@ -18,6 +18,7 @@ import { nameKey } from "./name-key";
 import { mirrorCard, unmirrorCard } from "./markdown/mirror";
 import { normalizeNumber } from "./pricing/match";
 import { summarize } from "./pricing";
+import { readPriceSummary } from "./price-summary";
 import { getSettings } from "./settings";
 import { alertsForRefresh, createAlert, deliver } from "./alerts";
 
@@ -878,11 +879,13 @@ interface SnapshotRow {
  * restore installs a whole file, and a bare `JSON.parse` here throws out of a
  * server component — one unreadable row would take out the portfolio, the
  * collection, the report and the cards API together. An unreadable snapshot is
- * dropped instead, which loses one price reading and nothing else.
+ * dropped instead, which loses one price reading and nothing else; one that is
+ * an object is read field by field (`readPriceSummary`), since the pages index
+ * into its tables and quotes.
  */
 function rowToSnapshot(r: SnapshotRow): PriceSnapshot | null {
-  const summary = parseJson<PriceSummary | null>(r.summary, null);
-  if (!summary || typeof summary !== "object" || Array.isArray(summary)) return null;
+  const summary = readPriceSummary(parseJson<unknown>(r.summary, null), r.fetched_at);
+  if (!summary) return null;
   return {
     id: r.id,
     cardId: r.card_id,

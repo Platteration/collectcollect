@@ -14,7 +14,7 @@ import { CONDITIONS, GAMES, GAME_IDS, GRADING_STATUSES } from "../types";
 import { CenteringRatiosSchema, IdentificationSchema } from "../identify/schema";
 import { readCentering, readGradingReport } from "../grading/schema";
 import { capsFor, describeCentering } from "../grading/centering";
-import { money, parseDocument, readFenced, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "@collectcollect/core/markdown/format";
+import { money, parseDocument, readFenced, readLotPart, readMoney, readSection, readTable, slug, splitSource, table, writeFrontMatter } from "@collectcollect/core/markdown/format";
 
 /** How many prices a card's file lists, newest first; the database holds the rest. */
 export const MAX_VALUE_ROWS = 1000;
@@ -218,37 +218,44 @@ function lotsCell(lots: Array<{ quantity: number; unitCost: number | null; acqui
     .join(" · ");
 }
 
-const LOT_RE = /^\s*(\d+)\s*@\s*(.*?)\s*(?:\((\d{4}-\d{2}-\d{2})\))?\s*$/;
-
 function parseLotsCell(text: string): ParsedSaleLot[] {
   const out: ParsedSaleLot[] = [];
   if (!text) return out;
   for (const part of text.split("·")) {
-    const match = LOT_RE.exec(part);
-    if (!match) continue;
-    const quantity = Number(match[1]);
+    const lot = readLotPart(part);
+    if (!lot) continue;
+    const quantity = Number(lot.quantity);
     if (!Number.isInteger(quantity) || quantity < 1) continue;
-    out.push({ quantity, unitCost: readMoney(match[2] ?? ""), acquiredOn: match[3] ?? null });
+    out.push({ quantity, unitCost: readMoney(lot.cost), acquiredOn: lot.day });
   }
   return out;
 }
 
-const SOURCE_RE = /^(.*?)\s*\((.*)\)\s*$/;
-
-function splitSource(text: string): { rest: string; source: string | null } {
-  const match = SOURCE_RE.exec(text.trim());
-  if (!match) return { rest: text.trim(), source: null };
-  const [, rest = "", source = ""] = match;
-  return { rest: rest.trim(), source: source.trim() || null };
+/**
+ * `PSA 10 $5,000` as its grade and its amount: the last word is the amount and
+ * everything before it the grade. Read by scanning back from the end rather
+ * than by `/^\s*(.+?)\s+([$-]?[\d,.]+)\s*$/`, whose lazy grade tried the
+ * rest of the cell after every character it took: a cell of sixty thousand
+ * spaces held the whole server for ten seconds, and a folder may be 64 MB.
+ */
+function gradeAndAmount(part: string): [string, string] | null {
+  const text = part.trim();
+  let gap = text.length;
+  while (gap > 0 && !/\s/.test(text.charAt(gap - 1))) gap--;
+  const key = text.slice(0, gap).trim();
+  const amount = text.slice(gap);
+  // The pattern's `.` stopped at a line break, so a grade holding one never matched.
+  if (!key || /[\n\r\u2028\u2029]/.test(key) || !/^[$-]?[\d,.]+$/.test(amount)) return null;
+  return [key, amount];
 }
 
 /** Turn `PSA 10 $5,000 · PSA 9 $1,400` back into a map. */
 function parseGraded(text: string): Record<string, number> {
   const out: Record<string, number> = {};
   for (const part of text.split("·")) {
-    const match = /^\s*(.+?)\s+([$-]?[\d,.]+)\s*$/.exec(part);
+    const match = gradeAndAmount(part);
     if (!match) continue;
-    const [, key = "", amount = ""] = match;
+    const [key, amount] = match;
     const value = readMoney(amount);
     if (value === null) continue;
     out[key.trim()] = value;

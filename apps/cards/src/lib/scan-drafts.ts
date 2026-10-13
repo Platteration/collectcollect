@@ -19,10 +19,32 @@ interface DraftRow {
   attempt: string | null; started_at: string | null; card_id: number | null; result: ScanDraft["result"];
   created_at: string; updated_at: string;
 }
-function decode(row: DraftRow): ScanDraft {
-  return { id: row.id, uploads: JSON.parse(row.uploads), accentColor: row.accent_color, input: JSON.parse(row.input),
-    identification: row.identification ? JSON.parse(row.identification) : null, hint: row.hint, status: row.status,
-    message: row.message, revision: row.revision, cardId: row.card_id, result: row.result, createdAt: row.created_at, updatedAt: row.updated_at };
+const STATUSES: Record<ScanDraft["status"], true> = { queued: true, identifying: true, ready: true, review: true, failed: true, committed: true, discarded: true };
+function parsed(text: string | null): unknown {
+  if (text === null) return null;
+  try { return JSON.parse(text); } catch { return undefined; }
+}
+/**
+ * A stored draft, or null when it is not one this app could have written: its
+ * photos a list of saved upload names, its details an object, its status one
+ * the Scan page has a word for. A restore installs rows this app never wrote,
+ * and one draft whose columns were not JSON made the Scan page and its API
+ * answer 500 on every load, with nothing on the page to clear it; such a draft
+ * is passed over instead, like an unreadable price snapshot. An identification
+ * that cannot be read is no identification: the details are the draft.
+ */
+function decode(row: DraftRow): ScanDraft | null {
+  const uploads = parsed(row.uploads);
+  const input = parsed(row.input);
+  if (!Array.isArray(uploads) || !uploads.every((name) => typeof name === "string" && isValidUploadName(name))) return null;
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  if (typeof row.status !== "string" || !Object.hasOwn(STATUSES, row.status)) return null;
+  const identification = parsed(row.identification);
+  return { id: row.id, uploads, accentColor: row.accent_color, input: input as Partial<CardInput>,
+    identification: identification && typeof identification === "object" && !Array.isArray(identification) ? identification as Identification : null,
+    hint: row.hint, status: row.status,
+    message: row.message, revision: row.revision, cardId: row.card_id, result: row.result === "created" || row.result === "merged" ? row.result : null,
+    createdAt: row.created_at, updatedAt: row.updated_at };
 }
 export function getScanDraft(id: string): ScanDraft | null {
   if (!validDraftId(id)) return null;
@@ -40,7 +62,8 @@ export function listScanDrafts(): ScanDraft[] {
       .run(new Date().toISOString(), row.attempt);
     if (row.attempt) activeAttempts.delete(row.attempt);
   }
-  return (getDb().prepare("SELECT * FROM scan_drafts WHERE status NOT IN ('committed','discarded') OR id IN (SELECT id FROM scan_drafts WHERE status='committed' ORDER BY updated_at DESC LIMIT 100) ORDER BY created_at DESC, id").all() as DraftRow[]).map(decode);
+  return (getDb().prepare("SELECT * FROM scan_drafts WHERE status NOT IN ('committed','discarded') OR id IN (SELECT id FROM scan_drafts WHERE status='committed' ORDER BY updated_at DESC LIMIT 100) ORDER BY created_at DESC, id").all() as DraftRow[])
+    .map(decode).filter((draft): draft is ScanDraft => draft !== null);
 }
 export function createScanDraft(id: string, upload: { name: string; color: string | null }): ScanDraft {
   if (!validDraftId(id) || !isValidUploadName(upload.name)) throw new DraftError("Invalid scan or upload identifier");

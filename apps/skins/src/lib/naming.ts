@@ -27,11 +27,28 @@ export const EXTERIOR_ALIASES: Record<string, Exterior> = {
   battlescarred: "battle_scarred",
 };
 
+/**
+ * The bracketed group a name ends with, `(Field-Tested)`: where it opens and
+ * what is inside it, or null. The same group `/\(([^)]*)\)\s*$/` finds — the
+ * first "(" after the last ")" before the closing one — found by scanning
+ * instead, because that pattern starts again from every "(" in the name and
+ * runs to the end each time: a spreadsheet cell of sixty thousand "(" held the
+ * whole server for eleven seconds, and the cell may be eight megabytes.
+ */
+function trailingGroup(name: string): { open: number; inner: string } | null {
+  const end = name.trimEnd();
+  if (!end.endsWith(")")) return null;
+  const close = end.length - 1;
+  const open = end.indexOf("(", end.lastIndexOf(")", close - 1) + 1);
+  if (open === -1 || open > close) return null;
+  return { open, inner: end.slice(open + 1, close) };
+}
+
 /** The wear tier printed in brackets at the end of a market hash name. */
 export function exteriorFromName(name: string): Exterior | null {
-  const match = /\(([^)]+)\)\s*$/.exec(name);
-  if (!match) return null;
-  const printed = (match[1] ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  const group = trailingGroup(name);
+  if (!group?.inner) return null;
+  const printed = group.inner.toLowerCase().replace(/[^a-z]/g, "");
   return lookup(EXTERIOR_ALIASES, printed) ?? EXTERIOR_IDS.find((id) => id.replace(/_/g, "") === printed) ?? null;
 }
 
@@ -62,7 +79,9 @@ export function guessCategory(name: string): Category | null {
 
 /** "StatTrak™ AK-47 | Redline (Field-Tested)" split into the gun and the finish. */
 export function splitName(name: string): { weapon: string | null; finish: string | null } {
-  const withoutWear = name.replace(/\s*\([^)]*\)\s*$/, "");
+  // The bracketed wear tier goes, with the spaces either side of it.
+  const group = trailingGroup(name);
+  const withoutWear = group ? name.slice(0, group.open).trimEnd() : name;
   const bar = withoutWear.indexOf("|");
   if (bar === -1) return { weapon: null, finish: null };
   const weapon = withoutWear

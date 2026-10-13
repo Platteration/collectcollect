@@ -43,8 +43,37 @@ export function goalFiles(): Array<{ name: string; path: string; size: number }>
   return fs.readdirSync(dir()).filter(isGoalFileName).sort().map((name) => ({ name: `goals/${name}`, path: path.join(dir(), name), size: fs.statSync(path.join(dir(), name)).size }));
 }
 export function isGoalFileName(name: string): boolean { return /^goal-[a-f0-9-]{36}\.md$/i.test(name.split("/").pop() ?? ""); }
+/**
+ * The JSON record in a goal file: the body of its first ```json fence. What
+ * `/(?:^|\n)```json\r?\n([\s\S]*?)\r?\n```(?:\r?\n|$)/` read, found by
+ * scanning, because that pattern ran to the end of the text again from every
+ * fence opened and never closed: 144 KB of openings took over a second, and a
+ * folder read back in may be 64 MB.
+ */
+export function goalRecord(text: string): string | undefined {
+  // The first opening: "```json" alone on a line, CRLF or LF.
+  let body = -1;
+  for (let at = text.indexOf("```json"); at !== -1; at = text.indexOf("```json", at + 1)) {
+    if (at > 0 && text[at - 1] !== "\n") continue;
+    const end = at + "```json".length;
+    if (text[end] === "\n") body = end + 1;
+    else if (text[end] === "\r" && text[end + 1] === "\n") body = end + 2;
+    else continue;
+    break;
+  }
+  if (body === -1) return undefined;
+  // The first closing after it: "```" alone on a line, or ending the text. A
+  // later opening can only find a closing this one would have found first.
+  for (let line = text.indexOf("\n```", body); line !== -1; line = text.indexOf("\n```", line + 1)) {
+    const after = line + 4;
+    if (after !== text.length && text[after] !== "\n" && !(text[after] === "\r" && text[after + 1] === "\n")) continue;
+    return text.slice(body, line > body && text[line - 1] === "\r" ? line - 1 : line);
+  }
+  return undefined;
+}
+
 export function importGoalMarkdown(text: string): void {
-  const encoded = text.match(/(?:^|\n)```json\r?\n([\s\S]*?)\r?\n```(?:\r?\n|$)/)?.[1];
+  const encoded = goalRecord(text);
   if (!encoded) throw new Error("No goal record in this file");
   const raw = JSON.parse(encoded) as Document;
   if (!raw || raw.version !== 1 || typeof raw.id !== "string" || !uuid.test(raw.id) || !Array.isArray(raw.items) || raw.items.length > 20_000) throw new Error("Invalid goal record");

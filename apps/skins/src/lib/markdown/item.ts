@@ -14,7 +14,7 @@ import type {
   Sale,
 } from "../types";
 import { CATEGORIES, EXTERIORS, RARITIES } from "../types";
-import { money, parseDocument, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "@collectcollect/core/markdown/format";
+import { money, parseDocument, readLotPart, readMoney, readSection, readTable, slug, splitSource, table, writeFrontMatter } from "@collectcollect/core/markdown/format";
 
 /** How many prices an item's file lists, newest first; the database holds the rest. */
 export const MAX_VALUE_ROWS = 1000;
@@ -86,14 +86,31 @@ function quotesCell(quotes: Array<Pick<PriceQuote, "source" | "price">>): string
   return [...best.entries()].map(([source, price]) => `${MARKET_SHORT[source]} ${money(price)}`).join(" · ");
 }
 
+/**
+ * `Skinport $12.40` as its market and its price: the first word and the rest.
+ * Read by scanning rather than by `/^\s*(\S+)\s+(.+?)\s*$/`, whose lazy price
+ * tried the rest of the cell after every character it took: a cell of sixty
+ * thousand spaces held the whole server for seconds, and a folder may be 64 MB.
+ */
+function marketAndPrice(part: string): [string, string] | null {
+  const text = part.trim();
+  let gap = 0;
+  while (gap < text.length && !/\s/.test(text.charAt(gap))) gap++;
+  const market = text.slice(0, gap);
+  const price = text.slice(gap).trim();
+  // The pattern's `.` stopped at a line break, so a price holding one never matched.
+  if (!market || !price || /[\n\r\u2028\u2029]/.test(price)) return null;
+  return [market, price];
+}
+
 /** The Markets column read back into quotes; a file written without the column simply has none. */
 function parseQuotesCell(text: string, fetchedAt: string): PriceQuote[] {
   const quotes: PriceQuote[] = [];
   for (const part of text.split("·")) {
-    const match = /^\s*(\S+)\s+(.+?)\s*$/.exec(part);
+    const match = marketAndPrice(part);
     if (!match) continue;
-    const source = MARKET_BY_SHORT.get(match[1] ?? "");
-    const price = readMoney(match[2] ?? "");
+    const source = MARKET_BY_SHORT.get(match[0]);
+    const price = readMoney(match[1]);
     if (!source || price === null) continue;
     quotes.push({ source, sourceLabel: MARKET_SHORT[source], currency: "USD", url: null, matchedName: "", price, volume: null, fetchedAt });
   }
@@ -168,29 +185,17 @@ function lotsCell(lots: Array<{ quantity: number; unitCost: number | null; acqui
     .join(" · ");
 }
 
-const LOT_RE = /^\s*(\d+)\s*@\s*(.*?)\s*(?:\((\d{4}-\d{2}-\d{2})\))?\s*$/;
-
 function parseLotsCell(text: string): ParsedSaleLot[] {
   const out: ParsedSaleLot[] = [];
   if (!text) return out;
   for (const part of text.split("·")) {
-    const match = LOT_RE.exec(part);
-    if (!match) continue;
-    const quantity = Number(match[1]);
+    const lot = readLotPart(part);
+    if (!lot) continue;
+    const quantity = Number(lot.quantity);
     if (!Number.isInteger(quantity) || quantity < 1) continue;
-    out.push({ quantity, unitCost: readMoney(match[2] ?? ""), acquiredOn: match[3] ?? null });
+    out.push({ quantity, unitCost: readMoney(lot.cost), acquiredOn: lot.day });
   }
   return out;
-}
-
-// Source labels can carry their own brackets, so the split runs to the last
-// bracket rather than the first balanced pair.
-const SOURCE_RE = /^(.*?)\s*\((.*)\)\s*$/;
-
-function splitSource(text: string): { rest: string; source: string | null } {
-  const match = SOURCE_RE.exec(text.trim());
-  if (!match) return { rest: text.trim(), source: null };
-  return { rest: (match[1] ?? "").trim(), source: (match[2] ?? "").trim() || null };
 }
 
 function escapeProse(text: string): string {

@@ -17,6 +17,22 @@ export function badRatio(input: unknown): Error {
 const PAIR = /^\s*(\d{1,3}(?:\.\d+)?)\s*%?\s*[LTRB]?\s*(?:[/:\-–]|\s+)\s*(\d{1,3}(?:\.\d+)?)\s*%?\s*[LTRB]?\s*$/i;
 const SINGLE = /^\s*(\d{1,3}(?:\.\d+)?)\s*%?\s*$/;
 
+/**
+ * The text these patterns read, with every run of whitespace made one space.
+ * Their space slots sit side by side (`\s*%?\s*[LTRB]?\s*…\s+\s*`), so a long
+ * run is shared out between them every possible way before a miss is
+ * accepted: "55", two hundred spaces and an "x" took nine seconds, each
+ * doubling of the run multiplied that by about twenty-five, and a 60 KB
+ * centering field sent to the API had not been answered after five minutes,
+ * with the server answering nothing else. It arrives in a request, a file or
+ * a restored row, which every read of the card checks again. A slot that
+ * matches one space matches any run, and the numbers hold none, so nothing
+ * reads differently.
+ */
+function spaced(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 function toRatio(a: number, b: number, input: unknown): Ratio {
   if (!Number.isFinite(a) || !Number.isFinite(b) || a < 0 || b < 0 || a > 100 || b > 100 || Math.abs(a + b - 100) > 1) throw badRatio(input);
   const first = Math.round(a);
@@ -25,7 +41,8 @@ function toRatio(a: number, b: number, input: unknown): Ratio {
 
 /** Whether a string is one ratio rather than a side's two or prose. */
 export function looksLikeOneRatio(text: string): boolean {
-  return PAIR.test(text) || SINGLE.test(text);
+  const one = spaced(text);
+  return PAIR.test(one) || SINGLE.test(one);
 }
 
 /**
@@ -41,7 +58,7 @@ export function parseRatio(input: unknown): Ratio | null {
     return toRatio(Number(input[0]), Number(input[1]), input);
   }
   if (typeof input === "number") return toRatio(input, 100 - input, input);
-  const text = String(input).trim();
+  const text = spaced(String(input));
   if (!text) return null;
   const pair = PAIR.exec(text);
   if (pair) return toRatio(Number(pair[1]), Number(pair[2]), text);
@@ -55,7 +72,7 @@ export function parseRatio(input: unknown): Ratio | null {
 
 /** "54L/46R 49T/51B", "55/45 52/48" or just "55/45": one side's ratios, as a report prints them. */
 export function parseSide(text: string): CenteringSide {
-  const trimmed = text.trim();
+  const trimmed = spaced(text);
   if (!trimmed) return { lr: null, tb: null };
   if (looksLikeOneRatio(trimmed)) return { lr: parseRatio(trimmed), tb: null };
   const tokens = trimmed.split(/\s+(?=\d)/).filter(Boolean);
@@ -99,7 +116,9 @@ export function parseCentering(text: string | null | undefined): Centering | nul
   const out: Centering = { front: { lr: null, tb: null }, back: { lr: null, tb: null } };
   const untagged: Array<{ side: "front" | "back"; ratio: Ratio }> = [];
   let any = false;
-  for (const clause of text.split(/[,;.]|\band\b/i)) {
+  // One space for every run, as `spaced` says: the pair pattern below has two
+  // space slots on either side of its letter.
+  for (const clause of spaced(text).split(/[,;.]|\band\b/i)) {
     const side: "front" | "back" = /\b(back|reverse)\b/i.test(clause) ? "back" : "front";
     for (const m of clause.matchAll(/(\d{1,3})\s*([LTRB])?\s*\/\s*(\d{1,3})\s*([LTRB])?/gi)) {
       const a = Number(m[1]);

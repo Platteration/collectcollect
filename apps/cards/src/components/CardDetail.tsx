@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { httpUrl, imageSrc, localDateInput, money, when } from "@/lib/format";
+import { httpUrl, imageSrc, localDateInput, money, when, caveatSentence } from "@/lib/format";
 import { GAMES, GRADING_STATUSES, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Sale, type Settings } from "@/lib/types";
 import { gradingVerdict, isReadyToGrade, outlookSeries } from "@/lib/analytics";
 import { OutlookChart } from "./charts/OutlookChart";
@@ -595,7 +595,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
               )}
             </dl>
             <p className="mt-3 text-xs text-neutral-500">
-              {assessment.caveat ? `${assessment.caveat.replace(/[.;,]?\s*$/, "")}. ` : ""}A photo is not a grading service; treat this as a first
+              {assessment.caveat ? `${caveatSentence(assessment.caveat)}. ` : ""}A photo is not a grading service; treat this as a first
               look, not a prediction of what a grader would return.
             </p>
           </section>

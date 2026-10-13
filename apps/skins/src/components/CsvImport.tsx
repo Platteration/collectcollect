@@ -136,6 +136,13 @@ export function CsvImport() {
             </p>
           )}
 
+          {preview.skippedForSize > 0 && (
+            <p role="status" className="card-surface p-3 text-sm">
+              This file has {preview.skippedForSize} more row{preview.skippedForSize === 1 ? "" : "s"} than one import can take.
+              Only the first {preview.total} are read and will be imported; split the file and import the rest separately.
+            </p>
+          )}
+
           {/* Once it has run, what happened supersedes what was going to
               happen: showing both lists the same skipped rows twice. */}
           {!result && warnings.length > 0 && (

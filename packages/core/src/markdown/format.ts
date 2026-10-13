@@ -199,3 +199,52 @@ export function readMoney(text: string): number | null {
   const n = Number(text.replace(/[^0-9.\-]/g, ""));
   return Number.isFinite(n) ? n : null;
 }
+
+// ---------------------------------------------------------------------------
+// Cells
+//
+// A folder read back in is a file someone else may have written, up to the
+// import's 64 MB, and every cell below used to be read with a pattern whose
+// space slots or lazy part sat beside one another, so a long cell was tried
+// every possible way before it was given up on: a lot cell of two thousand
+// spaces held the server for four seconds, and the time grew with the cube of
+// the cell's length. Each is a scan now, reading exactly what its pattern
+// read, line breaks included: the `.` in those patterns never matched one, so
+// a part holding one still reads as nothing.
+// ---------------------------------------------------------------------------
+
+const LINE_BREAK = /[\n\r\u2028\u2029]/;
+
+/**
+ * One part of a purchase-lot cell, `2 @ $1.50 (2026-03-01)`: the count, the
+ * cost as written and the day, or null when the part is not one. What
+ * `/^\s*(\d+)\s*@\s*(.*?)\s*(?:\((\d{4}-\d{2}-\d{2})\))?\s*$/` read.
+ */
+export function readLotPart(part: string): { quantity: string; cost: string; day: string | null } | null {
+  const text = part.trim();
+  const head = /^(\d+)\s*@/.exec(text);
+  if (!head) return null;
+  let cost = text.slice(head[0].length).trim();
+  const dated = /\((\d{4}-\d{2}-\d{2})\)$/.exec(cost);
+  if (dated) cost = cost.slice(0, dated.index).trimEnd();
+  if (LINE_BREAK.test(cost)) return null;
+  return { quantity: head[1] ?? "", cost, day: dated?.[1] ?? null };
+}
+
+/**
+ * A value and the source it names in brackets at the end,
+ * `$8.00 (Scryfall (TCGplayer-derived USD))`. Source labels carry brackets of
+ * their own, so the source runs from the first bracket to the last. What
+ * `/^(.*?)\s*\((.*)\)\s*$/` read.
+ */
+export function splitSource(text: string): { rest: string; source: string | null } {
+  const whole = text.trim();
+  if (whole.endsWith(")")) {
+    // The source may not hold a line break, so it opens after the last one.
+    const lastBreak = Math.max(...["\n", "\r", "\u2028", "\u2029"].map((mark) => whole.lastIndexOf(mark)));
+    const open = whole.indexOf("(", lastBreak + 1);
+    const rest = open === -1 ? "" : whole.slice(0, open).trim();
+    if (open !== -1 && !LINE_BREAK.test(rest)) return { rest, source: whole.slice(open + 1, -1).trim() || null };
+  }
+  return { rest: whole, source: null };
+}

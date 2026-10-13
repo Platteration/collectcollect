@@ -16,6 +16,21 @@ test.describe("password gate", () => {
     await expect(page.getByRole("link", { name: "Portfolio" })).toBeVisible();
   });
 
+  test("a login link cannot send the owner to another site once they sign in", async ({ page, baseURL }) => {
+    // Dot segments resolve on this origin to a path starting `//`, which the
+    // browser then reads as another host: this link once signed the owner in
+    // and left them on evil.example, a page free to ask for the password again.
+    // Answered here so that, were it followed, nothing would leave the machine;
+    // the fixture fails the test on the request all the same.
+    await page.route(/^https?:\/\/evil\.example\//, (route) => route.fulfill({ contentType: "text/html", body: "elsewhere" }));
+    await page.goto(`/login?next=${encodeURIComponent("/.//evil.example/sign-in-again")}`);
+    await page.getByLabel("Password").fill("e2e-secret");
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page.getByRole("link", { name: "Portfolio" })).toBeVisible();
+    expect(new URL(page.url()).origin).toBe(new URL(String(baseURL)).origin);
+    expect(new URL(page.url()).pathname).toBe("/");
+  });
+
   test("the login page shows a stranger none of the app", async ({ page }) => {
     // No nav that bounces straight back to this page, no unread-alert count,
     // no Sign out and no Add: the chrome is for someone signed in.

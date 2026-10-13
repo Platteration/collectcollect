@@ -59,6 +59,22 @@ expires on 2027-10-08 and the unit test fails once it has. Each app lives at the
 its own origin; there is no sub-path build. Trusted Types were measured and break Next's
 chunk loader and the service worker's registration, so the policy does not require them.
 
+## Input from outside
+
+A file read back in, a spreadsheet, a restored database and a request body are all
+text someone else may have written, up to 64 MB (8 MB for a spreadsheet), and parsing
+runs on the one thread every request shares. So a parser over such text must not let
+two of a pattern's quantifiers share one run of characters (`\s*%?\s*`, a lazy `(.*?)`
+before `\s*$`) unless the run is bounded first, as `spaced` in `centering.ts` makes
+every run of spaces one: each of those held the whole server for seconds, and the
+centering one for more than five minutes, on a few hundred bytes to a few hundred
+kilobytes of crafted text, and the `linear-parsing` tests in both apps hold each reader
+they replaced to a budget on such input. A stored row is read back field
+by field rather than trusted for its shape (`readPriceSummary`, `decode` in
+`scan-drafts.ts`, `readStored` in `cards.ts`): a restore installs rows this app never
+wrote, and a reader that indexes into one it cannot read takes every page that lists
+it down. An import reads at most `MAX_IMPORT_ROWS` rows in each app.
+
 ## Settings
 
 Each app keeps its settings server-side: one JSON record under the `settings` key of its

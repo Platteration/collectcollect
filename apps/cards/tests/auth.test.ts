@@ -164,4 +164,19 @@ describe("login redirect target", () => {
     expect(safeNext("javascript:alert(1)", origin)).toBe("/");
     expect(safeNext("", origin)).toBe("/");
   });
+
+  it("does not hand back a path that dot segments made protocol-relative", async () => {
+    const { safeNext } = await import("@collectcollect/core/components/LoginForm");
+    const origin = "https://cards.example";
+    // Each resolves on this origin to a path starting `//`, which the browser
+    // then reads as another host: /login?next=/.//evil.example signed the
+    // owner in and sent them to http://evil.example.
+    for (const next of ["/.//evil.example/steal", "/..//evil.example/steal", "/a/..//evil.example", "/./\\evil.example", "/%2e//evil.example"]) {
+      const target = safeNext(next, origin);
+      expect(target, next).toBe("/");
+      expect(new URL(target, origin).origin, next).toBe(origin);
+    }
+    // An ordinary path with a dot segment still resolves to where it points.
+    expect(safeNext("/sets/./pokemon/../pokemon/Base%20Set?x=1", origin)).toBe("/sets/pokemon/Base%20Set?x=1");
+  });
 });

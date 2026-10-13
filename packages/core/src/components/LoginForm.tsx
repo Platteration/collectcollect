@@ -8,11 +8,18 @@ import { api } from "../api-client";
  * crafted link cannot turn the login into an open redirect. Checking the
  * resolved origin also catches forms browsers treat as protocol-relative,
  * such as a leading "/\".
+ *
+ * What is checked is the path handed to the browser, not only the URL it came
+ * from: resolving removes dot segments, so `/.//evil.example` resolves on this
+ * origin to the path `//evil.example`, which the browser then reads as
+ * protocol-relative and leaves for another site.
  */
 export function safeNext(next: string, origin = window.location.origin): string {
   try {
     const url = new URL(next, origin);
-    return url.origin === origin ? url.pathname + url.search : "/";
+    if (url.origin !== origin) return "/";
+    const target = url.pathname + url.search;
+    return new URL(target, origin).origin === origin ? target : "/";
   } catch {
     return "/";
   }

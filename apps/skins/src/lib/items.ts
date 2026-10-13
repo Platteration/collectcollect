@@ -13,6 +13,7 @@ import {
   type AcquisitionInput,
 } from "./acquisitions";
 import { mirrorItem, unmirrorItem } from "./markdown/mirror";
+import { readPriceSummary } from "./price-summary";
 
 export interface ItemRow {
   id: number;
@@ -858,15 +859,25 @@ interface SnapshotRow {
   checked_at: string | null;
 }
 
-function rowToSnapshot(r: SnapshotRow): PriceSnapshot {
+/**
+ * A snapshot row as a record, or null when its summary is not a JSON object.
+ * A restore installs a whole file this app did not write, so a summary is read
+ * field by field (`readPriceSummary`) and one that is not an object at all is
+ * dropped, which loses one price reading and nothing else.
+ */
+function rowToSnapshot(r: SnapshotRow): PriceSnapshot | null {
+  const summary = readPriceSummary(parseJson<unknown>(r.summary, null), r.fetched_at);
+  if (!summary) return null;
   return {
     id: r.id,
     itemId: r.item_id,
     fetchedAt: r.fetched_at,
-    summary: JSON.parse(r.summary) as PriceSummary,
+    summary,
     ...(r.checked_at ? { checkedAt: r.checked_at } : {}),
   };
 }
+
+const readable = (s: PriceSnapshot | null): s is PriceSnapshot => s !== null;
 
 /**
  * A refresh found the same prices this snapshot already holds: note when,
@@ -882,7 +893,7 @@ export function listSnapshots(itemId: number, limit = 50): PriceSnapshot[] {
     getDb()
       .prepare("SELECT * FROM price_snapshots WHERE item_id = ? ORDER BY fetched_at DESC, id DESC LIMIT ?")
       .all(itemId, limit) as SnapshotRow[]
-  ).map(rowToSnapshot);
+  ).map(rowToSnapshot).filter(readable);
 }
 
 export function latestSnapshot(itemId: number): PriceSnapshot | null {
@@ -893,7 +904,7 @@ export function latestSnapshot(itemId: number): PriceSnapshot | null {
 export function allSnapshots(): PriceSnapshot[] {
   return (
     getDb().prepare("SELECT * FROM price_snapshots ORDER BY fetched_at ASC, id ASC").all() as SnapshotRow[]
-  ).map(rowToSnapshot);
+  ).map(rowToSnapshot).filter(readable);
 }
 
 /** Latest snapshot for every item in one query (for the inventory view). */
@@ -907,7 +918,10 @@ export function latestSnapshotsByItem(): Map<number, PriceSnapshot> {
     )
     .all() as SnapshotRow[];
   const map = new Map<number, PriceSnapshot>();
-  for (const r of rows) map.set(r.item_id, rowToSnapshot(r));
+  for (const r of rows) {
+    const snapshot = rowToSnapshot(r);
+    if (snapshot) map.set(r.item_id, snapshot);
+  }
   return map;
 }
 
