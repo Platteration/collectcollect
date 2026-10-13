@@ -49,12 +49,12 @@ describe("signing in", () => {
     expect(cookie).toMatch(/HttpOnly/i);
     expect(cookie).toMatch(/SameSite=lax/i);
     expect(cookie).not.toMatch(/Secure/);
-    const tls = await POST(new Request("https://cards.example/api/auth", { method: "POST", body: JSON.stringify({ password: "hunter2" }) }));
-    expect(tls.headers.get("set-cookie")).toMatch(/Secure/);
-
     // Behind a proxy that terminates TLS the app sees plain http; the proxy
-    // says otherwise, and is believed only when it is trusted.
-    const behindProxy = () => attempt(POST, "hunter2", { "x-forwarded-proto": "https" });
+    // says otherwise, and is believed only when it is trusted. The running
+    // server also writes https into the URL from that header, whoever sent it,
+    // so the request a route is handed looks like this one either way.
+    const behindProxy = () =>
+      POST(new Request("https://cards.example/api/auth", { method: "POST", body: JSON.stringify({ password: "hunter2" }), headers: { "Content-Type": "application/json", "x-forwarded-proto": "https" } }));
     expect((await behindProxy()).headers.get("set-cookie")).not.toMatch(/Secure/);
     process.env.TRUST_PROXY = "1";
     try {

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { latestSnapshotsByCard } from "@/lib/cards";
-import { httpUrl, money } from "@/lib/format";
+import { money, shownImage } from "@/lib/format";
 import { setDetail } from "@/lib/sets";
 import { GAMES, isGame } from "@/lib/types";
 import { SetGoalButton } from "@/components/SetPlanning";
@@ -53,9 +53,9 @@ export default async function SetPage({ params }: PageProps<"/sets/[game]/[name]
               {missing.map((c) => (
                 <li key={`${c.number}-${c.name}`} className="flex items-center gap-3 px-3 py-2 text-sm">
                   <div className="h-12 w-9 shrink-0 overflow-hidden rounded well">
-                    {httpUrl(c.imageUrl) ? (
+                    {shownImage(c.imageUrl) ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={httpUrl(c.imageUrl) ?? undefined} alt="" className="h-full w-full object-cover" loading="lazy" />
+                      <img src={shownImage(c.imageUrl) ?? undefined} alt="" className="h-full w-full object-cover" loading="lazy" />
                     ) : null}
                   </div>
                   <div className="min-w-0 flex-1">

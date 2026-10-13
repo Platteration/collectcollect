@@ -25,3 +25,19 @@ describe("a picture or a link from outside", () => {
     expect(imageSrc({ imagePath: "0a1b2c3d-0000-4000-8000-000000000000.jpg", referenceImageUrl: "javascript:alert(1)" })).toBe("/api/uploads/0a1b2c3d-0000-4000-8000-000000000000.jpg");
   });
 });
+
+describe("a picture the policy would refuse", () => {
+  it("is not drawn: an outside picture over http, or one carrying credentials, shows the card without one", async () => {
+    const { imageSrc, shownImage } = await import("@/lib/format");
+    // img-src takes outside pictures over https only; one over http drew a
+    // broken picture and a policy violation on every page that listed the card.
+    for (const url of ["http://images.example/card.png", "HTTP://images.example/card.png", "https://user:secret@images.example/card.png", "https://user@images.example/card.png"]) {
+      expect(shownImage(url), url).toBeNull();
+      expect(imageSrc({ imagePath: null, referenceImageUrl: url }), url).toBeNull();
+    }
+    expect(shownImage("https://images.example/card.png")).toBe("https://images.example/card.png");
+    expect(shownImage(" https://images.example:8443/a b.png ")).toBe("https://images.example:8443/a%20b.png");
+    // The card's own photo is this origin's, whatever its reference image says.
+    expect(imageSrc({ imagePath: "0a1b2c3d-0000-4000-8000-000000000000.jpg", referenceImageUrl: "http://images.example/card.png" }, "thumb")).toBe("/api/uploads/0a1b2c3d-0000-4000-8000-000000000000.jpg?size=thumb");
+  });
+});

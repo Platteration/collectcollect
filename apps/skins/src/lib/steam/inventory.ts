@@ -1,6 +1,7 @@
 import type { AppliedSticker, Category, Exterior, ItemInput, Rarity } from "../types";
-import { EXTERIOR_IDS, isStackable } from "../types";
+import { isStackable } from "../types";
 import { lookup } from "@collectcollect/core/lookup";
+import { exteriorFromName, splitName } from "../naming";
 
 /**
  * Reading a CS2 inventory out of Steam's public endpoint.
@@ -157,26 +158,10 @@ function exteriorFor(description: SteamDescription): Exterior | null {
   const internal = lower(tag(description, "Exterior")?.internal_name);
   const tagged = lookup(WEAR_TAGS, internal);
   if (tagged) return tagged;
-  // Fall back to the tier printed in the name, which is where it comes from.
-  const name = description.market_hash_name ?? "";
-  const match = /\(([^)]+)\)\s*$/.exec(name);
-  if (!match) return null;
-  const printed = (match[1] ?? "").toLowerCase().replace(/[^a-z]/g, "");
-  return EXTERIOR_IDS.find((id) => id.replace(/_/g, "") === printed) ?? null;
-}
-
-/** "AK-47 | Redline (Field-Tested)" split into the gun and the finish. */
-function weaponAndFinish(marketHashName: string): { weapon: string | null; finish: string | null } {
-  const withoutWear = marketHashName.replace(/\s*\([^)]*\)\s*$/, "");
-  const bar = withoutWear.indexOf("|");
-  if (bar === -1) return { weapon: null, finish: null };
-  const weapon = withoutWear
-    .slice(0, bar)
-    .replace(/^★\s*/, "")
-    .replace(/^StatTrak™\s*/, "")
-    .replace(/^Souvenir\s*/, "")
-    .trim();
-  return { weapon: weapon || null, finish: withoutWear.slice(bar + 1).trim() || null };
+  // Fall back to the tier printed in the name, which is where it comes from,
+  // read the way a spreadsheet's names are (naming.ts): by a scan, not by a
+  // pattern that starts again from every bracket in the name.
+  return exteriorFromName(description.market_hash_name ?? "");
 }
 
 /**
@@ -276,7 +261,7 @@ export function parseInventory(payload: SteamInventory, steamId: string): Parsed
       }
     }
 
-    const { weapon, finish } = weaponAndFinish(marketHashName);
+    const { weapon, finish } = splitName(marketHashName);
     const item: ItemInput = {
       marketHashName,
       category,

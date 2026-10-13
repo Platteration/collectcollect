@@ -93,10 +93,11 @@ function carriesBody(request: Request): boolean {
 /** How the proxy saw the request, beyond the request itself. */
 export interface GuardContext {
   /**
-   * The page is served over https: the request came over TLS, a trusted
-   * proxy says it did, or the deployment says it serves https (the proxy's
-   * `servesHttps`). Decides the scheme a write's Origin must carry.
-   * Defaults to what the request itself says (`isSecureRequest`).
+   * The page is served over https: a trusted proxy says the request came over
+   * TLS, or it was sent to the https address APP_BASE_URL names
+   * (`servedOverHttps`), or COOKIE_SECURE=1 says every page is. Decides the
+   * scheme a write's Origin must carry. Defaults to what a trusted proxy says
+   * (`isSecureRequest`).
    */
   https?: boolean;
   /** Skip the host list for this request: the container's own health check, which arrives by address. */

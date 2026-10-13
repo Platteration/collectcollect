@@ -1,4 +1,5 @@
-import { documentedHeaders, expect, headerProblems, test } from "./fixtures";
+import http from "node:http";
+import { documentedHeaders, expect, headerProblems, test, watch } from "./fixtures";
 
 test.describe("password gate", () => {
   test("every page redirects to the login form until the password is given", async ({ page }) => {
@@ -161,6 +162,85 @@ test.describe("the website, behind the password", () => {
       await page.waitForTimeout(1_000);
       expect(new URL(page.url()).pathname).toBe("/login");
       expect(sent.filter((url) => url.includes("typed-before-any-script"))).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
+test.describe("an https address beside a home network's names", () => {
+  // This server is told it is reached at https://cards.example, through a
+  // proxy it was not told about, and answers to cardbox.lan and 127.0.0.1 as
+  // well (playwright.config.ts): README's advice to keep listing the names an
+  // owner still uses at home. Neither app serves TLS, so those are plain http,
+  // and what only https may carry goes to the domain alone.
+
+  /** An answer as the server gives it, Host and all, with nothing in between. */
+  const raw = (baseURL: string, path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) =>
+    new Promise<{ status: number; headers: http.IncomingHttpHeaders }>((resolve, reject) => {
+      const { hostname, port } = new URL(baseURL);
+      const req = http.request({ host: hostname, port, path, method: init.method ?? "GET", headers: init.headers }, (res) => {
+        res.resume();
+        resolve({ status: res.statusCode ?? 0, headers: res.headers });
+      });
+      req.on("error", reject);
+      req.end(init.body);
+    });
+  const promisesHttps = (headers: http.IncomingHttpHeaders) => ({
+    hsts: headers["strict-transport-security"] ?? null,
+    upgrade: String(headers["content-security-policy"]).includes("upgrade-insecure-requests"),
+  });
+
+  test("the domain's answers promise https; the home names', and a forwarded protocol nobody declared, do not", async ({ baseURL }) => {
+    const { port } = new URL(baseURL!);
+    const domain = await raw(baseURL!, "/login", { headers: { host: "cards.example" } });
+    expect(domain.status).toBe(200);
+    expect(promisesHttps(domain.headers)).toEqual({ hsts: "max-age=31536000; includeSubDomains", upgrade: true });
+    // The server writes https into the request's URL whenever X-Forwarded-Proto
+    // so much as contains it, from anyone; with no proxy declared it is believed nowhere.
+    const plain: Array<Record<string, string>> = [{ host: `cardbox.lan:${port}` }, { host: `127.0.0.1:${port}` }, { "x-forwarded-proto": "https" }, { "x-forwarded-proto": "https, http" }];
+    for (const headers of plain) {
+      const answer = await raw(baseURL!, "/login", { headers });
+      expect(answer.status, JSON.stringify(headers)).toBe(200);
+      expect(promisesHttps(answer.headers), JSON.stringify(headers)).toEqual({ hsts: null, upgrade: false });
+    }
+    const signIn = (headers: Record<string, string>) =>
+      raw(baseURL!, "/api/auth", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ password: "e2e-secret" }) });
+    const cookie = await signIn({ "x-forwarded-proto": "https" });
+    expect(cookie.status).toBe(200);
+    expect(String(cookie.headers["set-cookie"])).not.toMatch(/;\s*secure/i);
+    // A write whose page claims https on a plain-http name is another origin's.
+    expect((await signIn({ "x-forwarded-proto": "https", origin: `https://127.0.0.1:${port}` })).status).toBe(403);
+  });
+
+  test("a home name keeps working over plain http: styled, scripted, and its writes accepted", async ({ playwright, baseURL }) => {
+    // Sent the upgrade, Chromium asked https://cardbox.lan for every script,
+    // stylesheet and font, got nothing, and drew the page bare with no safety
+    // net; and every write from the page was refused as cross-site.
+    const lan = `http://cardbox.lan:${new URL(baseURL!).port}`;
+    const browser = await playwright.chromium.launch({
+      args: ["--host-resolver-rules=MAP cardbox.lan 127.0.0.1"],
+      ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}),
+    });
+    try {
+      const context = await browser.newContext({ baseURL: lan });
+      const problems: string[] = [];
+      await watch(context, lan, problems);
+      const page = await context.newPage();
+      page.on("response", (response) => {
+        if (new URL(response.url()).origin === lan && !response.fromServiceWorker()) problems.push(...headerProblems(response, documentedHeaders()));
+      });
+      await page.goto("/login");
+      await page.getByLabel("Password").fill("e2e-secret");
+      await page.getByRole("button", { name: "Sign in" }).click();
+      await page.waitForURL(`${lan}/`);
+      await expect(page.getByRole("link", { name: "Collection" })).toBeVisible();
+      // The stylesheet arrived: the header is laid out, not the browser's default block.
+      expect(await page.evaluate(() => getComputedStyle(document.body).margin)).toBe("0px");
+      await page.getByRole("button", { name: "Sign out" }).click();
+      await expect(page).toHaveURL(/\/login/);
+      await expect(page.locator(".boot-note")).toHaveCount(0);
+      expect(problems).toEqual([]);
     } finally {
       await browser.close();
     }

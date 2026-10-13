@@ -35,10 +35,18 @@ blocks (`<!-- headers:cards:begin -->`, `headers:skins`): each app's
 `e2e/website.spec.ts` holds every live response to it. Change one, change both. An
 address with a trailing slash is redirected by the proxy (each `next.config.ts` sets
 `skipTrailingSlashRedirect`, since Next's own redirect runs before the proxy and carried
-no header); Next's repeated-slash redirect and its 500 for `TRACE` still leave without
-them, and `website.spec.ts` pins both, so the README's sentence about them changes when
-Next does. Every source in the policy was measured in Chromium against the production
-build, by taking it out and seeing a spec go red (but `script-src`'s `'self'`, a fallback
+no header); Next's repeated-slash redirect and its 500 for `TRACE`, and Node's own 400
+for an unknown method and 431 for oversized headers, still leave without them, and
+`website.spec.ts` pins all four, so the README's sentence about them changes when Next or
+Node does. What only https may carry — HSTS, `upgrade-insecure-requests`, an https
+`Origin` on a write — is decided per request by `servedOverHttps` in
+`packages/core/src/net.ts`: a trusted proxy's `X-Forwarded-Proto`, or a request sent to
+the https address `APP_BASE_URL` names. Never the request URL's scheme, which Next writes
+from any client's `X-Forwarded-Proto`, and never for the whole deployment: a LAN name
+listed beside the domain is plain http, and the cards suite's locked server is set up
+that way (`auth.spec.ts` drives it through a `.lan` name). Every source in the policy
+was measured in Chromium against the production build, by taking it out and seeing a spec
+go red (but `script-src`'s `'self'`, a fallback
 Chromium ignores beside `'strict-dynamic'`, and `worker-src`, which it fills from
 `script-src`: README, "The website"); add one only when a spec shows something real
 needs it. Every spec imports `test` from `e2e/fixtures.ts`, not
@@ -49,8 +57,11 @@ whose pages break those rules on purpose. `website.spec.ts` starts every page th
 has, read off `src/app`: a new page fails it until the walk has an address for it. In
 skins an item's picture is drawn only from the hosts `IMAGE_SOURCES` names
 (`src/lib/images.ts`), which is also the policy's `img-src`, so a host added to one is in
-the other. API answers are `no-store` unless their path is on the app's `cachedPaths` (the
-proxy's header wins over a route's own). Without a session, only each app's
+the other; in cards an outside picture is drawn only over https (`shownImage` in
+`src/lib/format.ts`), which is what its `img-src` allows. `public/` is served whole, so it
+holds only what a page loads: a source such as the skins icon's SVG lives beside the
+script that uses it. API answers are `no-store` unless their path is on the app's
+`cachedPaths` (the proxy's header wins over a route's own). Without a session, only each app's
 `publicPaths` and the proxy's `SITE_PATHS` answer (`/_next/static`, `/robots.txt`,
 `/.well-known/security.txt`, `/guard.js`). `/guard.js` is the safety net
 (`packages/core/src/guard.ts`, loaded with the nonce, before the app; `Started` tells it
@@ -69,10 +80,12 @@ before `\s*$`) unless the run is bounded first, as `spaced` in `centering.ts` ma
 every run of spaces one: each of those held the whole server for seconds, and the
 centering one for more than five minutes, on a few hundred bytes to a few hundred
 kilobytes of crafted text, and the `linear-parsing` tests in both apps hold each reader
-they replaced to a budget on such input. A stored row is read back field
-by field rather than trusted for its shape (`readPriceSummary`, `decode` in
-`scan-drafts.ts`, `readStored` in `cards.ts`): a restore installs rows this app never
-wrote, and a reader that indexes into one it cannot read takes every page that lists
+they replaced to a budget on such input, and to reading exactly what its pattern read on
+seeded short inputs drawn from the characters that matter (brackets, every line break).
+A stored row is read back field by field rather than trusted for its shape
+(`readPriceSummary`, `decode` in `scan-drafts.ts`, `readStored` and the JSON-column
+readers beside it in `cards.ts`): a restore installs rows this app never wrote, and a
+reader that indexes into one it cannot read takes every page that lists
 it down. An import reads at most `MAX_IMPORT_ROWS` rows in each app.
 
 ## Settings

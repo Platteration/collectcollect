@@ -178,7 +178,7 @@ test.describe("the website", () => {
     expect(problems).toEqual([]);
   });
 
-  test("every kind of answer carries the headers, but the two Next makes before the proxy runs", async ({ request, baseURL }) => {
+  test("every kind of answer carries the headers, but the two Next makes before the proxy runs and Node's parser's own", async ({ request, baseURL }) => {
     const origin = new URL(baseURL!).origin;
     const answers: Array<{ method?: string; path: string; status?: number; location?: string; headers?: Record<string, string>; data?: string }> = [
       // A trailing slash is put right by the proxy, the query kept.
@@ -215,6 +215,16 @@ test.describe("the website", () => {
     expect(traced.status()).toBe(500);
     expect(traced.headers()["content-type"]).toBe("text/plain");
     expect(traced.headers()["content-security-policy"]).toBeUndefined();
+    // And before Next, Node's own parser: a 400 for a method it does not know,
+    // which no page can make a browser send either, and a 431 for a request
+    // whose headers are past its limit, which a page could provoke by filling
+    // this origin's cookies; neither carries any header at all.
+    const unknown = await request.fetch(`${origin}/`, { method: "FOO" });
+    expect(unknown.status()).toBe(400);
+    expect(unknown.headers()["content-security-policy"]).toBeUndefined();
+    const crowded = await request.fetch(`${origin}/`, { headers: { "X-Padding": "a".repeat(20_000) } });
+    expect(crowded.status()).toBe(431);
+    expect(crowded.headers()["content-security-policy"]).toBeUndefined();
   });
 
   test("a context a test makes for itself is held to the same rules as its own", async ({ browser, baseURL, siteRules }) => {
@@ -412,6 +422,9 @@ test.describe("the website", () => {
       "/src/proxy.ts",
       "/src/app/layout.tsx",
       "/public/robots.txt",
+      // The icons' source, which no page loads: it lives beside the script that renders the PNGs.
+      "/icons/icon.svg",
+      "/scripts/icon.svg",
       "/data/skins.db",
       "/.next/BUILD_ID",
       "/_next/BUILD_ID",

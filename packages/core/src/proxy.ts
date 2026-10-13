@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Auth, Revoked } from "./auth";
-import { cookieSecure, isSecureRequest } from "./net";
+import { cookieSecure, servedOverHttps } from "./net";
 import { requestSecurityError } from "./request-guard";
 
 /**
@@ -197,20 +197,12 @@ export function securityHeaders(csp: string, permissions: ProxyOptions["permissi
   };
   // Only over TLS: sent on a plain-http answer it would be ignored, and a
   // proxy that terminates TLS is the one that says so (see TRUST_PROXY) —
-  // or the deployment says it serves https (APP_BASE_URL), which holds for a
-  // proxy the app was not told about. With includeSubDomains, so every name
-  // under this host is held to https for a year too: give the app a leaf name.
+  // or the request was sent to the https address APP_BASE_URL names, which
+  // holds for a proxy the app was not told about (servedOverHttps). With
+  // includeSubDomains, so every name under this host is held to https for a
+  // year too: give the app a leaf name.
   if (https) headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
   return headers;
-}
-
-/**
- * Whether the deployment says it is reached over https. Read per request from
- * the running server's environment: the proxy is not evaluated at build time,
- * so the Docker image picks it up from the .env it is started with.
- */
-function servesHttps(env: Record<string, string | undefined> = process.env): boolean {
-  return (env.APP_BASE_URL ?? "").trim().toLowerCase().startsWith("https://");
 }
 
 /**
@@ -225,11 +217,12 @@ function servesHttps(env: Record<string, string | undefined> = process.env): boo
  * with the security headers — pages, API answers, the framework's own files,
  * the not-found page, every refusal and every redirect — with every page render
  * handed a nonce for its inline scripts: Next reads it back out of the policy
- * on the request and applies it to its own scripts as well. Two answers never
- * reach this function, because Next makes them first: its redirect for an
- * address with a repeated slash or a backslash, and its 500 for a TRACE
- * request, a method the fetch standard will not build a Request for (README,
- * "The website").
+ * on the request and applies it to its own scripts as well. Four answers never
+ * reach this function: Next makes two first, its redirect for an address with a
+ * repeated slash or a backslash and its 500 for a TRACE request, a method the
+ * fetch standard will not build a Request for; and Node's HTTP parser makes two
+ * before Next, a 400 for a method it does not know and a 431 for headers past
+ * its limit (README, "The website").
  */
 export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
   const opts: ProxyOptions = Array.isArray(options) ? { publicPaths: options } : options;
@@ -237,7 +230,10 @@ export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
 
   return async function proxy(request: NextRequest) {
     const nonce = makeNonce();
-    const https = isSecureRequest(request) || servesHttps();
+    // Per request, from the running server's environment (the proxy is not
+    // evaluated at build time, so the Docker image reads the .env it starts
+    // with): a LAN address listed beside an https domain stays plain http.
+    const https = servedOverHttps(request);
     const csp = contentSecurityPolicy(nonce, opts.imageSources, { https });
     const headers = securityHeaders(csp, opts.permissions, https);
     const { pathname, search } = request.nextUrl;
@@ -271,9 +267,9 @@ export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
     // The host list, the cross-site write check and the JSON rule
     // (request-guard.ts), ahead of the password gate. The health route is
     // exempt from the host list alone. A write's Origin must carry https
-    // whenever the deployment says it is served that way by any of its
-    // settings: the answer HSTS takes above, or COOKIE_SECURE, which is how an
-    // owner behind a proxy the app was not told about says so.
+    // whenever the page is served that way: the answer HSTS takes above, or
+    // COOKIE_SECURE=1, which is how an owner whose app is only ever reached
+    // over https, through a proxy it was not told about, says so.
     const refused = requestSecurityError(request, { https: https || cookieSecure(request), anyHost: pathname === healthPath });
     if (refused) return refuse(refused);
 

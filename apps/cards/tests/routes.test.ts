@@ -301,6 +301,18 @@ describe("what the lookup routes refuse", () => {
     expect((await GET(new Request("http://localhost/api/uploads/x"), ctx({ name: "../../secrets.jpg" }) as never)).status).toBe(404);
     expect((await GET(new Request("http://localhost/api/uploads/x"), ctx({ name: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg" }) as never)).status).toBe(404);
   });
+
+  it("keeps a photo route's refusals out of the browser's cache, like every API answer but a photo", async () => {
+    // The route is on the proxy's cachedPaths for the photo's year-long
+    // lifetime, so what its refusals say is all they carry.
+    const { GET } = await import("@/app/api/uploads/[name]/route");
+    const answers = [
+      await GET(new Request("http://localhost/api/uploads/x"), ctx({ name: "../../secrets.jpg" }) as never),
+      await GET(new Request("http://localhost/api/uploads/x"), ctx({ name: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg" }) as never),
+      await GET(new Request("http://localhost/api/uploads/x?size=huge"), ctx({ name: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg" }) as never),
+    ];
+    expect(answers.map((res) => [res.status, res.headers.get("Cache-Control")])).toEqual([[404, "no-store"], [404, "no-store"], [400, "no-store"]]);
+  });
 });
 
 describe("the collection routes", () => {

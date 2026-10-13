@@ -30,8 +30,8 @@ function holdResponses(page: Page, origin: string, problems: string[], answeredB
     const type = response.request().resourceType();
     if (url.pathname.startsWith("/_next/static/")) {
       if (response.status() === 200 && cache !== "public, max-age=31536000, immutable") problems.push(`${url.pathname}: a hashed build file is cached as "${cache}"`);
-    } else if (url.pathname.startsWith("/api/uploads/") && response.request().method() === "GET") {
-      if (response.status() === 200 && cache !== "private, max-age=31536000, immutable") problems.push(`${url.pathname}: a photo is cached as "${cache}"`);
+    } else if (url.pathname.startsWith("/api/uploads/") && response.request().method() === "GET" && response.status() === 200) {
+      if (cache !== "private, max-age=31536000, immutable") problems.push(`${url.pathname}: a photo is cached as "${cache}"`);
     } else if (type === "document" || url.pathname.startsWith("/api/")) {
       if (!/\bno-store\b/.test(cache)) problems.push(`${url.pathname}: a page or an API answer is cached as "${cache}"`);
     }
@@ -196,9 +196,9 @@ test.describe("the website", () => {
     expect(problems).toEqual([]);
   });
 
-  test("every kind of answer carries the headers, but the two Next makes before the proxy runs", async ({ request, baseURL }) => {
+  test("every kind of answer carries the headers, but the two Next makes before the proxy runs and Node's parser's own", async ({ request, baseURL }) => {
     const origin = new URL(baseURL!).origin;
-    const answers: Array<{ method?: string; path: string; status?: number; location?: string; headers?: Record<string, string>; data?: string }> = [
+    const answers: Array<{ method?: string; path: string; status?: number; location?: string; cache?: string; headers?: Record<string, string>; data?: string }> = [
       // A trailing slash is put right by the proxy, the query kept.
       { path: "/collection/", status: 308, location: "/collection" },
       { path: "/collection/?q=Wartortle", status: 308, location: "/collection?q=Wartortle" },
@@ -210,12 +210,16 @@ test.describe("the website", () => {
       { path: "/%E0%A4%A" },
       { method: "POST", path: "/api/cards", status: 415, headers: { "Content-Type": "text/plain" }, data: "{}" },
       { method: "DELETE", path: "/api/cards/999999999" },
+      // The photo route keeps its year-long lifetime for a photo alone.
+      { path: "/api/uploads/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg", status: 404, cache: "no-store" },
+      { path: "/api/uploads/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg?size=huge", status: 400, cache: "no-store" },
     ];
     for (const answer of answers) {
       const res = await request.fetch(`${origin}${answer.path}`, { method: answer.method ?? "GET", headers: answer.headers, data: answer.data, maxRedirects: 0 });
       const label = `${answer.method ?? "GET"} ${answer.path}`;
       if (answer.status !== undefined) expect(res.status(), label).toBe(answer.status);
       if (answer.location !== undefined) expect(res.headers()["location"], label).toBe(answer.location);
+      if (answer.cache !== undefined) expect(res.headers()["cache-control"], label).toBe(answer.cache);
       expect(headerProblems(res, EXPECTED), label).toEqual([]);
     }
 
@@ -232,6 +236,16 @@ test.describe("the website", () => {
     expect(traced.status()).toBe(500);
     expect(traced.headers()["content-type"]).toBe("text/plain");
     expect(traced.headers()["content-security-policy"]).toBeUndefined();
+    // And before Next, Node's own parser: a 400 for a method it does not know,
+    // which no page can make a browser send either, and a 431 for a request
+    // whose headers are past its limit, which a page could provoke by filling
+    // this origin's cookies; neither carries any header at all.
+    const unknown = await request.fetch(`${origin}/`, { method: "FOO" });
+    expect(unknown.status()).toBe(400);
+    expect(unknown.headers()["content-security-policy"]).toBeUndefined();
+    const crowded = await request.fetch(`${origin}/`, { headers: { "X-Padding": "a".repeat(20_000) } });
+    expect(crowded.status()).toBe(431);
+    expect(crowded.headers()["content-security-policy"]).toBeUndefined();
   });
 
   test("a context a test makes for itself is held to the same rules as its own", async ({ browser, baseURL, siteRules }) => {
@@ -343,6 +357,28 @@ test.describe("the website", () => {
     await expect(preview).toBeVisible();
     expect(await preview.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBeGreaterThan(0);
     await expect(page.locator('img[src^="/api/uploads/"]').first()).toBeVisible();
+  });
+
+  test("a reference image over http, which img-src refuses, is not asked for: the card shows without one", async ({ page }) => {
+    // Every price source answers with https, but a card file, a spreadsheet, a
+    // restore or the API can name an http address. Drawn, it was a broken
+    // picture and a policy violation on every page that showed the card.
+    const name = `Plain Http Picture ${Date.now()}`;
+    const created = await page.request.post("/api/cards", { data: { game: "pokemon", name, referenceImageUrl: "http://images.example/card.png" } });
+    expect(created.status()).toBe(201);
+    const { card } = (await created.json()) as { card: { id: number; referenceImageUrl: string } };
+    // Kept as it was given, for the file and the exports.
+    expect(card.referenceImageUrl).toBe("http://images.example/card.png");
+    const asked: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).hostname === "images.example") asked.push(request.url());
+    });
+    await page.goto(`/collection?${new URLSearchParams({ q: name })}`);
+    await expect(page.getByRole("link", { name: new RegExp(name) })).toBeVisible();
+    await page.goto(`/cards/${card.id}`);
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    await expect(page.getByText("No image").first()).toBeVisible();
+    expect(asked).toEqual([]);
   });
 
   test("the scan screen's camera previews and captures, granted to this page and no other feature", async ({ playwright, baseURL }) => {

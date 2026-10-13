@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb, openDatabase, setDb } from "@/lib/db";
-import { addSnapshot, createCard, getCard, latestSnapshotsByCard, listCards, listSnapshots, recentSnapshotsByCard } from "@/lib/cards";
+import { addSnapshot, createCard, getCard, latestSnapshotsByCard, listCards, listSnapshots, recentSnapshotsByCard, updateCard } from "@/lib/cards";
+import { hintFromCards } from "@/lib/sets/types";
 import { OUTLOOK_SNAPSHOTS, gradingVerdict, outlookSeries } from "@/lib/analytics";
 import { summarize } from "@/lib/pricing";
 import { readPriceSummary } from "@/lib/price-summary";
@@ -128,5 +129,70 @@ describe("a scan draft this app did not write", () => {
     const res = scanDrafts();
     expect(res.status).toBe(200);
     expect(((await res.json()) as { drafts: unknown[] }).drafts).toHaveLength(2);
+  });
+});
+
+describe("a card's JSON columns as a restore may leave them", () => {
+  const setColumn = (id: number, column: "manual_graded" | "external_ids" | "identification", value: string) =>
+    getDb().prepare(`UPDATE cards SET ${column} = ? WHERE id = ?`).run(value, id);
+  const notRecords = ["null", "[1]", "[]", '"x"', "5", "true", "{"];
+
+  it("reads manual graded prices that are not a record of figures as none, so the card's page still opens", () => {
+    // `null` here made /cards/<id> answer 500 on every load: the page hands
+    // the prices to Object.entries, and only an edit could have healed the
+    // row, which needs that page.
+    const card = createCard({ game: "pokemon", name: "Pikachu", setName: "Base Set" });
+    for (const value of notRecords) {
+      setColumn(card.id, "manual_graded", value);
+      const read = getCard(card.id)!;
+      expect(read.manualGraded, value).toEqual({});
+      expect(() => Object.entries(read.manualGraded), value).not.toThrow();
+    }
+    // Field by field: what normalizeInput would have kept, and nothing else.
+    setColumn(card.id, "manual_graded", JSON.stringify({ "PSA 9": 9, " BGS 9.5 ": 40, "PSA 10": "450", "": 4, "  ": 5, CGC: -1, SGC: 1e15, TAG: null, "__proto__": 7 }));
+    const read = getCard(card.id)!.manualGraded;
+    expect(read).toEqual({ "PSA 9": 9, "BGS 9.5": 40 });
+    expect(Object.getPrototypeOf(read)).toBe(Object.prototype);
+    // And an edit through the app goes through, rather than tripping over the row.
+    expect(updateCard(card.id, { quantity: 2 })?.manualGraded).toEqual({ "PSA 9": 9, "BGS 9.5": 40 });
+  });
+
+  it("reads provider ids that are not a record of text as none, so a set's checklist can still be fetched", () => {
+    // `null` here answered POST /api/sets/refresh with a 502: the hint for the
+    // set's provider walks every owned card's ids with Object.entries.
+    const card = createCard({ game: "pokemon", name: "Pikachu", setName: "Base Set" });
+    for (const value of notRecords) {
+      setColumn(card.id, "external_ids", value);
+      expect(getCard(card.id)!.externalIds, value).toEqual({});
+      expect(hintFromCards(listCards()), value).toMatchObject({ setName: "Base Set", externalIds: {} });
+    }
+    setColumn(card.id, "external_ids", JSON.stringify({ pricecharting: " 6910 ", tcgplayer: 42, scryfall: { id: 1 }, ebay: null, other: "", nan: Number.NaN, "__proto__": "x" }));
+    expect(getCard(card.id)!.externalIds).toEqual({ pricecharting: "6910", tcgplayer: "42" });
+  });
+
+  it("reads an identification through the same checks a saved one passes, and drops one that fails them", () => {
+    const card = createCard({ game: "pokemon", name: "Pikachu" });
+    for (const value of [...notRecords, '{"confidence":"high"}', '{"condition_assessment":{"caveat":5}}', '{"alternatives":{}}', '{"grading":[]}']) {
+      setColumn(card.id, "identification", value);
+      expect(getCard(card.id)!.identification, value).toBeNull();
+    }
+    // An older identification, before the condition assessment existed, is still one.
+    setColumn(card.id, "identification", JSON.stringify({ game: "pokemon", name: "Pikachu", confidence: 0.9, alternatives: [], unknownLater: true }));
+    expect(getCard(card.id)!.identification).toEqual({ game: "pokemon", name: "Pikachu", confidence: 0.9, alternatives: [] });
+  });
+
+  it("reads what the app itself wrote exactly as it was written", () => {
+    const identification = {
+      game: "pokemon" as const, sport: null, name: "Pikachu", set_name: "Base Set", set_code: null, card_number: "58/102", year: 1999,
+      rarity: "Common", variant: null, language: "English", manufacturer: null, subject: "Pikachu",
+      grading: { company: null, grade: null, cert_number: null }, condition_notes: null,
+      condition_assessment: { centering: "55/45", corners: "sharp", edges: "clean", surface: "clean", estimated_grade_low: "8", estimated_grade_high: "9", caveat: null, centering_ratios: null },
+      confidence: 0.92, alternatives: [{ name: "Pikachu", set_name: "Jungle", card_number: "60/64", reason: "a reprint" }], search_query: "Pikachu 58/102 Base Set",
+    };
+    const card = createCard({ game: "pokemon", name: "Pikachu", identification, manualGraded: { "PSA 10": 450, "PSA 9": 120.5 }, externalIds: { pricecharting: "6910", scryfall: "abc-123" } });
+    const read = getCard(card.id)!;
+    expect(read.identification).toEqual(identification);
+    expect(read.manualGraded).toEqual({ "PSA 10": 450, "PSA 9": 120.5 });
+    expect(read.externalIds).toEqual({ pricecharting: "6910", scryfall: "abc-123" });
   });
 });

@@ -13,11 +13,28 @@ export function localDateInput(now = new Date(), offsetMinutes = now.getTimezone
   return new Date(now.getTime() - offsetMinutes * 60_000).toISOString().slice(0, 10);
 }
 
+/**
+ * An outside picture's address as a page may draw it, or null. The policy's
+ * img-src takes outside pictures over https alone (README, "The website"), but
+ * an address is kept as http(s): one over http — from a card file, a
+ * spreadsheet, a restore or the API, since every price source answers with
+ * https — drew a broken picture and a policy violation on every page that
+ * showed it. It stays on the card, in its file and its exports, as it was
+ * given; the page shows the card without a picture instead of asking for one.
+ */
+export function shownImage(value: unknown): string | null {
+  const url = httpUrl(value);
+  if (!url) return null;
+  const parsed = new URL(url);
+  // Chromium refuses a picture whose address carries a user name or password.
+  return parsed.protocol === "https:" && !parsed.username && !parsed.password ? url : null;
+}
+
 /** Where a card's picture is served from: its own photo (full, or the small copy for a grid), else the source's reference image. */
 export function imageSrc(card: { imagePath: string | null; referenceImageUrl: string | null }, size: "full" | "thumb" = "full"): string | null {
   if (card.imagePath) return `/api/uploads/${card.imagePath}${size === "thumb" ? "?size=thumb" : ""}`;
   // Checked here as well as when it is saved: a restored database is not saved through the app.
-  return httpUrl(card.referenceImageUrl);
+  return shownImage(card.referenceImageUrl);
 }
 
 /**

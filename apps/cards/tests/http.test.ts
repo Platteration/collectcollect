@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { isPrivateAddress, isSecureRequest, isWebhookUrl, parseId, tooLarge } from "@collectcollect/core/http";
-import { cookieSecure } from "@collectcollect/core/net";
+import { cookieSecure, servedOverHttps } from "@collectcollect/core/net";
 
 describe("reading an id out of a route", () => {
   it("takes the digits of a positive integer and nothing else", () => {
@@ -109,14 +109,23 @@ describe("whether a request came over TLS", () => {
     delete process.env.TRUST_PROXY;
   });
 
-  it("believes the URL, and a forwarded protocol only from a trusted proxy", () => {
-    expect(isSecureRequest(new Request("https://cards.example/"))).toBe(true);
+  it("believes a forwarded protocol only from a trusted proxy, and never the URL's scheme", () => {
     expect(isSecureRequest(new Request("http://cards.example/"))).toBe(false);
+    // Neither app listens for TLS, and the running server writes https into the
+    // URL whenever X-Forwarded-Proto merely contains "https", from any client
+    // and whatever TRUST_PROXY says: the request the proxy and the routes are
+    // handed then looks like this one, which is not evidence of anything.
+    for (const header of ["https", "https, http", "x-https"]) {
+      expect(isSecureRequest(new Request("https://cards.example/", { headers: { "x-forwarded-proto": header } })), header).toBe(false);
+    }
+    expect(isSecureRequest(new Request("https://cards.example/"))).toBe(false);
     const forwarded = new Request("http://cards.example/", { headers: { "x-forwarded-proto": "https" } });
     // Anyone can send the header; without a proxy to have set it, it means nothing.
     expect(isSecureRequest(forwarded)).toBe(false);
     process.env.TRUST_PROXY = "1";
     expect(isSecureRequest(forwarded)).toBe(true);
+    // With a proxy declared, it is still the entry the proxy wrote that decides, not the URL.
+    expect(isSecureRequest(new Request("https://cards.example/", { headers: { "x-forwarded-proto": "https, http" } }))).toBe(false);
     // The hop the nearest proxy wrote is the rightmost; the client can prepend anything.
     expect(isSecureRequest(new Request("http://cards.example/", { headers: { "x-forwarded-proto": "http, https" } }))).toBe(true);
     expect(isSecureRequest(new Request("http://cards.example/", { headers: { "x-forwarded-proto": "https, http" } }))).toBe(false);
@@ -135,12 +144,38 @@ describe("whether a request came over TLS", () => {
     }
   });
 
-  it("marks the cookie Secure as the request says, unless COOKIE_SECURE settles it", () => {
+  it("serves https to the address APP_BASE_URL names, and plain http to every other name the instance answers to", () => {
+    const at = (host: string, headers: Record<string, string> = {}) => new Request("http://127.0.0.1:3000/", { headers: { host, ...headers } });
+    const env = { APP_BASE_URL: "https://cards.example" };
+    for (const host of ["cards.example", "CARDS.example.", "cards.example:443"]) expect(servedOverHttps(at(host), env), host).toBe(true);
+    // The LAN address and names the README tells an owner to keep listing beside
+    // the domain are reached over plain http, since neither app serves TLS; and
+    // the domain on another port is another address.
+    for (const host of ["192.168.1.20:3000", "192.168.1.20", "cardbox.local:3000", "cardbox.lan", "localhost:3000", "cards.example:3000", "cards.example:80", "cards.example.evil", "evil.cards.example", "", "cards.example/x"]) {
+      expect(servedOverHttps(at(host), env), host).toBe(false);
+    }
+    // The address names its port when the proxy listens on another.
+    expect(servedOverHttps(at("cards.example:8443"), { APP_BASE_URL: "https://cards.example:8443/" })).toBe(true);
+    expect(servedOverHttps(at("cards.example"), { APP_BASE_URL: "https://cards.example:8443/" })).toBe(false);
+    // An address that is not https, or not an address, says nothing.
+    for (const base of ["http://cards.example", "", "https://", "cards.example", " https://cards.example "]) {
+      expect(servedOverHttps(at("cards.example"), { APP_BASE_URL: base }), base).toBe(base === " https://cards.example ");
+    }
+    // A trusted proxy's word holds for any name it forwards.
+    expect(servedOverHttps(at("192.168.1.20:3000", { "x-forwarded-proto": "https" }), {})).toBe(false);
+    process.env.TRUST_PROXY = "1";
+    expect(servedOverHttps(at("192.168.1.20:3000", { "x-forwarded-proto": "https" }), {})).toBe(true);
+  });
+
+  it("marks the cookie Secure as a trusted proxy says, unless COOKIE_SECURE settles it", () => {
     const plain = new Request("http://cards.example/");
-    const tls = new Request("https://cards.example/");
+    const tls = new Request("https://cards.example/", { headers: { "x-forwarded-proto": "https" } });
     expect(cookieSecure(plain)).toBe(false);
-    expect(cookieSecure(tls)).toBe(true);
+    // The header alone, which the server also turns into an https URL, is anyone's to send.
+    expect(cookieSecure(tls)).toBe(false);
     try {
+      process.env.TRUST_PROXY = "1";
+      expect(cookieSecure(tls)).toBe(true);
       process.env.COOKIE_SECURE = "1";
       expect(cookieSecure(plain)).toBe(true);
       process.env.COOKIE_SECURE = "false";

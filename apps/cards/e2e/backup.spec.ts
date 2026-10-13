@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import Database from "better-sqlite3";
+import { readZip, zipStream } from "@collectcollect/core/zip";
 import { expect, test, type Page } from "./fixtures";
 import { addCardByHand } from "./helpers";
 
@@ -84,6 +87,46 @@ test("a restore can be undone from Settings", async ({ page }, testInfo) => {
   await expect(page.getByText(/Put back \d+ cards? and \d+ photos?/)).toBeVisible({ timeout: 20_000 });
   await page.goto(`/collection?${new URLSearchParams({ q: later })}`);
   await expect(page.getByRole("link", { name: new RegExp(later) })).toBeVisible();
+});
+
+test("a restored card whose stored prices, ids and identification are not what the app writes still opens and takes an edit", async ({ page }, testInfo) => {
+  const suffix = `${testInfo.repeatEachIndex}-${testInfo.retry}`;
+  const name = `Restored Odd Columns ${suffix}`;
+  await addCardByHand(page, { name, set: "Base Set" });
+  await page.goto("/settings");
+  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "Download backup" }).click()]);
+  const entries = await readZip(new Uint8Array(fs.readFileSync((await download.path())!)), { maxTotalBytes: 512 * 1024 * 1024, maxEntries: 100_000 });
+
+  // One statement on the backup's database, as anyone holding the file can
+  // run, and the archive zipped up again around it.
+  const dbFile = testInfo.outputPath("collectcollect.db");
+  fs.writeFileSync(dbFile, entries.find((entry) => entry.name === "collectcollect.db")!.data);
+  const db = new Database(dbFile, { fileMustExist: true });
+  try {
+    expect(db.prepare("UPDATE cards SET manual_graded = 'null', external_ids = 'null', identification = '[1]' WHERE name = ?").run(name).changes).toBe(1);
+  } finally {
+    db.close();
+  }
+  const crafted = new Uint8Array(fs.readFileSync(dbFile));
+  const parts: Uint8Array[] = [];
+  for await (const part of zipStream(entries.map((entry) => {
+    const data = entry.name === "collectcollect.db" ? crafted : entry.data;
+    return { name: entry.name, size: data.length, chunks: () => [data] };
+  }))) parts.push(part);
+  const archive = testInfo.outputPath("crafted.zip");
+  fs.writeFileSync(archive, Buffer.concat(parts));
+  await restoreArchive(page, archive);
+
+  await page.goto(`/collection?${new URLSearchParams({ q: name })}`);
+  const href = await page.getByRole("link", { name: new RegExp(name) }).getAttribute("href");
+  expect(href).toMatch(/^\/cards\/\d+$/);
+  // The card's page handed the restored `null` to Object.entries and answered
+  // 500 on every load; only an edit healed the row, and editing needs the page.
+  for (let load = 0; load < 2; load++) expect((await page.goto(href!))?.status()).toBe(200);
+  await expect(page.getByRole("heading", { name })).toBeVisible();
+  const edited = await page.request.patch(`/api${href}`, { data: { notes: "still mine" } });
+  expect(edited.status(), await edited.text()).toBe(200);
+  expect(((await edited.json()) as { card: { manualGraded: unknown; externalIds: unknown } }).card).toMatchObject({ manualGraded: {}, externalIds: {} });
 });
 
 test("restoring something that is not a backup is refused", async ({ page }) => {

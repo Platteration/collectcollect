@@ -118,14 +118,48 @@ export function rowToCard(row: CardRow): CardRecord {
     // It goes into a style attribute.
     accentColor: hexColor(row.accent_color),
     location: row.location,
-    externalIds: parseJson(row.external_ids, {}),
-    identification: parseJson<Identification | null>(row.identification, null),
+    // The three JSON columns are read back through the checks their input went
+    // through, like centering above: a restored `null` here was handed to
+    // Object.entries by the card's own page, which then answered 500 on every
+    // load, and to Object.keys by a set's checklist refresh.
+    externalIds: storedIds(parseJson<unknown>(row.external_ids, null)),
+    identification: identification(parseJson<unknown>(row.identification, null)),
     manualUngraded: row.manual_ungraded,
-    manualGraded: parseJson(row.manual_graded, {}),
+    manualGraded: storedGradedPrices(parseJson<unknown>(row.manual_graded, null)),
     gradingStatus: (Object.hasOwn(GRADING_STATUSES, row.grading_status) ? row.grading_status : "undecided") as GradingStatus,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+/**
+ * A plain object's own entries, or none: an array, a string, a number or null is
+ * not a record. (A `__proto__` key that JSON.parse made an own one needs no care
+ * here: only a number or a string is ever assigned back, and neither can set a
+ * prototype.)
+ */
+function entries(value: unknown): Array<[string, unknown]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value);
+}
+
+/** A stored set of provider ids: text by name, as normalizeInput keeps them; a number reads as its digits. */
+function storedIds(value: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, id] of entries(value)) {
+    const text = typeof id === "string" ? id.trim() : typeof id === "number" && Number.isFinite(id) ? String(id) : "";
+    if (text) out[key] = text;
+  }
+  return out;
+}
+
+/** Stored manual graded prices: the figures normalizeInput would take, under the names it would keep. */
+function storedGradedPrices(value: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [key, figure] of entries(value)) {
+    if (key.trim() && typeof figure === "number" && Number.isFinite(figure) && figure >= 0 && figure <= MAX_MONEY) out[key.trim()] = figure;
+  }
+  return out;
 }
 
 const str = (v: unknown): string | null => {

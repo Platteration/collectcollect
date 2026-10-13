@@ -128,7 +128,7 @@ describe("cross-site writes", () => {
   });
 
   it("compares the whole origin, so a proxy in front passes the Host through with its port and says it ends TLS", async () => {
-    process.env.ALLOWED_HOSTS = "cards.example";
+    process.env.ALLOWED_HOSTS = "cards.example, 192.168.1.20";
     // The proxy ends TLS, and the app is told so (APP_BASE_URL, or TRUST_PROXY
     // with X-Forwarded-Proto), as it must be for HSTS and the cookie's Secure flag.
     process.env.APP_BASE_URL = "https://cards.example";
@@ -136,12 +136,20 @@ describe("cross-site writes", () => {
       status(request("http://localhost:3000/api/cards", { method: "POST", site: "same-origin", host, origin }));
     // Behind a proxy that ends TLS on 443 the origin has no port and neither does Host.
     expect(await post("cards.example", "https://cards.example")).toBe(200);
-    expect(await post("cards.example:8443", "https://cards.example:8443")).toBe(200);
-    // nginx's $host drops a non-default port; .env.example says to use $http_host.
-    expect(await post("cards.example", "https://cards.example:8443")).toBe(403);
     // An http page of the same name is another origin, and one a network attacker
     // can write into: refused even from a browser too old to send Fetch Metadata.
     expect(await post("cards.example", "http://cards.example")).toBe(403);
+    // The LAN address listed beside the domain is reached over plain http, and
+    // its pages' writes carry an http Origin: once refused, as if the https
+    // address were the only way in.
+    expect(await post("192.168.1.20:3000", "http://192.168.1.20:3000")).toBe(200);
+    expect(await post("192.168.1.20:3000", "https://192.168.1.20:3000")).toBe(403);
+    // A proxy on another port is named with it, as the address the app is reached at.
+    process.env.APP_BASE_URL = "https://cards.example:8443";
+    expect(await post("cards.example:8443", "https://cards.example:8443")).toBe(200);
+    // nginx's $host drops a non-default port; .env.example says to use $http_host.
+    expect(await post("cards.example", "https://cards.example:8443")).toBe(403);
+    process.env.APP_BASE_URL = "https://cards.example";
     // Told nothing, the app takes the request for plain http, and an https page's
     // write does not match the origin it serves.
     delete process.env.APP_BASE_URL;
@@ -229,14 +237,27 @@ describe("security headers", () => {
     expect(csp["form-action"]).toEqual(["'self'"]);
   });
 
-  it("promises https only where the request or the deployment says it is served over https", async () => {
-    const hsts = async (url: string) => (await proxy(request(url))).headers.get("Strict-Transport-Security");
-    expect(await hsts("http://localhost:3000/")).toBeNull();
-    expect(await hsts("https://localhost:3000/")).toBe("max-age=31536000; includeSubDomains");
-    // Behind a proxy the app was not told about, the deployment says it.
+  it("promises https only where a trusted proxy or the deployment's https address says the page is served over https", async () => {
+    process.env.ALLOWED_HOSTS = "cards.example, localhost";
+    const answer = async (url: string, headers: Record<string, string> = {}) => {
+      const res = await proxy(request(url, { headers }));
+      expect(res.status, url).toBe(200);
+      return { hsts: res.headers.get("Strict-Transport-Security"), upgrade: (res.headers.get("Content-Security-Policy") ?? "").includes("upgrade-insecure-requests") };
+    };
+    const https = { hsts: "max-age=31536000; includeSubDomains", upgrade: true };
+    const http = { hsts: null, upgrade: false };
+    expect(await answer("http://localhost:3000/")).toEqual(http);
+    // The URL's scheme is what the server writes from X-Forwarded-Proto, whoever sent it.
+    expect(await answer("https://localhost:3000/", { "x-forwarded-proto": "https" })).toEqual(http);
+    process.env.TRUST_PROXY = "1";
+    expect(await answer("https://localhost:3000/", { "x-forwarded-proto": "https" })).toEqual(https);
+    delete process.env.TRUST_PROXY;
+    // Behind a proxy the app was not told about, the deployment names its https address...
     process.env.APP_BASE_URL = "https://cards.example";
-    expect(await hsts("http://localhost:3000/")).toBe("max-age=31536000; includeSubDomains");
+    expect(await answer("http://cards.example/")).toEqual(https);
+    // ...and every other name it answers to stays plain http.
+    expect(await answer("http://localhost:3000/")).toEqual(http);
     process.env.APP_BASE_URL = "http://localhost:3000";
-    expect(await hsts("http://localhost:3000/")).toBeNull();
+    expect(await answer("http://localhost:3000/")).toEqual(http);
   });
 });

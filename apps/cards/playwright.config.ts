@@ -57,7 +57,14 @@ export default defineConfig({
       port: LOCKED_PORT,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { DATA_DIR: LOCKED_DATA_DIR, APP_PASSWORD: E2E_PASSWORD, AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: offline },
+      // Set up as README's "Host names and other sites" suggests for a domain
+      // behind a TLS proxy the app was not told about: the https address it is
+      // reached at, and the names it is still reached by at home, which are
+      // plain http (auth.spec.ts, "an https address beside a home network's names").
+      env: {
+        DATA_DIR: LOCKED_DATA_DIR, APP_PASSWORD: E2E_PASSWORD, AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: offline,
+        APP_BASE_URL: "https://cards.example", ALLOWED_HOSTS: "cards.example,cardbox.lan,127.0.0.1",
+      },
     },
   ],
 });

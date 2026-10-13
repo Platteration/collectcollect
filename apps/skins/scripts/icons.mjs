@@ -4,14 +4,16 @@
  *   npm run icons -w @collectcollect/skins
  *
  * The PNGs are committed, so this only runs when the icon changes. sharp is
- * a dev dependency here — the app itself never re-encodes an image.
+ * a dev dependency here — the app itself never re-encodes an image. The SVG
+ * lives beside this script rather than in public/, which the server publishes
+ * whole: no page loads it, and a site serves only what its pages use.
  */
 import fs from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 
 const dir = path.join(import.meta.dirname, "..", "public", "icons");
-const svg = fs.readFileSync(path.join(dir, "icon.svg"));
+const svg = fs.readFileSync(path.join(import.meta.dirname, "icon.svg"));
 
 /** The maskable icon keeps its mark inside the safe zone: the middle 80%. */
 const maskable = (size) =>

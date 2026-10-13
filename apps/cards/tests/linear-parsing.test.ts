@@ -4,6 +4,7 @@ import { goalRecord } from "@/lib/goals/markdown";
 import { looksLikeOneRatio, parseCentering, parseSide } from "@/lib/grading/centering";
 import { readCentering } from "@/lib/grading/schema";
 import { caveatSentence } from "@/lib/format";
+import { readLotPart, splitSource } from "@collectcollect/core/markdown/format";
 
 /**
  * Text the app did not write — a card file read back in, a request's
@@ -127,5 +128,86 @@ describe("a stored caveat", () => {
     expect(caveatSentence("Glare on the holo.  ")).toBe("Glare on the holo");
     expect(caveatSentence("Only the front; ")).toBe("Only the front");
     expect(caveatSentence("Sleeve in the way")).toBe("Sleeve in the way");
+  });
+});
+
+/**
+ * Short strings drawn from a few tokens by a seeded generator (mulberry32), so
+ * a failure names an input that comes back on every run, and short enough that
+ * the patterns the scans replaced stay quick on every one of them.
+ */
+function drawn(tokens: string[], count: number, seed: number, most = 8): string[] {
+  let state = seed;
+  const next = () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  return Array.from({ length: count }, () => {
+    let text = "";
+    for (let n = Math.floor(next() * (most + 1)); n > 0; n--) text += tokens[Math.floor(next() * tokens.length)];
+    return text;
+  });
+}
+
+/** The inputs on which a reader and the pattern it replaced disagree, the first few. */
+function disagreements<T>(inputs: string[], read: (text: string) => T, before: (text: string) => T): string[] {
+  return inputs.filter((text) => JSON.stringify(read(text)) !== JSON.stringify(before(text))).slice(0, 5);
+}
+
+describe("the scans read exactly what the patterns they replaced read", () => {
+  // Every kind of line break, since the patterns' `.` stopped at each and their `\s` did not.
+  const breaks = ["\n", "\r", "\r\n", "\u2028", "\u2029"];
+  const spacing = [" ", "  ", "\t", "\u00a0", ...breaks];
+
+  it("for a purchase-lot cell's parts", () => {
+    const before = (part: string) => {
+      const match = /^\s*(\d+)\s*@\s*(.*?)\s*(?:\((\d{4}-\d{2}-\d{2})\))?\s*$/.exec(part);
+      return match ? { quantity: match[1] ?? "", cost: match[2] ?? "", day: match[3] ?? null } : null;
+    };
+    const parts = [
+      "2 @ $1.50 (2026-03-01)",
+      "2 @ $1.\n50 (2026-03-01)",
+      "2 @ $1.50\n(2026-03-01)",
+      "2 @ $1.50 (2026-03-01)\u2028",
+      "2 @ x (2026-03-01) (2026-03-01)",
+      ...drawn(["2", "12", "@", "$1.50", "x", "(", ")", "(2026-03-01)", "2026-03-01", ...spacing], 10_000, 7),
+      // Half of them starting the way a part does, so most get as far as the cost and the day.
+      ...drawn(["$1.50", "x", "(", ")", "(2026-03-01)", "2026-03-01", "@", ...spacing], 10_000, 8).map((rest) => `2 @${rest}`),
+    ];
+    // Reaching the cases that matter: parts that read, with and without a day, and costs a break splits.
+    expect(parts.filter((part) => before(part)?.day).length).toBeGreaterThan(100);
+    expect(parts.filter((part) => before(part) && !before(part)?.day).length).toBeGreaterThan(100);
+    expect(parts.filter((part) => /\d\s*@.*\S[\n\r\u2028\u2029]+\S/.test(part.trim()) && !before(part)).length).toBeGreaterThan(100);
+    expect(disagreements(parts, readLotPart, before)).toEqual([]);
+  });
+
+  it("for a value and the source it names in brackets", () => {
+    const before = (text: string) => {
+      const match = /^(.*?)\s*\((.*)\)\s*$/.exec(text.trim());
+      if (!match) return { rest: text.trim(), source: null };
+      const [, rest = "", source = ""] = match;
+      return { rest: rest.trim(), source: source.trim() || null };
+    };
+    const cells = [
+      "$8.00 (Scryfall (TCGplayer-derived USD))",
+      "$8.00\n(Scryfall)",
+      "$8\r.00 (Scryfall)",
+      "$8.00 (Scry\u2029fall)",
+      ...drawn(["$8.00", "Scryfall", "(", ")", "(Scryfall)", "x", ...spacing], 20_000, 11),
+    ];
+    expect(cells.filter((cell) => before(cell).source).length).toBeGreaterThan(500);
+    expect(cells.filter((cell) => /[\n\r\u2028\u2029]/.test(cell.trim()) && before(cell).source === null && cell.trim().endsWith(")")).length).toBeGreaterThan(100);
+    expect(disagreements(cells, splitSource, before)).toEqual([]);
+  });
+
+  it("for a goal file's record and a stored caveat", () => {
+    const recordBefore = (text: string) => text.match(/(?:^|\n)```json\r?\n([\s\S]*?)\r?\n```(?:\r?\n|$)/)?.[1];
+    const files = drawn(["```json\n", "```json\r\n", "\n```\n", "\n```\r\n", "\n```", "```json", "```", "\n", "\r\n", "\r", "{}", "x", " "], 20_000, 13, 10);
+    expect(files.filter((text) => recordBefore(text) !== undefined).length).toBeGreaterThan(200);
+    expect(disagreements(files, goalRecord, recordBefore)).toEqual([]);
+    const caveats = drawn(["glare", ".", ";", ",", "!", ...spacing], 20_000, 17);
+    expect(disagreements(caveats, caveatSentence, (caveat) => caveat.replace(/[.;,]?\s*$/, ""))).toEqual([]);
   });
 });

@@ -78,25 +78,69 @@ export function isPrivateAddress(address: string): boolean {
 }
 
 /**
- * Whether the request arrived over TLS: either directly, or through a proxy
- * this deployment trusts that says so. Decides whether a cookie may be marked
- * Secure — without which a session set behind a TLS-terminating proxy would
- * be sent over any plain-http path to the same host — and whether a response
- * carries HSTS.
+ * Whether a proxy this deployment trusts says the request arrived over TLS.
+ * Decides whether a cookie may be marked Secure — without which a session set
+ * behind a TLS-terminating proxy would be sent over any plain-http path to the
+ * same host — and, with `servedOverHttps`, whether a response carries HSTS.
  *
  * X-Forwarded-Proto is read the way the limiters read X-Forwarded-For
  * (forwarded.ts): only with a declared proxy in front, and the entry the
  * nearest of them wrote, counted from the right. Asking the two questions two
  * different ways is how an operator who set TRUSTED_PROXY_HOPS for a two-proxy
  * deployment got a working limiter and a cookie that silently lost its flag.
+ *
+ * The scheme of `request.url` is not read. Neither app has a TLS listener of
+ * its own, and the running server writes `https:` into that URL whenever
+ * X-Forwarded-Proto merely contains "https" — any entry, from any client,
+ * whatever TRUST_PROXY says — so believing it believed every client.
  */
 export function isSecureRequest(request: Request): boolean {
-  if (request.url.startsWith("https://")) return true;
   return forwardedEntry(request.headers.get("x-forwarded-proto"), trustedProxyHops())?.toLowerCase() === "https";
 }
 
+/** A Host header or an address's authority as a browser compares origins: lower case, no trailing dot, no default https port. */
+function httpsAuthority(value: string): string | null {
+  try {
+    const url = new URL(`https://${value.trim()}`);
+    if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) return null;
+    return `${url.hostname.replace(/\.$/, "")}${url.port ? `:${url.port}` : ""}`;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Whether the session cookie is marked Secure: what the request says
+ * Whether the page a request is for is served over https: a trusted proxy says
+ * it came over TLS (`isSecureRequest`), or it was sent to the address
+ * APP_BASE_URL names with https — the same name and port, as Host carries
+ * them — which covers a proxy the app was not told about. Decides HSTS,
+ * `upgrade-insecure-requests` and the scheme a browser write's Origin must
+ * carry.
+ *
+ * Per request, not per deployment: an owner who reaches the app by a domain
+ * through a TLS proxy and also by its LAN address or name (both in
+ * ALLOWED_HOSTS, as the README suggests) reaches the second over plain http,
+ * since neither app serves TLS itself. Decided once for the deployment, that
+ * address was sent `upgrade-insecure-requests`, so every script and stylesheet
+ * went to an https port nothing listens on, and every write from it was
+ * refused as coming from another origin.
+ */
+export function servedOverHttps(request: Request, env: Record<string, string | undefined> = process.env): boolean {
+  if (isSecureRequest(request)) return true;
+  const base = (env.APP_BASE_URL ?? "").trim();
+  if (!/^https:\/\//i.test(base)) return false;
+  let named: string | null;
+  try {
+    named = httpsAuthority(new URL(base).host);
+  } catch {
+    return false;
+  }
+  const host = httpsAuthority(request.headers.get("host") ?? new URL(request.url).host);
+  return named !== null && host === named;
+}
+
+/**
+ * Whether the session cookie is marked Secure: what a trusted proxy says
  * (isSecureRequest), unless COOKIE_SECURE settles it either way — for a
  * deployment whose proxy the app cannot be told about.
  */

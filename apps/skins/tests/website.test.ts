@@ -65,8 +65,8 @@ function request(url: string, headers: Record<string, string> = {}): NextRequest
 }
 
 /** The security headers the proxy answered with, the nonce written as the README writes it. */
-async function served(url: string): Promise<Map<string, string>> {
-  const res = await proxy(request(url));
+async function served(url: string, headers: Record<string, string> = {}): Promise<Map<string, string>> {
+  const res = await proxy(request(url, headers));
   const out = new Map<string, string>();
   for (const name of SECURITY_HEADERS) {
     const value = res.headers.get(name);
@@ -96,7 +96,9 @@ describe("the headers every response carries", () => {
       "x-content-type-options",
       "x-frame-options",
     ]);
-    expect(await served("https://localhost:3000/")).toEqual(block);
+    // Neither app listens for TLS: a proxy in front ends it and, trusted, says so.
+    vi.stubEnv("TRUST_PROXY", "1");
+    expect(await served("https://localhost:3000/", { "x-forwarded-proto": "https" })).toEqual(block);
   });
 
   it("are the same less HSTS and the upgrade over plain http, which on a home network would send every file to a port nothing listens on", async () => {
@@ -105,9 +107,26 @@ describe("the headers every response carries", () => {
     expect(http.get("content-security-policy")).not.toContain("upgrade-insecure-requests");
   });
 
-  it("promise https behind a proxy the app was not told about when the deployment says it serves https", async () => {
+  it("promise https behind a proxy the app was not told about at the https address the deployment names, and only there", async () => {
     process.env.APP_BASE_URL = "https://skins.example";
-    expect(await served("http://localhost:3000/")).toEqual(documented());
+    vi.stubEnv("ALLOWED_HOSTS", "skins.example, 192.168.1.20, skinsbox.lan");
+    expect((await proxy(request("http://skins.example/"))).status).toBe(200);
+    expect(await served("http://skins.example/")).toEqual(documented());
+    // The LAN address and name an owner keeps beside the domain (README, "Host
+    // names and other sites") are plain http, since the app serves no TLS: sent
+    // the upgrade, a browser asked an https port nothing listens on for every
+    // script and stylesheet, and drew the page bare.
+    for (const url of ["http://192.168.1.20:3000/collection", "http://skinsbox.lan:3000/", "http://skins.example:3000/"]) {
+      expect((await proxy(request(url))).status, url).toBe(200);
+      expect(await served(url), url).toEqual(overHttp(documented()));
+    }
+  });
+
+  it("are not talked into https by a forwarded protocol from a proxy nobody declared", async () => {
+    // The server turns the header into an https URL before the proxy sees it.
+    for (const header of ["https", "https, http"]) {
+      expect(await served("https://localhost:3000/", { "x-forwarded-proto": header }), header).toEqual(overHttp(documented()));
+    }
   });
 
   it("cover the framework's own files, the not-found page and a refusal as well as the pages", async () => {

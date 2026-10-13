@@ -292,9 +292,9 @@ Compose gives each app a 2 GB memory limit: a request body is buffered whole, up
 
 > Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
 
-**Behind a proxy.** The login limiter and the per-route limits count attempts per client. Without a proxy every client is one client, and the `X-Forwarded-For` header is ignored — anyone can send one. Set `TRUST_PROXY=1` only when a reverse proxy in front of the app sets that header, and it will be read — as will `X-Forwarded-Proto`, which is what lets the session cookie be marked `Secure` and the response carry HSTS when the proxy terminates TLS. Both are read from the right: proxies append to these headers, so the rightmost entry is what your proxy saw and anything left of it is whatever the client typed; behind more than one proxy, `TRUSTED_PROXY_HOPS` says how many. `COOKIE_SECURE=1` (or `0`) settles the cookie's `Secure` flag outright, for a proxy the app cannot be told about. Compose binds both apps to `127.0.0.1`; put the proxy in front and change the bind address there, since neither app speaks TLS.
+**Behind a proxy.** The login limiter and the per-route limits count attempts per client. Without a proxy every client is one client, and the `X-Forwarded-For` header is ignored — anyone can send one. Set `TRUST_PROXY=1` only when a reverse proxy in front of the app sets that header, and it will be read — as will `X-Forwarded-Proto`, which is what lets the session cookie be marked `Secure` and the response carry HSTS when the proxy terminates TLS. Without it, `X-Forwarded-Proto` is believed nowhere: Next writes `https` into the address of any request whose header so much as contains it, from anyone, so the apps read neither. Both are read from the right: proxies append to these headers, so the rightmost entry is what your proxy saw and anything left of it is whatever the client typed; behind more than one proxy, `TRUSTED_PROXY_HOPS` says how many. `COOKIE_SECURE=1` (or `0`) settles the cookie's `Secure` flag outright, for a proxy the app cannot be told about. Compose binds both apps to `127.0.0.1`; put the proxy in front and change the bind address there, since neither app speaks TLS.
 
-**Host names and other sites.** Whether or not a password is set, each app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` / `.home.arpa` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`, and the proxy has to pass the original `Host` header through. The list replaces those defaults rather than adding to them, so name every way the instance is still reached (`ALLOWED_HOSTS=cards.example.com,192.168.1.20,cardbox.local`); `*` turns the check off. The health route ignores the list, since a container checks itself by address. Requests that a browser sends from anywhere but the app's own origin are refused for anything but a read, so a page you happen to visit cannot restore a backup over your collection or spend your API budget: `Sec-Fetch-Site` must say `same-origin`, and an `Origin` must match scheme, name and port. Behind a proxy that ends TLS, tell the app so — `TRUST_PROXY=1` with `X-Forwarded-Proto`, `APP_BASE_URL=https://…` or `COOKIE_SECURE=1` — or every write from the browser is refused as coming from another origin. `curl` and scripts, which send no browser origin headers, are unaffected, but a body sent to the JSON API must say `Content-Type: application/json` (a `text/plain` form is something any page can send without asking, and its bytes can parse as JSON), or it is answered 415; a write with neither a body nor a `Content-Type`, such as a `DELETE` or a price refresh from a script, needs no header, and uploads, restores and folder imports stay `multipart/form-data`.
+**Host names and other sites.** Whether or not a password is set, each app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` / `.home.arpa` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`, and the proxy has to pass the original `Host` header through. The list replaces those defaults rather than adding to them, so name every way the instance is still reached (`ALLOWED_HOSTS=cards.example.com,192.168.1.20,cardbox.local`); `*` turns the check off. The health route ignores the list, since a container checks itself by address. Requests that a browser sends from anywhere but the app's own origin are refused for anything but a read, so a page you happen to visit cannot restore a backup over your collection or spend your API budget: `Sec-Fetch-Site` must say `same-origin`, and an `Origin` must match scheme, name and port. Behind a proxy that ends TLS, tell the app so — `TRUST_PROXY=1` with `X-Forwarded-Proto`, `APP_BASE_URL=https://…` or `COOKIE_SECURE=1` — or every write from the browser is refused as coming from another origin. `APP_BASE_URL` speaks for the address it names alone, name and port as the proxy passes them in `Host`: the LAN address or name listed beside the domain is reached over plain http, since neither app serves TLS, and keeps working that way. `COOKIE_SECURE=1` says every page is https, so it is for an instance reached only through the proxy. `curl` and scripts, which send no browser origin headers, are unaffected, but a body sent to the JSON API must say `Content-Type: application/json` (a `text/plain` form is something any page can send without asking, and its bytes can parse as JSON), or it is answered 415; a write with neither a body nor a `Content-Type`, such as a `DELETE` or a price refresh from a script, needs no header, and uploads, restores and folder imports stay `multipart/form-data`.
 
 **Webhooks.** The alert webhook is posted to by the server itself, so it has to be an address on the public internet: `localhost`, `*.local`, and any private, loopback, link-local or reserved address (carrier-grade NAT, benchmarking, multicast and the like) are refused when saved, a name that resolves to one is refused at delivery, and the request does not follow redirects. The name is resolved once, inside the connection itself, and every address it answers with is checked before the one connected to is used, so a DNS answer that changes between a check and the request cannot point the post at your own network; each delivery opens a connection of its own, and an address carrying a user name or password is refused.
 
@@ -319,7 +319,12 @@ rather than a path on a shared one.
 These are the headers each app sends on every response when it is served over
 https. Over plain http (the default on a home network) the same, less
 `Strict-Transport-Security` and `upgrade-insecure-requests`, which would send
-every script and stylesheet to an https port nothing listens on. `{nonce}` is
+every script and stylesheet to an https port nothing listens on. Which one a
+response is decided request by request (`servedOverHttps` in
+`packages/core/src/net.ts`): https when a trusted proxy says the request came
+over TLS, or when it was sent to the https address `APP_BASE_URL` names, and
+plain http for every other name the instance answers to, such as the LAN address
+kept beside a domain. `{nonce}` is
 16 random bytes, fresh for every response. Both blocks are read by the tests:
 each app's `tests/website.test.ts` holds its proxy's output equal to its block
 word for word, and its browser suite holds every live response to it.
@@ -332,8 +337,12 @@ them, because Next makes them before the proxy runs, and neither is something
 a browser draws: the redirect from an address with a repeated slash or a
 backslash (`//collection`) to the one without, and the 500 for a `TRACE`
 request — a method no page can make a browser send — for which Next cannot
-build the request the proxy reads. The browser suite pins both, so a Next that
-changes either fails it.
+build the request the proxy reads. Before Next, Node's own HTTP parser answers
+two more with no header at all and an empty body: a 400 for a method it does not
+know (`FOO`, `TRACK`), which no page can make a browser send either, and a 431
+for a request whose headers are past its limit, which a page could provoke by
+filling this origin's cookies. The browser suite pins all four, so a Next or a
+Node that changes one fails it.
 
 The card app:
 
@@ -386,7 +395,7 @@ a page from another origin to see it refused.
 | `default-src 'none'` | Nothing loads unless it is named below. |
 | `script-src` | This origin's files, and an inline script only with this response's nonce: Next stamps it on its bootstrap and page data, the layout on the theme script and the safety net. `'strict-dynamic'` lets those load Next's chunks and makes a modern browser ignore `'self'`, so markup injected into a page cannot load even one of this origin's own files. No `'unsafe-inline'`, and `'unsafe-eval'` only under `next dev`. |
 | `style-src 'self'`, `style-src-attr 'unsafe-inline'` | The app's own stylesheets, and `style` attributes, which React writes for the theme's variables, the charts and each card's colour. An injected `<style>` element is refused. `next dev` adds `'unsafe-inline'` for its overlay. |
-| `img-src` | Both: the app's icons and uploaded photos (this origin). Cards: a photo's preview while it uploads (`blob:`), and reference images from whichever price source matched (`https:`). Skins: Steam's two image hosts, and a page draws an item's picture from those alone (`src/lib/images.ts`): one whose address names another host, from a spreadsheet's image column say, keeps it but shows "No image" rather than ask for a picture the policy refuses. No `data:`: nothing uses one. |
+| `img-src` | Both: the app's icons and uploaded photos (this origin). Cards: a photo's preview while it uploads (`blob:`), and reference images from whichever price source matched (`https:`); a reference image whose address is `http:` or carries credentials, from a file, a spreadsheet or a restore, is kept on the card but not drawn (`shownImage` in `src/lib/format.ts`). Skins: Steam's two image hosts, and a page draws an item's picture from those alone (`src/lib/images.ts`): one whose address names another host, from a spreadsheet's image column say, keeps it but shows "No image" rather than ask for a picture the policy refuses. No `data:`: nothing uses one. |
 | `font-src`, `connect-src`, `worker-src`, `manifest-src` | The display face, the app's own API, its service worker and its manifest — all this origin. A browser reads the manifest only when something asks for it, installing the app say, so the suite asks for it the way an install does. `next dev` adds its websocket. |
 | `form-action 'self'` | The collection and inventory search boxes are plain forms that reload their own page, so they work before the scripts arrive. |
 | media | None: the scan screen's camera preview is a stream handed to `<video>` as an object, which no fetch directive governs. |
@@ -406,8 +415,8 @@ misspelt feature is ignored without a word) or a feature the page still has.
 `Referrer-Policy: no-referrer` because a page's address names a card or an item.
 `Cross-Origin-Resource-Policy: same-origin`: no other site may embed a photo, a
 chart or a script from here. `Strict-Transport-Security` (a year,
-`includeSubDomains`) goes out when the request came over TLS, directly or
-through a trusted proxy, or when `APP_BASE_URL` starts with `https://`;
+`includeSubDomains`) goes out when a trusted proxy says the request came over
+TLS, or when it was sent to the https address `APP_BASE_URL` names;
 `includeSubDomains` holds every name under that host to https too, so give the
 app a leaf name or a host whose subdomains are all https. No `X-Powered-By`.
 Next's image optimiser (`/_next/image`, which neither app uses) sets a stricter
@@ -416,7 +425,8 @@ policy of its own on what it answers.
 **Caching**, as measured: every page, and every API answer but an uploaded
 photo, is `no-store` (the collection, what it cost and what it is worth never go
 to the browser's disk); a photo is `private, max-age=31536000, immutable`, since
-its name never changes; Next's content-hashed build files are `public,
+its name never changes, and the photo route's 404 and 400 are `no-store` like
+the rest; Next's content-hashed build files are `public,
 max-age=31536000, immutable`; `/sw.js` and `/guard.js` are `no-cache`, and the
 manifest, the icons, `robots.txt` and `security.txt` `max-age=0` — revalidated on
 every use, because their names carry no version.
