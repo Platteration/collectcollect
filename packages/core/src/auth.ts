@@ -106,7 +106,7 @@ async function hmac(message: string, key: string): Promise<string> {
  * How long an explicit signing secret must be, in bytes, where nothing else
  * secret goes into a session's signature: a gate with no password, which only
  * sign-in with Google makes (see signingKey). The kit asks the same of its own
- * SESSION_SECRET (kit/app.js).
+ * SESSION_SECRET (kit/config.js).
  */
 export const MIN_SECRET_BYTES = 32;
 

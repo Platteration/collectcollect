@@ -447,7 +447,9 @@ search boxes work, and nothing can be added or changed.
 
 **For robots and for reports.** `/robots.txt` asks every crawler to stay out —
 this is one owner's collection — and `/.well-known/security.txt` points at
-GitHub's private vulnerability reporting, as `SECURITY.md` does. Both answer
+GitHub's private vulnerability reporting and, for while that is switched off,
+at the issues page, for an issue that says only that there is a report, as
+`SECURITY.md` does; its `Policy` is `SECURITY.md` on `main`. Both answer
 without a session, as do Next's build files and `/guard.js`, which the login
 page needs. `security.txt` expires on 2027-10-08, and each app's
 `tests/website.test.ts` fails once it has: renew it, a year ahead at most.
@@ -484,12 +486,16 @@ Node 22 or later; `.nvmrc` says so for version managers and `engines` for npm,
 which warns under an older one. `CONTRIBUTING.md` has the checks a change is
 expected to pass. CI runs on every push, on pull requests, by hand and weekly:
 one `check` job runs lint, typecheck, the unit tests, the conventions test,
-both builds and both end-to-end suites, on Ubuntu 24.04 by name rather than
+both builds and both end-to-end suites; a `docker` job builds both images,
+boots each and asks it how it is; and an `audit` job runs the shared gate,
+`node .github/audit/npm-audit.mjs`: `npm audit --omit=dev` against the
+lockfile, red on every high or critical advisory that
+`.github/audit/accepted.json` does not accept (this repository keeps no such
+list, so it accepts none). Every job runs on Ubuntu 24.04 by name rather than
 `ubuntu-latest`, since the locked Playwright has no Chromium build for the
 26.04 that label becomes (a unit test asks Playwright which releases it has
-one for, so raising Playwright is the way to a newer runner); a `docker` job builds both images,
-boots each and asks it how it is; and an `audit` job runs
-`npm audit --omit=dev --audit-level=high` against the lockfile.
+one for, so raising Playwright is the way to a newer runner), and every action
+is pinned to a commit of a release that runs on Node 24.
 
 Unit tests cover the pieces where a mistake is silent: price matching and the
 provider adapters (against recorded responses, never the network), the

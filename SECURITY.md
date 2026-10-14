@@ -6,7 +6,11 @@ Please report security issues privately rather than opening a public issue.
 
 Use GitHub's private vulnerability reporting on this repository:
 **Security → Report a vulnerability**. That opens a private advisory visible
-only to the maintainers.
+only to the maintainers. Private reporting is a repository setting the owner
+switches on; while it is off, that button is not there and the form reaches
+nothing, so open an issue instead that says only that you have a security
+report and how to reach you, with none of the details in it, and a private
+channel will be arranged.
 
 Include what you need to make the problem reproducible: the affected version
 or commit, which app (cards or skins), the steps or input that trigger it, and
@@ -36,6 +40,8 @@ demonstrated impact. The apps are meant for one owner on their own machine or
 private network, not as a service for other people; findings that assume a
 multi-user deployment are read with that in mind.
 
-Each app also answers `/.well-known/security.txt` with the same contact. Its
-`Expires` date is a year ahead at most and is renewed before it lapses; each
-app's `tests/website.test.ts` fails once it has.
+Each app also answers `/.well-known/security.txt` with the same two ways in:
+the private advisory form, then the issues page for while the form is off. Its
+`Policy` is this file on `main`, and its `Expires` date is a year ahead at most
+and is renewed before it lapses; each app's `tests/website.test.ts` fails once
+it has.

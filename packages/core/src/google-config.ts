@@ -165,10 +165,12 @@ const MAX_RETURN = 1024;
 
 /**
  * Where to send the browser once it is signed in: a page of this site, or the
- * home page. The kit's rule (kit/app.js, safeReturnPath) at the site's root:
+ * home page. The kit's rule (kit/config.js, safeReturnPath) at the site's root:
  * once decoded, one leading slash, no backslash and no control character (and
  * so as given too: decoding only adds characters a check here refuses), and
- * nothing under /api/. The caller puts the site's origin in front of what this
+ * nothing under /api/. The kit also refuses a path whose dot segments resolve
+ * to one that starts //, since it may write the path alone; this one is not
+ * needed here, because the caller puts the site's origin in front of what this
  * returns, so it is never read as another host.
  */
 export function returnPath(value: unknown, origin: string): string {

@@ -1,5 +1,9 @@
-# CollectCollect: report a vulnerability privately, as SECURITY.md describes.
+# CollectCollect: report a vulnerability privately, as SECURITY.md describes. The first
+# Contact opens a private advisory only the maintainers can read; while private reporting is
+# switched off on the repository, open an issue that says only that you have a report and how
+# to reach you, and leave the details out of it.
 Contact: https://github.com/Platteration/collectcollect/security/advisories/new
+Contact: https://github.com/Platteration/collectcollect/issues
 Expires: 2027-10-08T00:00:00.000Z
-Policy: https://github.com/Platteration/collectcollect/blob/HEAD/SECURITY.md
+Policy: https://github.com/Platteration/collectcollect/blob/main/SECURITY.md
 Preferred-Languages: en

@@ -234,18 +234,27 @@ describe("the files a website answers at fixed addresses", () => {
 
   it("points reporters where SECURITY.md does, and has not expired", () => {
     const text = fs.readFileSync(path.join(PUBLIC, ".well-known/security.txt"), "utf8");
-    const fields = new Map(
-      text
-        .split("\n")
-        .filter((line) => line.trim() && !line.startsWith("#"))
-        .map((line) => [line.slice(0, line.indexOf(":")), line.slice(line.indexOf(":") + 1).trim()]),
-    );
-    expect([...fields.keys()].sort()).toEqual(["Contact", "Expires", "Policy", "Preferred-Languages"]);
-    // SECURITY.md asks for GitHub's private reporting, not a public issue.
-    expect(fs.readFileSync(path.join(REPO, "SECURITY.md"), "utf8")).toContain("private vulnerability reporting");
-    expect(fields.get("Contact")).toBe("https://github.com/Platteration/collectcollect/security/advisories/new");
-    expect(fields.get("Policy")).toBe("https://github.com/Platteration/collectcollect/blob/HEAD/SECURITY.md");
-    expect(fields.get("Preferred-Languages")).toBe("en");
+    // Every field in order, a name given twice (Contact) kept twice.
+    const lines = text
+      .split("\n")
+      .filter((line) => line.trim() && !line.startsWith("#"))
+      .map((line) => [line.slice(0, line.indexOf(":")), line.slice(line.indexOf(":") + 1).trim()] as const);
+    const values = (name: string) => lines.filter(([key]) => key === name).map(([, value]) => value);
+    const fields = new Map(lines);
+    expect(lines.map(([key]) => key).sort()).toEqual(["Contact", "Contact", "Expires", "Policy", "Preferred-Languages"]);
+    // SECURITY.md asks for GitHub's private reporting, not a public issue; while that is off,
+    // for an issue that carries no details, which is why the issues page is the second Contact.
+    const policy = fs.readFileSync(path.join(REPO, "SECURITY.md"), "utf8").replace(/\s+/g, " ");
+    expect(policy).toContain("private vulnerability reporting");
+    expect(policy).toContain("open an issue instead that says only that you have a security report and how to reach you");
+    expect(values("Contact")).toEqual([
+      "https://github.com/Platteration/collectcollect/security/advisories/new",
+      "https://github.com/Platteration/collectcollect/issues",
+    ]);
+    // SECURITY.md on main, the branch the site is published from: blob/HEAD follows the
+    // default branch, which may not carry it.
+    expect(values("Policy")).toEqual(["https://github.com/Platteration/collectcollect/blob/main/SECURITY.md"]);
+    expect(values("Preferred-Languages")).toEqual(["en"]);
     // RFC 9116: an expiry, a year ahead at most. Renew it before it lapses; this fails once it has.
     const expires = Date.parse(fields.get("Expires") ?? "");
     expect(fields.get("Expires")).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{3})?Z$/);

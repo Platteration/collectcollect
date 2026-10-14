@@ -15,15 +15,18 @@ package run the same version; `CONTRIBUTING.md` has what goes where.
 
 The fleet's sign-in kit lives at `packages/core/src/kit/`, not `server/kit/`: the apps reach
 it only through `packages/core`, which Next transpiles and bundles into each app and the
-Docker image. Its bytes are the canonical copy's (`diff -r` against it is empty) and are
-never edited here: a change is asked of the canonical copy and copied in whole. This
-repository uses three of its modules, `google.js`, `crypto.js` and `http.js`, from
-`packages/core/src/google-signin.ts`; the rest (its own sessions, users, Stripe, the
-adapters) is carried unused, since there is no shop and no webhook here. `npm test` runs its
-self-test (`packages/core`'s `test` script, `node --test src/kit/selftest.mjs`), and
-`packages/core`'s `typecheck` checks its declarations with the package's own tsconfig and its
-JavaScript with `tsconfig.kit.json` (the same options plus `checkJs` and Node's types); its
-`eslint .` lints all seventeen files.
+Docker image. Its bytes are the canonical copy's, its `.d.ts` files included (`diff -r`
+against it is empty, and the conventions test holds it to the canonical copy's hash,
+`KIT_SHA`), and are never edited here: a change is asked of the canonical copy and copied in
+whole. This repository uses three of its modules, `google.js`, `crypto.js` and `http.js`,
+from `packages/core/src/google-signin.ts`; the rest (its configuration reader `config.js`,
+its own sessions, users, Stripe, the adapters) is carried unused, since there is no shop and
+no webhook here, so a change to those modules changes the bytes here and nothing the apps
+do. `npm test` runs its self-test (`packages/core`'s `test` script,
+`node --test src/kit/selftest.mjs`), and `packages/core`'s `typecheck` checks its
+declarations with the package's own tsconfig and its JavaScript with `tsconfig.kit.json`
+(the same options plus `checkJs` and Node's types); its `eslint .` lints all nineteen
+files.
 
 Sign-in with Google is a way past each app's gate, beside the password or in its place, for
 the accounts the app lists: `google-config.ts` reads the app's variables (`APP_URL` and
