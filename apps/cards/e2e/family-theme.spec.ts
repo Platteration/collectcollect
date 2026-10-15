@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { expect, test } from "@playwright/test";
 
 test("header palette follows the user onto every page without recoloring returns", async ({ page }) => {
   await page.goto("/");

@@ -13,8 +13,6 @@ and chart surfaces. The existing platform body font and condensed display face
 remain. Depth stays shallow: a crisp outline, short lower edge and subtle upper
 highlight. Existing app layouts and navigation remain in place.
 
-The one exception is the card itself, which is a physical object and is drawn as one: its face tilts up to ten degrees towards the pointer, catches the light, and carries the wear its grade implies (soft corners, whitened edges, dust, fingerprints, print lines, scratches, dents, yellowing, stains and a crease as the grade falls; only dust and a print line may cross the middle of the art), a holo or foil finish shows an overlay rainbow in one of five patterns that tints the art rather than covering it, a raw card may curl a few degrees, and a graded card sits inside a three-plane slab. That depth stops at the card's edge; the panel it sits on keeps the shallow treatment above.
-
 Light, Dark and System are separate from the eight palettes: Teal (sea glass),
 Amber, Sky, Indigo, Violet, Plum, Copper and Slate. Teal retains the warm-paper /
 deep-ink default. The header offers the same palette choices as Settings.
