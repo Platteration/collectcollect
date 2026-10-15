@@ -193,34 +193,36 @@ describe("rows an import cannot decide about", () => {
 });
 
 
-describe("a file larger than one import", () => {
+describe("sports columns", () => {
   beforeEach(() => setDb(openDatabase(":memory:")));
 
-  it("reads no more rows than the cap, and says how many it left", () => {
-    const rows = MAX_IMPORT_ROWS + 25;
-    const csv = ["name,game", ...Array.from({ length: rows }, (_, i) => `Card ${i},pokemon`)].join("\n");
+  it("reads the team, rookie and parallel columns, the serial numbering, the flags and BGS subgrades", () => {
+    const csv = [
+      "player,sport,year,brand,set,number,team,RC,parallel,serial,auto,relic,grading company,grade,cert,centering,corners,edges,surface,paid",
+      "Mike Trout,baseball,2011,Topps,Topps Chrome,US175,Los Angeles Angels,yes,Gold Refractor,12/50,x,,BGS,9.5,0012345678,9.5,9.5,10,9,650",
+    ].join("\n");
     const preview = previewImport(csv);
-    // Derived from the file, not from the constant: whatever the cap is, the
-    // rows read plus the rows reported must account for every row in the file.
-    expect(preview.rows.length + preview.skippedForSize).toBe(rows);
-    expect(preview.skippedForSize).toBeGreaterThan(0);
-    expect(preview.total).toBe(preview.rows.length);
-    expect(applyImport(preview).created).toBe(preview.rows.length);
-  }, 120_000);
-
-  it("leaves a file under the cap alone", () => {
-    const csv = ["name,game", "Charizard,pokemon", "Blastoise,pokemon"].join("\n");
-    expect(previewImport(csv).skippedForSize).toBe(0);
+    expect(preview.unmapped).toEqual([]);
+    expect(preview.rows[0].input).toMatchObject({
+      game: "sports",
+      name: "Mike Trout",
+      team: "Los Angeles Angels",
+      rookie: true,
+      parallel: "Gold Refractor",
+      serialNumber: "12/50",
+      autograph: true,
+      relic: false,
+      gradingCompany: "BGS",
+      grade: "9.5",
+      certNumber: "0012345678",
+      subgrades: { centering: 9.5, corners: 9.5, edges: 10, surface: 9 },
+    });
+    expect(applyImport(preview)).toMatchObject({ created: 1, merged: 0 });
+    expect(listCards()[0]).toMatchObject({ serialNumber: "12/50", subgrades: { edges: 10 } });
   });
 
-  it("finds a duplicate through the index rather than by reading every card", () => {
-    createCard({ game: "pokemon", name: "Charizard" });
-    // SQLite's own plan, not a stopwatch: both columns have to be used, or the
-    // lookup degrades to a scan of every card in that game once per row.
-    const plan = getDb()
-      .prepare("EXPLAIN QUERY PLAN SELECT * FROM cards WHERE game = ? AND name_key = ? ORDER BY updated_at DESC, id DESC")
-      .all("pokemon", "charizard") as Array<{ detail: string }>;
-    expect(plan.map((r) => r.detail).join(" ")).toMatch(/USING INDEX idx_cards_lookup \(game=\? AND name_key=\?\)/);
-    expect(findSimilar({ game: "pokemon", name: " CHARIZARD " })).toHaveLength(1);
+  it("no longer reads a serial column as a cert number, and a parallel column as a variant", () => {
+    const preview = previewImport(["name,game,serial,parallel", "Mike Trout,sports,7/25,Silver Prizm"].join("\n"));
+    expect(preview.rows[0].input).toMatchObject({ serialNumber: "7/25", parallel: "Silver Prizm", certNumber: null, variant: null });
   });
 });

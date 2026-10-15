@@ -1,6 +1,6 @@
 import { extent, thinPoints } from "@collectcollect/core/series";
 import type { CostBasis } from "./acquisitions";
-import type { CardRecord, Centering, Game, PriceSnapshot, PriceSummary, Settings } from "./types";
+import type { CardRecord, PriceSnapshot } from "./types";
 import { round2 } from "./pricing/match";
 import { highestGradeAllowed, type CenteringCap } from "./grading/centering";
 
@@ -270,243 +270,20 @@ export function performance(first: Measurable | undefined, last: Measurable | un
 // Grading outlook for ungraded cards
 // ---------------------------------------------------------------------------
 
-export interface Outlook {
-  /** What the owner's raw copy is worth today (condition-adjusted). */
-  raw: number;
-  /** Realistic low outcome after grading (a mid grade). */
-  min: number;
-  minLabel: string;
-  /** Best realistic outcome after grading (gem mint). */
-  max: number;
-  maxLabel: string;
-  fee: number;
-  /** max − raw − fee: what grading could add at best. */
-  upside: number;
-  /** min − raw − fee: what grading adds if it comes back a mid grade (negative = you lose money). */
-  downside: number;
-  /** Whether both bounds have recorded graded prices rather than multiplier estimates. */
-  fromRealData: boolean;
-  /** Provenance of each bound; a measured high end never makes the low end measured. */
-  provenance?: { min: "observed" | "estimated"; max: "observed" | "estimated"; likely: "observed" | "estimated" | null; source: string | null; fetchedAt: string;
-    minSource: string | null; maxSource: string | null; minAt: string; maxAt: string;
-    likelySource: string | null; likelyAt: string | null;
-    /** The centering limit that held the best case under a 10, when one did. */
-    centeringCap: CenteringCap | null };
-  /** Value at the grade the photo suggests this copy would receive, when one was estimated. */
-  likely: number | null;
-  likelyLabel: string | null;
-}
-
-const MAX_KEYS = ["PSA 10", "BGS 10", "CGC 10", "SGC 10", "TAG 10"];
-const MIN_KEYS = ["PSA 8", "Grade 8", "CGC 8", "BGS 8", "PSA 7", "Grade 7"];
-
-function pick(summary: PriceSummary, keys: string[]): { value: number; label: string; real: boolean } | null {
-  for (const k of keys) if (summary.graded[k]) return { value: summary.graded[k], label: k, real: true };
-  for (const k of keys) if (summary.estimatedGraded[k]) return { value: summary.estimatedGraded[k], label: k, real: false };
-  return null;
-}
-
-/** Price at a specific expected grade, from real data first then the multiplier estimates. */
-function atGrade(summary: PriceSummary, grade: string | null | undefined): { value: number; label: string; real: boolean } | null {
-  const g = (grade ?? "").trim().replace(/[^0-9.]/g, "");
-  if (!g) return null;
-  const keys = [`PSA ${g}`, `Grade ${g}`, `CGC ${g}`, `BGS ${g}`, `SGC ${g}`, `TAG ${g}`];
-  for (const key of keys) {
-    if (summary.graded[key]) return { value: summary.graded[key], label: key, real: true };
-  }
-  for (const key of keys) {
-    if (summary.estimatedGraded[key]) return { value: summary.estimatedGraded[key], label: key, real: false };
-  }
-  return null;
-}
-
-/** The number a grade label carries: "PSA 9.5" is 9.5, "Grade 8" is 8. */
-function gradeNumber(label: string): number {
-  const numbers = label.match(/\d+(?:\.\d+)?/g);
-  return numbers ? Number(numbers[numbers.length - 1]) : NaN;
-}
-
-/** The company whose limits a best-case label is judged by; the generic grades follow PSA's. */
-function companyOf(label: string): string {
-  const word = label.split(" ")[0] ?? "";
-  return word === "Grade" ? "PSA" : word;
-}
-
-/** The best priced grade at or under a cap, stepping down by half grades. */
-function bestAtOrBelow(summary: PriceSummary, grade: number): { value: number; label: string; real: boolean } | null {
-  for (let g = grade; g >= 1; g -= 0.5) {
-    const hit = atGrade(summary, String(g));
-    if (hit) return hit;
-  }
-  return null;
-}
-
-/**
- * Outlook from one snapshot; null when the card has no usable ungraded price.
- *
- * A measured centering caps the best case: a card whose borders are further
- * off than the company allows for a 10 is priced at the best grade its
- * centering leaves open, and the grade the photo suggests is held there too.
- * Nothing measured, or nothing on the front, leaves the outlook as it was.
- */
-export function gradingOutlook(summary: PriceSummary, settings: Settings, expectedGrade?: string | null, centering?: Centering | null, game?: Game | null): Outlook | null {
-  const raw = summary.yourCopyValue ?? summary.ungraded;
-  if (!raw) return null;
-  const best = pick(summary, MAX_KEYS);
-  if (!best) return null;
-  const min = pick(summary, MIN_KEYS) ?? { value: raw, label: "Ungraded", real: false };
-  const fee = settings.gradingFee;
-  const cap = centering ? highestGradeAllowed(companyOf(best.label), centering, game) : null;
-  const capped = cap !== null && cap.grade < gradeNumber(best.label);
-  // Nothing priced at or under the cap: the best case is the mid case.
-  const max = capped ? (bestAtOrBelow(summary, cap.grade) ?? { value: min.value, label: min.label, real: min.real }) : best;
-  let likelyGrade = expectedGrade ?? null;
-  if (capped && likelyGrade) {
-    const n = Number(String(likelyGrade).replace(/[^0-9.]/g, ""));
-    if (Number.isFinite(n) && n > cap.grade) likelyGrade = String(cap.grade);
-  }
-  const likely = atGrade(summary, likelyGrade);
-  const provenanceOf = (label: string, value: number) => {
-    const priority = ["manual", "pricecharting", "pokemontcg", "scryfall", "ygoprodeck"];
-    const quote = summary.quotes.filter(q => q.currency === "USD" && q.graded[label] === value)
-      .sort((a, b) => priority.indexOf(a.source) - priority.indexOf(b.source))[0];
-    return { source: quote?.sourceLabel ?? summary.gradedSource, at: quote?.fetchedAt ?? summary.fetchedAt };
-  };
-  const minProvenance = provenanceOf(min.label, min.value), maxProvenance = provenanceOf(max.label, max.value);
-  const likelyMeasured = likely && summary.graded[likely.label] !== undefined;
-  const likelyProvenance = likelyMeasured ? provenanceOf(likely.label, likely.value) : null;
-  return {
-    likely: likely?.value ?? null,
-    likelyLabel: likely?.label ?? null,
-    raw,
-    min: min.value,
-    minLabel: min.label,
-    max: max.value,
-    maxLabel: max.label,
-    fee,
-    upside: round2(max.value - raw - fee),
-    downside: round2(min.value - raw - fee),
-    fromRealData: max.real && min.real,
-    provenance: { min: min.real ? "observed" : "estimated", max: max.real ? "observed" : "estimated",
-      likely: likely ? (likelyMeasured ? "observed" : "estimated") : null,
-      source: summary.gradedSource, fetchedAt: summary.fetchedAt,
-      minSource: min.real ? minProvenance.source : null, maxSource: max.real ? maxProvenance.source : null,
-      minAt: minProvenance.at, maxAt: maxProvenance.at,
-      likelySource: likelyProvenance?.source ?? null, likelyAt: likelyProvenance?.at ?? null,
-      centeringCap: capped ? cap : null },
-  };
-}
-
-export interface OutlookPoint extends Outlook {
-  t: string;
-}
-
-/**
- * How many of a card's newest snapshots the outlook is drawn from. The verdict
- * reads the last point and the peak within the series; three months of daily
- * checks is what "recent peak" means to a person, and it keeps the dashboard
- * from loading a card's whole life for a chart forty pixels high.
- */
-export const OUTLOOK_SNAPSHOTS = 90;
-
-/** How many outlook charts the dashboard draws before asking; the rest are one click away. */
-export const OUTLOOK_SHOWN = 12;
-
-/**
- * How many points of a card's outlook travel to the browser. The verdict is
- * decided on the server from the whole series; the chart is forty pixels
- * high, and ninety points a card for a few hundred cards was most of the page.
- */
-export const OUTLOOK_POINTS = 30;
-
-/** The series as the chart is sent it: thinned, with its first and last points kept. */
-export function outlookForChart(series: OutlookPoint[]): OutlookPoint[] {
-  return thinPoints(series, OUTLOOK_POINTS);
-}
-
-/** The charts to draw now, and how many the reader would have to ask for. */
-export function capOutlook<T>(list: T[], showAll: boolean, limit = OUTLOOK_SHOWN): { shown: T[]; hidden: number } {
-  if (showAll || list.length <= limit) return { shown: list, hidden: 0 };
-  return { shown: list.slice(0, limit), hidden: list.length - limit };
-}
-
-export function outlookSeries(snapshots: PriceSnapshot[], settings: Settings, expectedGrade?: string | null, centering?: Centering | null, game?: Game | null): OutlookPoint[] {
-  return [...snapshots]
-    .sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt) || a.id - b.id)
-    .flatMap((s) => {
-      const o = gradingOutlook(s.summary, settings, expectedGrade, centering, game);
-      return o ? [{ t: s.fetchedAt, ...o }] : [];
-    });
-}
-
-export type VerdictKind = "prime" | "wait" | "skip" | "insufficient";
-
-export interface Verdict {
-  kind: VerdictKind;
-  headline: string;
-  detail: string;
-  /** Current upside as a fraction of the best upside seen in the series (0–1). */
-  upsideVsPeak: number | null;
-}
-
-/**
- * Heuristic on when to send a raw card in. "Prime" means the gap between the
- * gem-mint price and the raw price is at or near the widest it has been and
- * comfortably clears the grading fee; "wait" means the gap is narrower than it
- * was; "skip" means even a gem-mint result would not pay for the fee.
- */
-export function gradingVerdict(series: OutlookPoint[]): Verdict {
-  const last = series[series.length - 1];
-  if (!last) return { kind: "insufficient", headline: "No price data", detail: "Refresh prices to see a grading outlook.", upsideVsPeak: null };
-  if (last.upside <= 0) {
-    return {
-      kind: "skip",
-      headline: "Not worth grading right now",
-      detail: `Even a ${last.maxLabel} would return ${fmt(last.max)} against ${fmt(last.raw)} raw plus a ${fmt(last.fee)} fee.`,
-      upsideVsPeak: null,
-    };
-  }
-  const days = new Map<string, OutlookPoint>();
-  for (const point of series) days.set(point.t.slice(0, 10), point);
-  const daily = [...days.values()];
-  if (daily.length < 3) {
-    return {
-      kind: "insufficient",
-      headline: `Up to ${fmt(last.upside)} upside`,
-      detail: "This comparison needs prices from at least three different days. Repeated refreshes today do not add another day of history.",
-      upsideVsPeak: null,
-    };
-  }
-  const [, peak] = extent(daily.map((p) => p.upside));
-  const ratio = peak > 0 ? last.upside / peak : 0;
-  const trend = last.upside - (daily[Math.max(0, daily.length - 4)] ?? last).upside;
-  if (ratio >= 0.9) {
-    return {
-      kind: "prime",
-      headline: "Near the best recorded premium",
-      detail: `The ${last.maxLabel} premium over raw is ${fmt(last.upside)} after fees, ${ratio >= 0.999 ? "the widest" : "close to the widest"} recorded here.${trend > 0 ? " Still widening." : ""} This comparison does not predict the grade or a sale price.`,
-      upsideVsPeak: ratio,
-    };
-  }
-  return {
-    kind: "wait",
-    headline: "Gap has narrowed",
-    detail: `Upside is ${fmt(last.upside)} now versus ${fmt(peak)} at its widest recorded here. ${trend > 0 ? "The recorded gap has increased recently." : "The recorded gap is below its earlier peak."}`,
-    upsideVsPeak: ratio,
-  };
-}
-
-/** Whether the latest outlook clears the owner's "ready to grade" thresholds and timing looks right. */
-export function isReadyToGrade(series: OutlookPoint[], verdict: Verdict, settings: Settings): boolean {
-  const last = series[series.length - 1];
-  if (!last || verdict.kind !== "prime") return false;
-  if (last.upside < settings.readyMinUpside) return false;
-  return last.raw <= 0 || (last.upside / last.raw) * 100 >= settings.readyMinUpsidePercent;
-}
-
-function fmt(n: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
-}
+// The outlook and the grade / wait / skip verdict live in the shared package
+// now, so a sealed game or a raw comic reasons the same way. The card app's
+// grade keys are the package's defaults, and these re-exports keep every
+// import in this app and its tests where it was.
+export {
+  gradingOutlook,
+  outlookSeries,
+  gradingVerdict,
+  isReadyToGrade,
+  type Outlook,
+  type OutlookPoint,
+  type Verdict,
+  type VerdictKind,
+} from "@collectcollect/core/grading";
 
 // ---------------------------------------------------------------------------
 // Cost basis and return

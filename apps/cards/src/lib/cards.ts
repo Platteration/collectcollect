@@ -9,8 +9,7 @@ import type {
   PriceSummary,
   Settings,
 } from "./types";
-import { CONDITIONS, GAMES, GRADING_STATUSES, MAX_MONEY, isCondition, isGame, MAX_QUANTITY, type Centering, type GradingReport, type GradingStatus } from "./types";
-import { readCentering, readGradingReport } from "./grading/schema";
+import { CONDITIONS, GAMES, GRADING_STATUSES, cleanSubgrades, flag, serial, type GradingStatus } from "./types";
 import { addLot, costBasisByCard, deleteLot, getLot, listLots, reconcileToQuantity, recomputePurchasePrice, type AcquisitionInput } from "./acquisitions";
 import { IdentificationSchema } from "./identify/schema";
 import { isValidUploadName } from "./images";
@@ -35,6 +34,13 @@ export interface CardRow {
   variant: string | null;
   language: string | null;
   manufacturer: string | null;
+  team: string | null;
+  rookie: number;
+  parallel: string | null;
+  serial_number: string | null;
+  autograph: number;
+  relic: number;
+  subgrades: string | null;
   quantity: number;
   condition: string;
   grading_company: string | null;
@@ -104,6 +110,13 @@ export function rowToCard(row: CardRow): CardRecord {
     variant: row.variant,
     language: row.language,
     manufacturer: row.manufacturer,
+    team: row.team,
+    rookie: row.rookie === 1,
+    parallel: row.parallel,
+    serialNumber: row.serial_number,
+    autograph: row.autograph === 1,
+    relic: row.relic === 1,
+    subgrades: cleanSubgrades(parseJson<unknown>(row.subgrades, null)),
     quantity: row.quantity,
     condition: isCondition(row.condition) ? row.condition : "NM",
     gradingCompany: row.grading_company,
@@ -255,6 +268,13 @@ export function normalizeInput(input: CardInput): Required<
     variant: str(input.variant),
     language: str(input.language),
     manufacturer: str(input.manufacturer),
+    team: str(input.team),
+    rookie: flag(input.rookie),
+    parallel: str(input.parallel),
+    serialNumber: serial(input.serialNumber),
+    autograph: flag(input.autograph),
+    relic: flag(input.relic),
+    subgrades: cleanSubgrades(input.subgrades),
     quantity,
     condition,
     gradingCompany: str(input.gradingCompany),
@@ -329,23 +349,23 @@ export function createCard(input: CardInput): CardRecord {
   const now = new Date().toISOString();
   const result = getDb()
     .prepare(
-      // name_key is bound, not computed in SQL: one function (nameKey) defines
-      // the key for the writers, for findSimilar and for the backfill, so the
-      // stored value and the value looked up cannot fold differently.
-      `INSERT INTO cards (game, sport, name, name_key, set_name, set_code, card_number, year, rarity, variant,
-        language, manufacturer, quantity, condition, grading_company, grade, cert_number, centering, grading_report, purchase_price,
+      `INSERT INTO cards (game, sport, name, set_name, set_code, card_number, year, rarity, variant,
+        language, manufacturer, team, rookie, parallel, serial_number, autograph, relic, subgrades,
+        quantity, condition, grading_company, grade, cert_number, purchase_price,
         notes, image_path, reference_image_url, accent_color, location, external_ids, identification, manual_ungraded, manual_graded,
         grading_status, created_at, updated_at)
-       VALUES (@game, @sport, @name, @nameKey, @setName, @setCode, @cardNumber, @year, @rarity, @variant,
-        @language, @manufacturer, @quantity, @condition, @gradingCompany, @grade, @certNumber, @centering, @gradingReport, @purchasePrice,
+       VALUES (@game, @sport, @name, @setName, @setCode, @cardNumber, @year, @rarity, @variant,
+        @language, @manufacturer, @team, @rookie, @parallel, @serialNumber, @autograph, @relic, @subgrades,
+        @quantity, @condition, @gradingCompany, @grade, @certNumber, @purchasePrice,
         @notes, @imagePath, @referenceImageUrl, @accentColor, @location, @externalIds, @identification, @manualUngraded, @manualGraded,
         @gradingStatus, @now, @now)`,
     )
     .run({
       ...c,
-      nameKey: nameKey(c.name),
-      centering: c.centering ? JSON.stringify(c.centering) : null,
-      gradingReport: c.gradingReport ? JSON.stringify(c.gradingReport) : null,
+      rookie: c.rookie ? 1 : 0,
+      autograph: c.autograph ? 1 : 0,
+      relic: c.relic ? 1 : 0,
+      subgrades: c.subgrades ? JSON.stringify(c.subgrades) : null,
       externalIds: JSON.stringify(c.externalIds),
       identification: c.identification ? JSON.stringify(c.identification) : null,
       manualGraded: JSON.stringify(c.manualGraded),
@@ -363,21 +383,41 @@ export function createCard(input: CardInput): CardRecord {
 }
 
 export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | null {
-  // One transaction: the row, its lots and the price derived from them change
-  // together or not at all. A failure between the row and the lots would leave
-  // a quantity the ledger does not account for.
-  const run = getDb().transaction((): CardRecord | null => {
-    const existing = getCard(id);
-    if (!existing) return null;
-    const merged = normalizeInput({ ...existing, ...patch, game: patch.game ?? existing.game, name: patch.name ?? existing.name });
-    // A card whose identity changed is no longer the product the sources were
-    // matched to. Forget the learned ids and the reference image, unless the
-    // edit set them itself, so the next refresh searches afresh instead of
-    // asking for the old product by id — which is how a wrong match used to
-    // outlive every correction.
-    if (identityChanged(existing, merged)) {
-      if (patch.externalIds === undefined) merged.externalIds = {};
-      if (patch.referenceImageUrl === undefined) merged.referenceImageUrl = null;
+  const existing = getCard(id);
+  if (!existing) return null;
+  const merged = normalizeInput({ ...existing, ...patch, game: patch.game ?? existing.game, name: patch.name ?? existing.name });
+  getDb()
+    .prepare(
+      `UPDATE cards SET game=@game, sport=@sport, name=@name, set_name=@setName, set_code=@setCode,
+        card_number=@cardNumber, year=@year, rarity=@rarity, variant=@variant, language=@language,
+        manufacturer=@manufacturer, team=@team, rookie=@rookie, parallel=@parallel, serial_number=@serialNumber,
+        autograph=@autograph, relic=@relic, subgrades=@subgrades,
+        quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
+        grade=@grade, cert_number=@certNumber, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
+        reference_image_url=@referenceImageUrl, accent_color=@accentColor, location=@location, external_ids=@externalIds, identification=@identification,
+        manual_ungraded=@manualUngraded, manual_graded=@manualGraded, grading_status=@gradingStatus, updated_at=@now
+       WHERE id=@id`,
+    )
+    .run({
+      ...merged,
+      id,
+      rookie: merged.rookie ? 1 : 0,
+      autograph: merged.autograph ? 1 : 0,
+      relic: merged.relic ? 1 : 0,
+      subgrades: merged.subgrades ? JSON.stringify(merged.subgrades) : null,
+      externalIds: JSON.stringify(merged.externalIds),
+      identification: merged.identification ? JSON.stringify(merged.identification) : null,
+      manualGraded: JSON.stringify(merged.manualGraded),
+      now: new Date().toISOString(),
+    });
+  if (merged.quantity !== existing.quantity) reconcileToQuantity(id, merged.quantity);
+  if (patch.purchasePrice !== undefined) {
+    // With one lot the purchase price is still something the owner sets
+    // directly. With several it is an average of them, so the edit is ignored
+    // and the recompute below puts the average back.
+    const lots = listLots(id);
+    if (lots.length === 1) {
+      getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, lots[0].id);
     }
     getDb()
       .prepare(
@@ -681,8 +721,10 @@ export type IntakeOutcome =
  * and each adding one copy.
  *
  * A match only counts when the copies are interchangeable: both ungraded, or
- * graded by the same company to the same grade. A raw scan must never be
- * folded into a slab, since it would then be valued as a graded copy.
+ * graded by the same company to the same grade, and the same parallel. A raw
+ * scan must never be folded into a slab, since it would then be valued as a
+ * graded copy. A serial-numbered card is one specific object ("12/99" names
+ * it), so it is never merged and never merged into.
  */
 export function intakeCard(input: CardInput): IntakeOutcome {
   try {
@@ -705,14 +747,20 @@ export function intakeCard(input: CardInput): IntakeOutcome {
 export function intakeCardWithin(input: CardInput): IntakeOutcome {
   const clean = normalizeInput(input);
   const run = getDb().transaction((): IntakeOutcome => {
+    if (clean.serialNumber) return { result: "created", card: createCard(input) };
+    const parallelKey = (p: string | null) => (p ?? "").trim().toLowerCase();
     const candidates = findSimilar({
       game: clean.game,
       name: clean.name,
       cardNumber: clean.cardNumber,
       setName: clean.setName,
-    });
-    const alike = candidates.filter((c) => interchangeable(c, clean));
-    if (candidates.length > 0 && alike.length !== 1) {
+    }).filter((c) => !c.serialNumber && parallelKey(c.parallel) === parallelKey(clean.parallel));
+    const interchangeable = candidates.filter(
+      (c) =>
+        (c.grade ?? null) === (clean.grade ?? null) &&
+        (c.gradingCompany ?? null) === (clean.gradingCompany ?? null),
+    );
+    if (candidates.length > 0 && interchangeable.length !== 1) {
       return { result: "ambiguous", candidates };
     }
     const existing = alike.length === 1 ? alike[0] : undefined;

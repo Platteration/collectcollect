@@ -2,6 +2,8 @@
 
 A personal cataloging app for trading cards: Pokémon, Yu-Gi-Oh!, Magic: The Gathering, sports cards (baseball, basketball, football, hockey…) and anything else in a sleeve.
 
+It is also a family: the same repository holds apps for CS2 skins, retro games, comics, watches and whisky, each with its own database, its own price sources and its own rules about what counts as one object, sharing the engine underneath. See [The other apps](#the-other-apps).
+
 Snap a photo of a card and CollectCollect:
 
 1. **Identifies it** with Claude's vision model: game, name, set, collector number, year, rarity, printing variant (holo, 1st edition, refractor, autograph…) and, if it's in a slab, the grading company, grade and cert number; it also reads the centering as border ratios when the photo shows them.
@@ -89,17 +91,25 @@ The archive is written and read by a small built-in zip writer and reader rather
 
 **Export.** The Collection page has an *Export CSV* button (also `GET /api/export`) with every card, its grade or condition, purchase price, and latest ungraded / PSA 10 / your-copy prices.
 
-## The value chart
+## Sports cards
 
-The line on the portfolio page is what the collection has been worth over time, built the way a brokerage builds an account chart rather than by totalling today's cards against every old price.
+The card app covers sports cards as a game type of its own rather than a separate app: the grading verdict, the outlook chart, submissions, sales and the report all apply unchanged. Choosing **Sports** in the form adds what a sports card has and a TCG card does not:
 
-- **Only what you held.** A card counts from the day it was catalogued, and copies leave the line on the day they sold. Buying a card today does not rewrite what the collection was worth last year, and selling one does not erase it from the history it lived through.
-- **Cards added are not gains.** Above the chart the window's change is split into how much came from cards joining or leaving and how much from prices actually moving, and the percentage is taken on the move alone — over the value held plus half the flows, the simple Dietz return a fund reports for a period with money going in and out.
-- **What you paid.** A dashed line follows the cost of the copies held, over the cards with a purchase price recorded; the gap to the value line is the unrealized gain, and the tooltip names both. Click it in the legend to hide it, which is worth doing on 1W where a low cost basis flattens the scale.
-- **One close per bucket.** Refreshing every card writes a snapshot per card seconds apart. The chart reads one value per hour (1W), day (1M, 3M) or week (1Y), so it plots the day's move instead of the staircase of a refresh in progress.
-- **Scaled to the data.** The axis fits the range on screen rather than starting at zero, with a dotted line at the window's opening value, so a 2% week reads as a 2% week.
+| Field | Notes |
+| --- | --- |
+| Player | the card's name field, labelled Player |
+| Sport, manufacturer / brand | baseball, basketball…; Topps, Panini, Upper Deck… |
+| Team | |
+| Rookie card | flag |
+| Parallel / refractor | the parallel's name and colour as printed: Gold Refractor, Silver Prizm, Blue Wave 1:25 |
+| Serial number | `12/99`, however it was typed (`12 of 99`, `#12/99`) |
+| Autograph, relic / patch | flags |
+| Grading company, grade, cert | PSA, BGS, SGC, CGC, TAG |
+| Subgrades | centering, corners, edges, surface, shown for BGS slabs |
 
-Each card page carries the same chart for a single copy, with what you paid drawn across it.
+**One specific object, or a stack?** A serial-numbered card is one specific object: `12/99` names it, so it is never merged with another copy and nothing is merged into it. So is a graded card at its own grade. Raw copies of the same card stack only when they are the same parallel: a base card and its Refractor are two rows, and two base copies are one row with a quantity of two and a purchase lot each.
+
+**Pricing.** There is no free sports-card price API. PriceCharting (`PRICECHARTING_TOKEN`, paid) is the only source, through the same adapter as every other game: the search carries the year, brand, set, player, number and the parallel, autograph and relic words the way PriceCharting names its listings, and a listing that names the parallel outranks the base card when the copy is one. Without a token, type the ungraded and graded prices in by hand on the card; they override every source and the chart, verdict and report work from them. Photo identification reads the team, RC logo, parallel, serial numbering, autograph and relic, and the four subgrades on a BGS label. Sports cards have no set-checklist source either, and the Sets page says so.
 
 ## Card identification
 
@@ -139,7 +149,126 @@ A small service worker makes that work and lets the shell open without a network
 
 Five destinations fit on the tab bar; the last one is labelled *More* and leads to Settings, where the rest are listed. The skins app is installable in the same way, with its own icon and its own service worker. Because a service worker's scope is an origin and each app's worker clears every cache it does not own, the two apps have to be served from different origins — which two ports are, and which two paths on one host are not.
 
-A page that is not there — a deleted card's, or a mistyped address — is a 404 drawn inside the app, with the header still there to leave by. A page that fails to render says so on the page, with the error, rather than going blank.
+The repository is an npm workspace, so a second collectible can get its own app
+without either one inheriting the other's assumptions. Root scripts fan out
+across all of them.
+
+```
+apps/cards/              this app
+apps/skins/              the same idea for CS2 items — see its own section below
+apps/retro-games/        four apps on the shared domain engine; each is a spec
+apps/comics/             (fields, rules, price sources, prompt, seed data) plus
+apps/watches/            the little that only it knows, and its own README
+apps/whisky/
+packages/core/           code with no opinion about what is being collected:
+                         the Markdown codec, the zip writer, the CSV reader,
+                         chart geometry, the components every app draws with,
+                         and under src/domain the engine that runs an app
+                         from its spec (schema, ledger, pricing, mirror, CSV,
+                         identification, backup, routes and pages)
+packages/create-domain/  scaffolds a new app on the engine in one command
+```
+
+Inside `apps/cards`:
+
+```
+src/app/                 Next.js App Router pages and API routes
+  /                      Portfolio: hero value, change, value chart, grading outlook
+  /scan                  Batch capture with automatic identify, merge and save
+  /collection            Card grid with search and game filter
+  api/identify           POST — identify a card from uploaded photos
+  api/uploads            POST photos / GET stored photo
+  api/cards[/id]         CRUD; /price refreshes prices, /prices returns history
+  api/prices/lookup      Price a not-yet-saved card
+  api/prices/refresh     POST — refresh every card (?stale=24 limits to stale ones)
+  api/export             GET — the collection as CSV (?type=sales for the sales ledger)
+  api/cards/[id]/sales   GET / POST — a card's sales; POST removes the copies sold
+  api/sales              GET all sales with realized totals; DELETE /api/sales/[id] undoes one
+  api/submissions[/id]   Grading batches; PATCH adds/removes cards, marks sent, records grades
+  api/alerts[/id]        GET the feed, POST marks all read, DELETE dismisses one
+  api/cards/intake       POST — atomic add-or-merge used by scan mode
+  api/backup             GET — the database and photos as one zip; /restore puts one back
+  api/cards/[id]/acquisitions
+                         GET/POST — what each copy cost; POST records another purchase
+  api/collection         GET — the collection as Markdown; /rebuild rewrites it, /import reads it back
+  api/import             POST — preview a CSV, or apply it with `apply: true`
+  api/locations          GET — storage locations in use, for autocomplete
+  api/sets/refresh       POST — fetch and store a set's published checklist
+  api/auth               POST signs in, DELETE signs out (only when APP_PASSWORD is set)
+  api/settings           Multipliers + provider status
+src/lib/identify/        Claude vision call and the identification schema
+src/lib/pricing/         Providers, matching heuristics, summary/valuation, refresh pipeline
+src/lib/analytics.ts     Portfolio value series, grading outlook (min/max/upside) and timing verdict
+src/lib/scheduler.ts     Hourly auto-refresh of stale prices (started from src/instrumentation.ts)
+src/components/charts/   Inline-SVG portfolio line and min/max outlook band charts
+src/lib/acquisitions.ts  Purchase lots: what each copy cost, consumed oldest first on a sale
+src/lib/markdown/        The plain-text copy: format, one card as a document, the
+                         on-disk mirror, and reading a collection back out of it
+src/lib/zip.ts           Dependency-free streaming zip writer used by the backup
+src/lib/csv.ts           RFC 4180 reader; src/lib/import.ts maps columns to cards
+src/lib/sets/            Set checklist providers, caching and completion matching
+src/lib/auth.ts          Optional password gate (Web Crypto, shared by proxy and routes)
+src/proxy.ts             Guards every route when APP_PASSWORD is set
+e2e/                     Playwright suite driving a real build
+src/lib/cards.ts, db.ts  SQLite (better-sqlite3) repository and schema
+src/components/          UI (add flow, card detail, price panel, settings)
+tests/                   Vitest suites (providers with mocked fetch, valuation, repository)
+```
+
+## Scripts
+
+```bash
+npm run dev         # development server
+npm run build       # production build
+npm test            # unit tests (vitest)
+npm run e2e         # end-to-end tests (playwright, boots its own servers)
+npm run typecheck   # tsc (after generating Next route types)
+npm run lint
+```
+
+Every script above runs from the repository root and covers every workspace.
+To drive one app on its own, add `-w @collectcollect/cards` — which is how you
+reach the app-only scripts, such as `npm run e2e:ui -w @collectcollect/cards`
+for the Playwright suite in UI mode.
+
+Each app also has a root shortcut for its dev server: `npm run cards` (3000),
+`npm run skins` (3001), `npm run retro-games` (3002), `npm run comics` (3003),
+`npm run watches` (3004) and `npm run whisky` (3005).
+
+## Testing
+
+Unit tests cover the pieces where a mistake is silent: price matching and the
+provider adapters (against recorded responses, never the network), the
+valuation and grading-outlook maths, the repository and its migrations, sales,
+submissions, alert rules, and the password gate.
+
+The end-to-end suites drive real production builds in Chromium against
+throwaway data directories. Identification and price lookups are intercepted, so
+the tests never call Anthropic or a price API, but everything else, including
+the database, runs for real. It covers adding a card by hand, duplicate
+merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
+grading submission from draft to booked outcome, and the password gate. The
+skins app has its own suite, and the whisky app's stands for every app on the
+domain engine: it drives the shared portfolio, collection, item, report, add
+and import pages, plus the one thing that is whisky's alone — opening a bottle,
+which splits a copy off a stack and freezes what it was worth. Every suite plus
+lint, typecheck and build runs in CI on every push.
+
+## The other apps
+
+Four more collections run on a shared **domain engine** in `packages/core/src/domain`. An app on it is a description of what it collects, a `DomainSpec`: typed fields (searchable, filterable, private), a title and a detail line, the rule for whether a row is one specific object or a fungible stack, its price providers and how their answers become one value, an identification prompt, settings, alerts, the report layout and sample data. From that the engine provides everything the card and skins apps wrote by hand: the SQLite schema with column migrations, validation, search and filters, add-or-merge intake, purchase lots with oldest-first cost basis, sales and realised gains, price refresh with a manual-entry source and hand-entered history points, the portfolio and its chart, alerts with a webhook, storage locations, the printable report (private fields off unless asked), CSV import and export, uploads and Claude vision identification, the Markdown mirror and restore, backup, the password gate, every API route and every page. Each app's route files are one line each, and its pages render from the spec with a small hook for what only that domain knows.
+
+`node packages/create-domain/index.mjs <id> --name … --singular … --plural … --prefix … --port …` scaffolds a new one with a working starter spec, tests and README.
+
+| App | Port | What it tracks | One object, or a stack? | Price sources |
+| --- | --- | --- | --- | --- |
+| [Retro games](apps/retro-games/README.md) | 3002 | cartridges and discs, loose / CIB / sealed / graded (WATA, VGA, CGC), box, manual and cart condition, variants | graded copies are unique; identical loose, CIB or sealed copies stack | PriceCharting by completeness (paid), manual; grade-or-wait verdict on sealed and complete copies |
+| [Comics](apps/comics/README.md) | 3003 | single issues, key-issue flags, raw or slabbed (CGC, CBCS, PGX), page quality, signature series | slabs are unique; identical raw copies stack | PriceCharting by grade (paid, column mapping unverified), manual; cert-verification stub; grade-or-wait verdict on raw copies |
+| Sports cards | 3000 | part of the card app: team, rookie, parallel, serial numbering, autograph, relic, BGS subgrades | serial-numbered and graded cards are unique; raw copies stack within a parallel | PriceCharting (paid), manual; there is no free sports API |
+| [Watches](apps/watches/README.md) | 3004 | brand, model, reference, private serial, movement, case, dial, box and papers, service history | always unique | manual with dated history; insurance appraisal with serial and photo switches |
+| [Whisky](apps/whisky/README.md) | 3005 | distillery, expression, age, cask, strength, size, bottle or batch, sealed or open, fill level | sealed identical bottles stack, numbered and open bottles are unique | manual with dated history; an opened bottle's value is frozen and left out of the total |
+
+They keep the conventions of the two older apps: everything self-hosted and local-first, one SQLite file per app in its own data directory (`<PREFIX>_DATA_DIR`), an optional password (`<PREFIX>_APP_PASSWORD`), hourly auto-refresh (`<PREFIX>_AUTO_REFRESH_HOURS`), and every item mirrored to Markdown under `data/collection`. Photo identification and PriceCharting use the same keys as the card app. Each has unit tests for its schema, its merge rule and its price adapter against a fake `fetch`. The pages they share are driven end to end by the whisky app's Playwright suite, so a change to the engine's portfolio, collection, item, report, add, import or login pages is caught for all of them at once.
 
 ## The skins app
 

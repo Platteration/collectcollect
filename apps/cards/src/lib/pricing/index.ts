@@ -224,32 +224,13 @@ export function summarize(
   };
 }
 
-/**
- * What a refresh compares to decide whether it learned anything: every figure
- * the app shows or sums, and what each source matched, but not when it was
- * asked. Two summaries the same by this measure are the same price, and the
- * second is a check, not a snapshot. The sources behind each graded price are
- * not compared on their own: they are derived from the quotes, which are.
- */
-export function sameSummary(a: PriceSummary, b: PriceSummary): boolean {
-  const project = (s: PriceSummary) =>
-    JSON.stringify({
-      ungraded: s.ungraded,
-      ungradedSource: s.ungradedSource,
-      graded: s.graded,
-      gradedSource: s.gradedSource,
-      estimatedGraded: s.estimatedGraded,
-      yourCopyValue: s.yourCopyValue,
-      yourCopyBasis: s.yourCopyBasis,
-      quotes: s.quotes.map((q) => ({ source: q.source, currency: q.currency, ungraded: q.ungraded, ungradedVariants: q.ungradedVariants, graded: q.graded, externalId: q.externalId ?? null })),
-      // A source that failed last time and answered this time is worth a row,
-      // or the page would go on showing an error that has cleared.
-      errors: s.errors,
-    });
-  return project(a) === project(b);
-}
-
-export function cardToQuery(card: Pick<CardRecord, "game" | "name" | "sport" | "setName" | "setCode" | "cardNumber" | "year" | "variant" | "manufacturer" | "externalIds">): CardQuery {
+export function cardToQuery(
+  card: Pick<CardRecord, "game" | "name" | "sport" | "setName" | "setCode" | "cardNumber" | "year" | "variant" | "manufacturer" | "externalIds"> &
+    Partial<Pick<CardRecord, "parallel" | "autograph" | "relic">>,
+): CardQuery {
+  // A parallel, an autograph and a relic are each their own listing at every
+  // price guide, so they go into the search the way the guides name them.
+  const parallel = [card.parallel ?? null, card.autograph ? "Auto" : null, card.relic ? "Relic" : null].filter(Boolean).join(" ");
   return {
     game: card.game,
     name: card.name,
@@ -260,6 +241,7 @@ export function cardToQuery(card: Pick<CardRecord, "game" | "name" | "sport" | "
     year: card.year,
     variant: card.variant,
     manufacturer: card.manufacturer,
+    parallel: parallel || null,
     externalIds: card.externalIds,
   };
 }

@@ -29,6 +29,13 @@ CREATE TABLE IF NOT EXISTS cards (
   variant TEXT,
   language TEXT,
   manufacturer TEXT,
+  team TEXT,
+  rookie INTEGER NOT NULL DEFAULT 0,
+  parallel TEXT,
+  serial_number TEXT,
+  autograph INTEGER NOT NULL DEFAULT 0,
+  relic INTEGER NOT NULL DEFAULT 0,
+  subgrades TEXT,
   quantity INTEGER NOT NULL DEFAULT 1,
   condition TEXT NOT NULL DEFAULT 'NM',
   grading_company TEXT,
@@ -141,17 +148,14 @@ const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "cards", column: "grading_status", ddl: "ALTER TABLE cards ADD COLUMN grading_status TEXT NOT NULL DEFAULT 'undecided'" },
   { table: "cards", column: "accent_color", ddl: "ALTER TABLE cards ADD COLUMN accent_color TEXT" },
   { table: "cards", column: "location", ddl: "ALTER TABLE cards ADD COLUMN location TEXT" },
-  // When a refresh last found these same prices, so an unchanged price is a
-  // note on the row rather than a copy of it.
-  { table: "price_snapshots", column: "checked_at", ddl: "ALTER TABLE price_snapshots ADD COLUMN checked_at TEXT" },
-  // Measured border ratios and the grading company's report, both JSON, both
-  // read back through the same checks the API applies to them.
-  { table: "cards", column: "centering", ddl: "ALTER TABLE cards ADD COLUMN centering TEXT" },
-  { table: "cards", column: "grading_report", ddl: "ALTER TABLE cards ADD COLUMN grading_report TEXT" },
-  // The normalised name duplicate detection looks a card up by (name-key.ts),
-  // stored rather than computed so the lookup is an index probe, and so the key
-  // is folded by one function in one language.
-  { table: "cards", column: "name_key", ddl: "ALTER TABLE cards ADD COLUMN name_key TEXT" },
+  // Sports cards: the team, rookie flag, parallel, serial numbering, autograph and relic flags, BGS subgrades.
+  { table: "cards", column: "team", ddl: "ALTER TABLE cards ADD COLUMN team TEXT" },
+  { table: "cards", column: "rookie", ddl: "ALTER TABLE cards ADD COLUMN rookie INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "parallel", ddl: "ALTER TABLE cards ADD COLUMN parallel TEXT" },
+  { table: "cards", column: "serial_number", ddl: "ALTER TABLE cards ADD COLUMN serial_number TEXT" },
+  { table: "cards", column: "autograph", ddl: "ALTER TABLE cards ADD COLUMN autograph INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "relic", ddl: "ALTER TABLE cards ADD COLUMN relic INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "subgrades", ddl: "ALTER TABLE cards ADD COLUMN subgrades TEXT" },
 ];
 
 /**
@@ -278,7 +282,11 @@ export function building(): boolean {
  * creates it, so anything that only wants to look has to ask first.
  */
 export function databaseExists(): boolean {
-  return Boolean(globalForDb.__collectcollectDb) || fs.existsSync(databaseFile());
+  // The path comes from an environment variable, so the build's file tracer
+  // cannot resolve it and falls back to tracing the whole project, packaging
+  // this app's source and tests into its standalone server. It is only ever
+  // read at runtime, so the tracer is told to leave the call alone.
+  return Boolean(globalForDb.__collectcollectDb) || fs.existsSync(/* turbopackIgnore: true */ databaseFile());
 }
 
 export function getDb(): Database.Database {

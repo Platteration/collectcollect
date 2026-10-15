@@ -10,19 +10,9 @@ import type {
   PriceSummary,
   Sale,
 } from "../types";
-import { CONDITIONS, GAMES, GAME_IDS, GRADING_STATUSES } from "../types";
-import { CenteringRatiosSchema, IdentificationSchema } from "../identify/schema";
-import { readCentering, readGradingReport } from "../grading/schema";
-import { capsFor, describeCentering } from "../grading/centering";
-import { money, parseDocument, readFenced, readLotPart, readMoney, readSection, readTable, slug, splitSource, table, writeFrontMatter } from "@collectcollect/core/markdown/format";
-
-/** How many prices a card's file lists, newest first; the database holds the rest. */
-export const MAX_VALUE_ROWS = 1000;
-
-/** The part of a price snapshot the file shows. */
-export type ValueRow = Pick<PriceSnapshot, "fetchedAt"> & {
-  summary: Pick<PriceSummary, "yourCopyValue" | "ungraded" | "ungradedSource" | "graded" | "gradedSource" | "yourCopyBasis">;
-};
+import { CONDITIONS, GAMES, GAME_IDS, GRADING_STATUSES, cleanSubgrades } from "../types";
+import { IdentificationSchema } from "../identify/schema";
+import { money, parseDocument, readFenced, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "@collectcollect/core/markdown/format";
 
 /** Everything about one card that the plain-text copy preserves. */
 export interface CardBundle {
@@ -65,8 +55,15 @@ export interface ParsedCard {
  * their identification on the way back in would lose real data.
  */
 const STORED_IDENTIFICATION = IdentificationSchema.extend({
-  // The numeric centering ratios came later still, so they may be absent too.
-  condition_assessment: IdentificationSchema.shape.condition_assessment.extend({ centering_ratios: CenteringRatiosSchema.nullish() }).nullish(),
+  condition_assessment: IdentificationSchema.shape.condition_assessment.nullish(),
+  // The sports fields arrived later; a file written before them is still an identification.
+  team: IdentificationSchema.shape.team.nullish(),
+  rookie: IdentificationSchema.shape.rookie.nullish(),
+  parallel: IdentificationSchema.shape.parallel.nullish(),
+  serial_number: IdentificationSchema.shape.serial_number.nullish(),
+  autograph: IdentificationSchema.shape.autograph.nullish(),
+  relic: IdentificationSchema.shape.relic.nullish(),
+  grading: IdentificationSchema.shape.grading.extend({ subgrades: IdentificationSchema.shape.grading.shape.subgrades.nullish() }),
 });
 
 export interface ParsedSaleLot {
@@ -119,6 +116,12 @@ function detail(card: CardRecord): string {
     card.year,
     card.rarity,
     card.variant,
+    card.team,
+    card.parallel,
+    card.serialNumber,
+    card.rookie ? "RC" : null,
+    card.autograph ? "Auto" : null,
+    card.relic ? "Relic" : null,
     card.language && card.language.toLowerCase() !== "english" ? card.language : null,
   ]
     .filter(Boolean)
@@ -301,13 +304,18 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
     variant: card.variant,
     language: card.language,
     manufacturer: card.manufacturer,
+    team: card.team,
+    rookie: card.rookie,
+    parallel: card.parallel,
+    serial_number: card.serialNumber,
+    autograph: card.autograph,
+    relic: card.relic,
     quantity: card.quantity,
     condition: card.condition,
     grading_company: card.gradingCompany,
     grade: card.grade,
     cert_number: card.certNumber,
-    centering: card.centering,
-    grading_report: card.gradingReport,
+    subgrades: card.subgrades,
     grading_status: card.gradingStatus,
     purchase_price: card.purchasePrice,
     location: card.location,
@@ -542,13 +550,18 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
     variant: str(data.variant),
     language: str(data.language),
     manufacturer: str(data.manufacturer),
+    team: str(data.team),
+    rookie: data.rookie === true,
+    parallel: str(data.parallel),
+    serialNumber: str(data.serial_number),
+    autograph: data.autograph === true,
+    relic: data.relic === true,
     quantity: quantity === null ? 1 : Math.max(0, Math.round(quantity)),
     condition: conditionValue,
     gradingCompany: str(data.grading_company),
     grade: str(data.grade),
     certNumber: str(data.cert_number),
-    centering,
-    gradingReport,
+    subgrades: cleanSubgrades(data.subgrades),
     purchasePrice: num(data.purchase_price),
     notes: notesSection ? unescapeProse(notesSection) : null,
     imagePath: str(data.photo),

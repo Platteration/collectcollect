@@ -10,41 +10,223 @@ import { CardForm, formFromCard, formToInput } from "./CardForm";
 type Pending = { id: string; file: File; error: string | null };
 const labels: Record<ScanDraft["status"], string> = { queued: "Waiting", identifying: "Reading", ready: "Saving", review: "Needs review", failed: "Failed", committed: "Saved", discarded: "Discarded" };
 
-/** Every acknowledged photo has a durable inbox row. Only unfinished uploads live in memory. */
-export function ScanFlow({ claudeConfigured, initialDrafts }: { claudeConfigured: boolean; initialDrafts: ScanDraft[] }) {
-  const [drafts, setDrafts] = useState(initialDrafts);
-  const [pending, setPending] = useState<Pending[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [camera, setCamera] = useState(false);
-  const video = useRef<HTMLVideoElement>(null);
-  const stream = useRef<MediaStream | null>(null);
-  const files = useRef<HTMLInputElement>(null);
-  const running = useRef(new Set<string>());
-  const attempted = useRef(new Map<string, number>());
-  const latestDrafts = useRef(initialDrafts);
-  useEffect(() => { latestDrafts.current = drafts; }, [drafts]);
-  const replace = useCallback((draft: ScanDraft) => setDrafts((all) => {
-    const existing = all.find((d) => d.id === draft.id);
-    if (existing && existing.revision > draft.revision) return all;
-    return existing ? all.map((d) => d.id === draft.id ? draft : d) : [draft, ...all];
-  }), []);
-  const reload = useCallback(async () => {
-    const before = latestDrafts.current;
-    const result = await api<{ drafts: ScanDraft[] }>("/api/scan-drafts");
-    result.drafts.forEach(replace);
-    const listed = new Set(result.drafts.map((draft) => draft.id));
-    // The inbox omits discarded rows. Confirm an absent row individually:
-    // this list response may predate a new upload or a newer local revision.
-    await runQueue(before.filter((draft) => !listed.has(draft.id) && draft.status !== "committed" && draft.status !== "discarded").map((draft) => async () => {
-      try { replace((await api<{ draft: ScanDraft }>(`/api/scan-drafts/${draft.id}`)).draft); }
-      catch { /* Keep local work when a poll cannot confirm its current state. */ }
-    }));
-  }, [replace]);
-  const process = useCallback(async (draft: ScanDraft) => {
-    if (running.current.has(draft.id)) return;
-    running.current.add(draft.id);
-    attempted.current.set(draft.id, draft.revision);
+interface ScanItem {
+  key: string;
+  file: File;
+  preview: string;
+  status: ScanStatus;
+  upload: string | null;
+  accentColor: string | null;
+  identification: Identification | null;
+  cardId: number | null;
+  message: string | null;
+}
+
+const CONCURRENCY = 2;
+/** Below this confidence a card is set aside rather than saved unattended. */
+const AUTO_SAVE_CONFIDENCE = 0.8;
+
+let counter = 0;
+const nextKey = () => `scan-${Date.now()}-${counter++}`;
+
+const STATUS_LABEL: Record<ScanStatus, string> = {
+  queued: "Waiting",
+  uploading: "Uploading",
+  identifying: "Reading",
+  saving: "Saving",
+  added: "Added",
+  merged: "Extra copy",
+  review: "Needs review",
+  failed: "Failed",
+};
+
+const STATUS_STYLE: Record<ScanStatus, string> = {
+  queued: "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-100",
+  uploading: "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-100",
+  identifying: "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100",
+  saving: "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100",
+  added: "bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-100",
+  merged: "bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-100",
+  review: "bg-amber-200 text-amber-900 dark:bg-amber-800 dark:text-amber-100",
+  failed: "bg-red-100 text-red-900 dark:bg-red-900 dark:text-red-100",
+};
+
+function conditionFromGrade(grade: string | null | undefined): string {
+  const n = Number((grade ?? "").replace(/[^0-9.]/g, ""));
+  if (!Number.isFinite(n) || n <= 0) return "NM";
+  if (n >= 8) return "NM";
+  if (n >= 6) return "LP";
+  if (n >= 4) return "MP";
+  if (n >= 2) return "HP";
+  return "DMG";
+}
+
+/**
+ * Batch capture: photograph a stack one card at a time and let each shot run
+ * through identify, duplicate check and save on its own. Only cards the model
+ * was unsure about stop for review, so a binder can be worked through without
+ * touching the keyboard.
+ */
+export function ScanFlow({ claudeConfigured }: { claudeConfigured: boolean }) {
+  const router = useRouter();
+  const [items, setItems] = useState<ScanItem[]>([]);
+  const [camera, setCamera] = useState<"idle" | "starting" | "live" | "unavailable">("idle");
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const queueRef = useRef<ScanItem[]>([]);
+  const runningRef = useRef(0);
+  const draining = useRef(false);
+
+  const patch = useCallback((key: string, p: Partial<ScanItem>) => {
+    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...p } : it)));
+  }, []);
+
+  const processOne = useCallback(
+    async (item: ScanItem) => {
+      try {
+        patch(item.key, { status: "uploading" });
+        const fd = new FormData();
+        fd.append("files", item.file);
+        const { uploads } = await api<{ uploads: Array<{ name: string; color: string | null }> }>("/api/uploads", { method: "POST", body: fd });
+        const upload = uploads[0];
+        patch(item.key, { upload: upload.name, accentColor: upload.color });
+
+        if (!claudeConfigured) {
+          patch(item.key, { status: "review", message: "Claude is not configured, so this card needs details by hand." });
+          return;
+        }
+
+        patch(item.key, { status: "identifying" });
+        const { identification } = await api<{ identification: Identification }>("/api/identify", {
+          method: "POST",
+          body: JSON.stringify({ uploads: [upload.name] }),
+        });
+        patch(item.key, { identification });
+
+        if (identification.confidence < AUTO_SAVE_CONFIDENCE) {
+          patch(item.key, {
+            status: "review",
+            message: `Only ${Math.round(identification.confidence * 100)}% sure this is ${identification.name}.`,
+          });
+          return;
+        }
+
+        patch(item.key, { status: "saving" });
+        const assess = identification.condition_assessment ?? null;
+        // One atomic call decides between merge and create, so two workers
+        // scanning the same card cannot both add a fresh row or lose a copy.
+        const outcome = await api<IntakeOutcome>("/api/cards/intake", {
+          method: "POST",
+          body: JSON.stringify({
+            game: identification.game,
+            name: identification.name,
+            sport: identification.sport,
+            setName: identification.set_name,
+            setCode: identification.set_code,
+            cardNumber: identification.card_number,
+            year: identification.year,
+            rarity: identification.rarity,
+            variant: identification.variant,
+            language: identification.language,
+            manufacturer: identification.manufacturer,
+            team: identification.team ?? null,
+            rookie: Boolean(identification.rookie),
+            parallel: identification.parallel ?? null,
+            serialNumber: identification.serial_number ?? null,
+            autograph: Boolean(identification.autograph),
+            relic: Boolean(identification.relic),
+            condition: conditionFromGrade(assess?.estimated_grade_low),
+            gradingCompany: identification.grading.company,
+            grade: identification.grading.grade,
+            certNumber: identification.grading.cert_number,
+            subgrades: identification.grading.subgrades ?? null,
+            notes: identification.condition_notes ? `Condition notes: ${identification.condition_notes}` : null,
+            imagePath: upload.name,
+            accentColor: upload.color,
+            identification,
+          }),
+        });
+
+        if (outcome.result === "ambiguous") {
+          patch(item.key, {
+            status: "review",
+            message:
+              outcome.candidates.length === 1
+                ? `You already have a ${outcome.candidates[0].grade ? `${outcome.candidates[0].gradingCompany ?? "graded"} ${outcome.candidates[0].grade}` : "raw"} copy; this one looks different.`
+                : `${outcome.candidates.length} cards in your collection look like this one.`,
+          });
+          return;
+        }
+        // Price in the background; the scan should not wait on provider APIs.
+        void api(`/api/cards/${outcome.card.id}/price`, { method: "POST" }).catch(() => undefined);
+        patch(item.key, {
+          status: outcome.result === "merged" ? "merged" : "added",
+          cardId: outcome.card.id,
+          message: outcome.result === "merged" ? `Now ${outcome.card.quantity} copies of ${outcome.card.name}.` : null,
+        });
+      } catch (e) {
+        patch(item.key, { status: "failed", message: (e as Error).message });
+      }
+    },
+    [claudeConfigured, patch],
+  );
+
+  /**
+   * A fixed pool of workers pulls from the shared queue until it is empty.
+   * `tick` restarts the pool when work arrives, so no function has to call
+   * itself recursively to keep the queue moving.
+   */
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (draining.current || queueRef.current.length === 0) return;
+    draining.current = true;
+    void (async () => {
+      await Promise.all(
+        Array.from({ length: CONCURRENCY }, async () => {
+          for (;;) {
+            const item = queueRef.current.shift();
+            if (!item) return;
+            runningRef.current += 1;
+            await processOne(item);
+            runningRef.current -= 1;
+          }
+        }),
+      );
+      draining.current = false;
+      // Anything queued while the pool was winding down starts a fresh pass.
+      if (queueRef.current.length > 0) setTick((t) => t + 1);
+      else router.refresh();
+    })();
+  }, [tick, processOne, router]);
+
+  const enqueue = useCallback(
+    (files: File[]) => {
+      const fresh = files
+        .filter((f) => f.type.startsWith("image/"))
+        .map<ScanItem>((file) => ({
+          key: nextKey(),
+          file,
+          preview: URL.createObjectURL(file),
+          status: "queued",
+          upload: null,
+          accentColor: null,
+          identification: null,
+          cardId: null,
+          message: null,
+        }));
+      if (fresh.length === 0) return;
+      setItems((prev) => [...fresh, ...prev]);
+      queueRef.current.push(...fresh);
+      setTick((t) => t + 1);
+    },
+    [],
+  );
+
+  const startCamera = useCallback(async () => {
+    setCamera("starting");
+    setCameraError(null);
     try {
       let current = draft;
       if (current.status !== "ready") {
