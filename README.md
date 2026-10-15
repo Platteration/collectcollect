@@ -12,6 +12,46 @@ Snap a photo of a card and CollectCollect:
 4. **Shows your portfolio** the way a brokerage app would: one headline number for the whole collection (valued at the grade or condition you recorded for each copy), the change over 1W / 1M / 3M / 1Y / all time, a value-over-time chart you can scrub, the cost of what you hold drawn beside it, your total return against what you paid, the split by game, and your top holdings. Each card page has its own value chart, the price you paid, and its return.
 5. **Tells you when to grade.** Every ungraded card gets a min/max outlook: the band between a mid-grade outcome and a gem-mint outcome, plotted against what the raw copy is worth. When the gap above the raw line is at its widest and clears your grading fee, the card is flagged as a good time to grade; when it has narrowed, it says wait; when even a PSA 10 would not cover the fee, it says skip.
 
+## Quick start
+
+For a persistent cards-only installation, see [Self-hosting](docs/SELF_HOSTING.md).
+Manual entry and CSV import work without API keys. The first-run checklist links
+to setup, provider connection tests, and backups.
+
+```bash
+npm install
+cp .env.example .env      # add ANTHROPIC_API_KEY (and optional price-source keys)
+npm run dev               # http://localhost:3000
+```
+
+Production: `npm run build && npm start`. Everything is stored locally in `apps/cards/data` (SQLite database, uploaded photos, and a Markdown copy of the collection); set `DATA_DIR` to move it.
+
+> Upgrading from a version before the app moved into `apps/cards`? Your collection is still where it was. On start the app looks for a `data` folder above itself and uses the one it finds, saying so in the log. Move it to `apps/cards/data`, or set `DATA_DIR`, to settle it permanently.
+
+Docker: `docker compose up -d --build cards` starts the card app on 3000 with its
+own named volume at `/data`. Add skins with `docker compose up -d --build skins`
+on port 3001. `docker compose up --build` still starts both apps. To build an image
+directly, pick the app with a build argument:
+
+```bash
+docker build -t collectcollect .                            # the card app
+docker build -t collectcollect-skins --build-arg APP=skins .
+```
+
+**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach. Failed attempts are rate limited, and changing the password invalidates existing sessions. Each session carries an id: signing out ends that one, wherever a copy of its cookie went, and *Sign out everywhere* on the Settings page ends every session issued so far — for the phone that was lost or the browser left signed in. The record lives in `sessions.json` in the data directory. Sessions from before this record existed are not recognised, so upgrading asks for the password once more.
+
+> Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
+
+**Behind a proxy.** The login limiter and the per-route limits count attempts per client. Without a proxy every client is one client, and the `X-Forwarded-For` header is ignored — anyone can send one. Set `TRUST_PROXY=1` only when a reverse proxy in front of the app sets that header, and it will be read — as will `X-Forwarded-Proto`, which is what lets the session cookie be marked `Secure` and the response carry HSTS when the proxy terminates TLS. Compose binds both apps to `127.0.0.1`; put the proxy in front and change the bind address there, since neither app speaks TLS.
+
+**Request origins.** Both apps refuse unknown public Host names and cross-site browser writes, including in passwordless mode. IP addresses, single-label names and private-use `.localhost`, `.local`, `.lan`, `.internal` and `.home.arpa` names work by default. Set `ALLOWED_HOSTS` to a comma-separated list of the names served by your reverse proxy, and have it preserve the public Host header. Scripts may omit browser Origin/Fetch Metadata headers, but JSON API bodies must use `Content-Type: application/json`. Multipart uploads and restores keep their existing format.
+
+**Webhooks.** The alert webhook is posted to by the server itself, so it has to be an address on the public internet: `localhost`, `*.local`, and any private, loopback or link-local address are refused when saved, a name that resolves to one is refused at delivery, and the request does not follow redirects.
+
+**What every response carries.** A content security policy that allows scripts only from the app itself, plus the one inline script that applies the theme before first paint, which is let through by a nonce minted per request; images from the app, `data:`/`blob:` and (for cards) any https host a price source's reference image might come from; nothing framed, nothing embedded. Alongside it: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, a strict referrer policy, and a permissions policy that refuses the camera except where scan mode uses it. `GET /api/health` answers without a session — `{ ok, app, database, scheduler: { enabled, running, lastRunAt } }`, and nothing more, since it answers anyone — for a container health check or a proxy. `database` is true only when a query has just run through the live connection: a database file whose restore journal cannot be replayed reports false, with the reason in the log rather than the response, and an install with no database yet reports false without one being created. `ok` means the process answers.
+
+**Limits on the expensive routes.** Identifying a photo (10 a minute), uploading (30), refreshing every price (6), pricing one card (120, since a scan or a bulk refresh sends one per card), reading a folder or a Steam inventory back in (6), importing a spreadsheet (30), downloading a backup or the folder (6), and restoring a backup or putting one back (6) each refuse with a 429 and a `Retry-After` past their limit. They are in memory and per process — protection against a runaway client or a double-clicked button, not a public API's defence. Only one whole-collection price refresh runs at a time, whoever asks: a second is told so with a 409, since the answer it wants is already being produced.
+
 ## How pricing works
 
 | Source | Games | Key | What it provides |
