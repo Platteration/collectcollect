@@ -321,10 +321,9 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
   const valuePoints = [...history]
     .reverse()
     .filter((s) => s.summary.yourCopyValue)
-    .map((s) => ({ t: s.fetchedAt, value: s.summary.yourCopyValue!, ungraded: s.summary.ungraded ?? 0, priced: 1 }));
-  const firstPoint = valuePoints[0];
-  const lastPoint = valuePoints.at(-1);
-  const valueChange = valuePoints.length > 1 && firstPoint && lastPoint ? lastPoint.value - firstPoint.value : 0;
+    // cost is per copy, matching the per-copy value the card chart plots.
+    .map((s) => ({ t: s.fetchedAt, value: s.summary.yourCopyValue!, ungraded: s.summary.ungraded ?? 0, priced: 1, cost: card.purchasePrice ?? 0, copies: card.quantity, flows: 0 }));
+  const valueChange = valuePoints.length > 1 ? valuePoints[valuePoints.length - 1].value - valuePoints[0].value : 0;
   const ret = card.purchasePrice !== null && latest?.yourCopyValue ? latest.yourCopyValue - card.purchasePrice : null;
   const assessment = card.identification?.condition_assessment ?? null;
   const expectedGrade = assessment?.estimated_grade_high ?? assessment?.estimated_grade_low ?? null;
@@ -476,7 +475,15 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
               </p>
             )}
             <div className="mt-3">
-              <PortfolioChart points={valuePoints} up={valueChange >= 0} height={200} label="Value of this card over time" detail={(p) => `ungraded ${money(p.ungraded)}`} />
+              <PortfolioChart
+                points={valuePoints}
+                up={valueChange >= 0}
+                height={200}
+                label="Value of this card over time"
+                showCost
+                costLabel="paid"
+                detail={(p) => `ungraded ${money(p.ungraded)}`}
+              />
             </div>
           </section>
         )}

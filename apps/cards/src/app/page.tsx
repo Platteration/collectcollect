@@ -14,18 +14,23 @@ export const dynamic = "force-dynamic";
 const VERDICT_ORDER = { prime: 0, insufficient: 1, wait: 2, skip: 3 } as const;
 
 export default function HomePage() {
+  const everyCard = listCards();
   // Cards with no copies left were sold; they keep their history but are not holdings.
-  const cards = listCards().filter((c) => c.quantity > 0);
+  const cards = everyCard.filter((c) => c.quantity > 0);
+  const snapshots = allSnapshots();
   const settings = getSettings();
   const latest = latestSnapshotsByCard();
-  // A long history is thinned before it travels to the browser; the chart
-  // thins what it shows again, so a short range keeps its detail. The series
-  // is summed from two figures per snapshot, not from every summary parsed.
-  const pricePoints = thinPoints(portfolioSeries(cards, snapshotValues()), 20_000);
-  const history = holdingsHistory(getDb());
-  const points = thinPoints(history.points, 20_000);
-  // The outlook is drawn from each card's recent history, not its whole life.
-  const recent = recentSnapshotsByCard(OUTLOOK_SNAPSHOTS);
+  const sales = listSales();
+  // The timeline covers sold cards too: their copies leave it on the day they
+  // sold rather than vanishing from the whole history.
+  const points = portfolioSeries(everyCard, snapshots, sales);
+
+  const byCard = new Map<number, PriceSnapshot[]>();
+  for (const s of snapshots) {
+    const list = byCard.get(s.cardId);
+    if (list) list.push(s);
+    else byCard.set(s.cardId, [s]);
+  }
 
   const detailOf = (c: (typeof cards)[number]) =>
     [c.setName, c.cardNumber ? `#${c.cardNumber}` : null, c.year].filter(Boolean).join(" · ") || "—";
@@ -75,9 +80,7 @@ export default function HomePage() {
     .slice(0, 5);
 
   const valueOf = (c: (typeof cards)[number]) => latest.get(c.id)?.summary.yourCopyValue ?? null;
-  const basis = costBasisByCard();
-  const returns = totalReturn(cards, valueOf, (c) => basis.get(c.id));
-  const sales = listSales();
+  const returns = totalReturn(cards, valueOf);
   const realized = realizedReturn(sales);
   const allocation = allocationByGame(cards, valueOf);
 

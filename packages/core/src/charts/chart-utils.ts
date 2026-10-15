@@ -25,15 +25,35 @@ export function yScale(lo: number, hi: number, layout: Layout) {
   return (v: number) => layout.top + innerH - ((v - lo) / span) * innerH;
 }
 
+/** A round-numbered gridline spacing for a span split `count` ways. */
+function niceStep(rawStep: number): number {
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+  const norm = (rawStep || 1) / mag;
+  return (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+}
+
+/**
+ * Gridlines inside the bounds given, leaving the bounds alone. Rounding the
+ * bounds outward to the nearest gridline (what `niceTicks` does) would undo a
+ * chart's zoom: a collection sitting between $14.9K and $15.3K would be plotted
+ * from $0 to $20K, and a week's move would flatten to nothing.
+ */
+export function niceScale(lo: number, hi: number, count = 3): { lo: number; hi: number; ticks: number[] } {
+  // An empty series gives Infinity for both bounds; draw an empty 0–1 frame.
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { lo: 0, hi: 1, ticks: [] };
+  if (hi <= lo) hi = lo + Math.max(1, Math.abs(lo) * 0.1);
+  const step = niceStep((hi - lo) / count);
+  const ticks: number[] = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + step / 1e6 && ticks.length <= count * 2; v += step) ticks.push(Math.round(v * 100) / 100);
+  return { lo, hi, ticks };
+}
+
 /** Round axis bounds outward to clean numbers and produce ~3 gridline values. */
 export function niceTicks(lo: number, hi: number, count = 3): { lo: number; hi: number; ticks: number[] } {
   if (hi <= lo) {
     hi = lo + Math.max(1, Math.abs(lo) * 0.1);
   }
-  const rawStep = (hi - lo) / count;
-  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
-  const norm = rawStep / mag;
-  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const step = niceStep((hi - lo) / count);
   const nlo = Math.floor(lo / step) * step;
   const nhi = Math.ceil(hi / step) * step;
   const ticks: number[] = [];
