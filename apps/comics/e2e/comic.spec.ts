@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test.describe("one comic", () => {
   test("prices a stack per copy and in total, and keeps each purchase", async ({ page }) => {

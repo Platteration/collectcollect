@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test.describe("adding a game by hand", () => {
   test("saves what was typed and opens it", async ({ page }) => {

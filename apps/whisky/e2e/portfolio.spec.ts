@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test.describe("the portfolio", () => {
   test("totals the sealed bottles and shows what they are made of", async ({ page }) => {
