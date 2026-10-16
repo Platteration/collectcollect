@@ -42,6 +42,7 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
   const [saved, setSaved] = useState<{ id: number; merged: boolean; title: string } | null>(null);
   const [ambiguous, setAmbiguous] = useState<Candidate[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const busy = status === "uploading" || status === "identifying" || status === "saving";
 
   const upload = async (files: File[]) => {
@@ -61,6 +62,11 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
       setError((e as Error).message);
       setStatus("idle");
     }
+  };
+
+  const picked = (e: React.ChangeEvent<HTMLInputElement>) => {
+    void upload(Array.from(e.target.files ?? []));
+    e.target.value = "";
   };
 
   const identify = async (names: string[], withHint: string) => {
@@ -169,20 +175,31 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
               {hasIdentify ? "Drop a photo here and it will be read for you." : "Drop a photo to keep with the record."}
             </p>
           )}
-          <button type="button" className="btn-secondary w-full" onClick={() => fileInput.current?.click()} disabled={busy || photos.length >= 4}>
-            {photos.length ? "+ Another photo" : "Choose photo"}
-          </button>
+          {/* Two inputs. One with `capture` opens a phone's camera directly, with no way to pick a photo already taken, so it
+              cannot also be the way to choose files: Take photo is that one, and Choose photos has no `capture` and takes several. */}
+          <div className="grid w-full grid-cols-2 gap-2 md:grid-cols-1">
+            <button type="button" className="btn-secondary" onClick={() => cameraInput.current?.click()} disabled={busy || photos.length >= 4}>
+              Take photo
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => fileInput.current?.click()} disabled={busy || photos.length >= 4}>
+              Choose photos
+            </button>
+          </div>
+          <input
+            ref={cameraInput}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={picked}
+          />
           <input
             ref={fileInput}
             type="file"
             accept="image/*"
             multiple
-            capture="environment"
             className="hidden"
-            onChange={(e) => {
-              void upload(Array.from(e.target.files ?? []));
-              e.target.value = "";
-            }}
+            onChange={picked}
           />
           {hasIdentify && !canIdentify && (
             <p className="text-xs" style={{ color: "var(--muted)" }}>
