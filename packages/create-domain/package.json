@@ -1,0 +1,8 @@
+{
+  "name": "@collectcollect/create-domain",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scaffold a new collection app on the shared domain engine.",
+  "type": "module",
+  "bin": { "create-domain": "./index.mjs" }
+}

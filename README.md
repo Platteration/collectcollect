@@ -2,6 +2,8 @@
 
 A personal cataloging app for trading cards: Pokémon, Yu-Gi-Oh!, Magic: The Gathering, sports cards (baseball, basketball, football, hockey…) and anything else in a sleeve.
 
+It is also a family: the same repository holds apps for CS2 skins, retro games, comics, watches and whisky, each with its own database, its own price sources and its own rules about what counts as one object, sharing the engine underneath. See [The other apps](#the-other-apps).
+
 Snap a photo of a card and CollectCollect:
 
 1. **Identifies it** with Claude's vision model: game, name, set, collector number, year, rarity, printing variant (holo, 1st edition, refractor, autograph…) and, if it's in a slab, the grading company, grade and cert number; it also reads the centering as border ratios when the photo shows them.
@@ -128,6 +130,21 @@ A small service worker makes that work and lets the shell open without a network
 Five destinations fit on the tab bar; the last one is labelled *More* and leads to Settings, where the rest are listed. The skins app is installable in the same way, with its own icon and its own service worker. Because a service worker's scope is an origin and each app's worker clears every cache it does not own, the two apps have to be served from different origins — which two ports are, and which two paths on one host are not.
 
 A page that is not there — a deleted card's, or a mistyped address — is a 404 drawn inside the app, with the header still there to leave by. A page that fails to render says so on the page, with the error, rather than going blank.
+
+## The other apps
+
+Four more collections run on a shared **domain engine** in `packages/core/src/domain`. An app on it is a description of what it collects, a `DomainSpec`: typed fields (searchable, filterable, private), a title and a detail line, the rule for whether a row is one specific object or a fungible stack, its price providers and how their answers become one value, an identification prompt, settings, alerts, the report layout and sample data. From that the engine provides everything the card and skins apps wrote by hand: the SQLite schema with column migrations, validation, search and filters, add-or-merge intake, purchase lots with oldest-first cost basis, sales and realised gains, price refresh with a manual-entry source and hand-entered history points, the portfolio and its chart, alerts with a webhook, storage locations, the printable report (private fields off unless asked), CSV import and export, uploads and Claude vision identification, the Markdown mirror and restore, backup, the password gate, every API route and every page. Each app's route files are one line each, and its pages render from the spec with a small hook for what only that domain knows.
+
+`node packages/create-domain/index.mjs <id> --name … --singular … --plural … --prefix … --port …` scaffolds a new one with a working starter spec, tests and README.
+
+| App | Port | What it tracks | One object, or a stack? | Price sources |
+| --- | --- | --- | --- | --- |
+| [Retro games](apps/retro-games/README.md) | 3002 | cartridges and discs, loose / CIB / sealed / graded (WATA, VGA, CGC), box, manual and cart condition, variants | graded copies are unique; identical loose, CIB or sealed copies stack | PriceCharting by completeness (paid), manual; grade-or-wait verdict on sealed and complete copies |
+| [Comics](apps/comics/README.md) | 3003 | single issues, key-issue flags, raw or slabbed (CGC, CBCS, PGX), page quality, signature series | slabs are unique; identical raw copies stack | PriceCharting by grade (paid, column mapping unverified), manual; cert-verification stub; grade-or-wait verdict on raw copies |
+| [Watches](apps/watches/README.md) | 3004 | brand, model, reference, private serial, movement, case, dial, box and papers, service history | always unique | manual with dated history; insurance appraisal with serial and photo switches |
+| [Whisky](apps/whisky/README.md) | 3005 | distillery, expression, age, cask, strength, size, bottle or batch, sealed or open, fill level | sealed identical bottles stack, numbered and open bottles are unique | manual with dated history; an opened bottle's value is frozen and left out of the total |
+
+They keep the conventions of the two older apps: everything self-hosted and local-first, one SQLite file per app in its own data directory (`<PREFIX>_DATA_DIR`), an optional password (`<PREFIX>_APP_PASSWORD`), hourly auto-refresh (`<PREFIX>_AUTO_REFRESH_HOURS`), and every item mirrored to Markdown under `data/collection`. Photo identification and PriceCharting use the same keys as the card app. Each has unit tests for its schema, its merge rule and its price adapter against a fake `fetch`. The pages they share are driven end to end by the whisky app's Playwright suite, so a change to the engine's portfolio, collection, item, report, add, import or login pages is caught for all of them at once.
 
 ## The skins app
 
@@ -476,6 +493,10 @@ npm run lint              # eslint in every workspace, the shared package includ
 
 `npm run e2e` is kept as another name for `npm run test:e2e`, which builds first.
 
+The four apps on the domain engine each have a root shortcut for their
+development server: `npm run retro-games` (port 3002), `npm run comics` (3003),
+`npm run watches` (3004) and `npm run whisky` (3005).
+
 Every script above runs from the repository root and covers every workspace.
 To drive one app on its own, add `-w @collectcollect/cards` — which is how you
 reach the app-only scripts, such as `npm run e2e:ui -w @collectcollect/cards`
@@ -543,7 +564,12 @@ across all of them.
 ```
 apps/cards/              this app
 apps/skins/              the same idea for CS2 items — see its own section below
+apps/retro-games/        four apps on the shared domain engine; each is a spec
+apps/comics/             (fields, rules, price sources, prompt, seed data) plus
+apps/watches/            the little that only it knows, and its own README
+apps/whisky/
 packages/core/           code with no opinion about what is being collected
+packages/create-domain/  scaffolds a new app on the engine in one command
 ```
 
 Inside `packages/core/src`:
@@ -579,6 +605,10 @@ guard.ts                 The safety net every page loads first, served at /guard
 charts/, components/     Chart geometry and the components both apps draw with, including the
                          not-found, error and offline pages, the service worker registration,
                          the safety net's Started signal and the no-JavaScript note
+domain/                  The domain engine the four newer apps run on: from an app's spec, its
+                         schema, ledger, pricing, mirror, CSV, identification, backup and routes
+pages/, components/domain/
+                         The pages and components those apps render from their spec
 ```
 
 Inside `apps/cards`:
