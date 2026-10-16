@@ -93,9 +93,10 @@ services:
       args:
         APP: retro-games
     ports:
-      - "3002:3000"
+      - "127.0.0.1:3002:3000"
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - collectcollect-retro-games-data:/data
     restart: unless-stopped
@@ -106,9 +107,10 @@ services:
       args:
         APP: comics
     ports:
-      - "3003:3000"
+      - "127.0.0.1:3003:3000"
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - collectcollect-comics-data:/data
     restart: unless-stopped
@@ -119,9 +121,10 @@ services:
       args:
         APP: watches
     ports:
-      - "3004:3000"
+      - "127.0.0.1:3004:3000"
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - collectcollect-watches-data:/data
     restart: unless-stopped
@@ -132,9 +135,10 @@ services:
       args:
         APP: whisky
     ports:
-      - "3005:3000"
+      - "127.0.0.1:3005:3000"
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - collectcollect-whisky-data:/data
     restart: unless-stopped
