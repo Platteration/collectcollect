@@ -33,7 +33,7 @@ ALL_APPS="cards skins retro-games comics watches whisky"
 # shorten them (the tests do); nothing in a normal install needs to.
 HEALTH_TIMEOUT="${INSTALL_HEALTH_TIMEOUT:-180}"
 HEALTH_INTERVAL="${INSTALL_HEALTH_INTERVAL:-2}"
-OVERRIDE_MARK="# Written by scripts/install.sh --lan"
+OVERRIDE_MARK="# Written by the CollectCollect installer (scripts/install.sh --lan or scripts/install.ps1 -Lan)"
 
 fail() {
   echo "error: $*" >&2

@@ -442,7 +442,7 @@ maybe("scripts/install.sh --lan", () => {
     const r = run(["--lan", "cards", "whisky"]);
     expect(r.code).toBe(0);
     const override = fs.readFileSync(path.join(work, "compose.override.yaml"), "utf8");
-    expect(override.split("\n")[0]).toBe("# Written by scripts/install.sh --lan");
+    expect(override.split("\n")[0]).toBe("# Written by the CollectCollect installer (scripts/install.sh --lan or scripts/install.ps1 -Lan)");
     expect(override).toMatch(/\n {2}cards:\n {4}ports: !override\n {6}- "3000:3000"\n/);
     expect(override).toMatch(/\n {2}whisky:\n {4}ports: !override\n {6}- "3005:3000"\n/);
     expect(override).not.toMatch(/skins|retro-games|comics|watches/);
@@ -568,6 +568,54 @@ maybe("scripts/install.sh --lan, read by the real docker compose", () => {
     expect(Object.values(published()).flat().every((p) => p.startsWith("*:"))).toBe(true);
     expect(run().code).toBe(0);
     expect(Object.values(published()).flat().every((p) => p.startsWith("127.0.0.1:"))).toBe(true);
+  });
+});
+
+/**
+ * install.ps1 cannot be run where this suite runs (no PowerShell), so what is
+ * pinned here is only what can be read off the text: that it agrees with
+ * install.sh on the facts the two share, and does not do what is known to fail
+ * under Windows PowerShell 5.1. It does not show that the script works.
+ */
+describe("scripts/install.ps1, by its text", () => {
+  const ps1 = fs.readFileSync(path.join(repo, "scripts/install.ps1"), "utf8");
+  const sh = fs.readFileSync(path.join(repo, "scripts/install.sh"), "utf8");
+
+  it("is plain ASCII, which Windows PowerShell 5.1 reads correctly without a byte-order mark", () => {
+    expect(ps1.match(/[^\x00-\x7f]/g)).toBeNull();
+  });
+
+  it("gives a launch that works under the default execution policy", () => {
+    expect(ps1).toContain("powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\install.ps1");
+  });
+
+  it("has the same apps, ports and variable prefixes as install.sh", () => {
+    for (const app of APPS) {
+      expect(ps1, app).toContain(`'${app}' = ${PORTS[app]}`);
+      expect(ps1, app).toContain(`'${app}' = '${PREFIX[app]}'`);
+      expect(sh, app).toMatch(new RegExp(`${app}\\) echo ${PORTS[app]} ;;`));
+      expect(sh, app).toContain(`${app}) echo "${PREFIX[app]}" ;;`);
+    }
+  });
+
+  it("marks the override it writes exactly as install.sh does, so each leaves the other's alone", () => {
+    const mark = /OVERRIDE_MARK="(.*)"/.exec(sh)![1]!;
+    expect(ps1).toContain(`$OverrideMark = '${mark}'`);
+  });
+
+  it("asks docker without redirecting its error output under $ErrorActionPreference = 'Stop', which 5.1 turns into a crash", () => {
+    expect(ps1).not.toMatch(/docker[^\n]*(\*>|2>\s*\$null)/);
+    expect(ps1).toContain("$ErrorActionPreference = 'Continue'");
+  });
+
+  it("reads and writes .env as UTF-8 by name, and moves a finished copy onto it", () => {
+    expect(ps1).not.toMatch(/Get-Content|Set-Content|Out-File/);
+    expect(ps1).toContain("Move-Item -LiteralPath $tmp -Destination $EnvPath");
+    expect(ps1).toContain("UTF8Encoding $false");
+  });
+
+  it("holds the health ask to a few seconds", () => {
+    expect(ps1).toMatch(/Invoke-WebRequest[^\n]*-TimeoutSec 5/);
   });
 });
 
