@@ -40,7 +40,7 @@ There are two ways to open one. **Open a bottle** on a sealed bottle's page take
 
 ## Price sources
 
-- **Manual entry** is the only source today. Type what a sealed bottle is worth on its page, and enter past values with dates (an auction hammer price, a retailer's price on a day) so the chart has a line. Refresh does nothing on its own and says so.
+- **Manual entry** is the only source. Type what a sealed bottle is worth on its page, and enter past values with dates (an auction hammer price, a retailer's price on a day) so the chart has a line. Refresh does nothing on its own and says so.
 - **Frozen — deliberately manual-only:** no auction or market source is planned; this app stays a manual-pricing engine-validation app, and a provider would only be added behind the existing `PriceProvider<BottleQuery>` slot in `src/lib/spec.ts` if the app graduates.
 
 Price-move alerts still fire when a value you enter moves by more than the threshold in Settings.
@@ -77,12 +77,14 @@ npm test -w @collectcollect/whisky
 - `tests/spec.test.ts`: schema validation and defaults, bottle number versus batch, CSV aliases, the stack-or-object rules, identification mapping, the mirror and the seed.
 - `tests/open.test.ts`: opening one copy off a stack (cost from the oldest lot, frozen value, history carried over, lot invariant), opening the only copy in place, the freeze-and-thaw hook on an ordinary edit, a bottle opened before it was valued, and what stays in the collection and out of the total.
 - `tests/pricing.test.ts`: the manual-only source and hand-entered history.
+- `tests/linear-parsing.test.ts`: a bottle number read in linear time, and exactly as before.
+- `tests/health.test.ts`, `tests/installable.test.ts`, `tests/pwa.test.ts`, `tests/e2e-teardown.test.ts`: the health route through the password gate, the icons and the installable shell's wiring, and the end-to-end suite's cleanup.
 
 ```sh
 npm run e2e -w @collectcollect/whisky
 ```
 
-The end-to-end suite drives a real production build in Chromium against throwaway collections: one seeded and read-only, one empty for the specs that write, and one behind a password. Most of what it covers is the shared engine — the portfolio and its chart, the collection page's search and filters, an item, the appraisal report, adding by hand, importing a spreadsheet and the gate — so it stands for the other apps built on the engine too. What is whisky's own is the open-bottle flow: a copy leaving a stack at the cost of the oldest copy still held, its value freezing, and the total not moving.
+The end-to-end suite drives a real production build in Chromium against throwaway collections: one seeded and read-only, one empty for the specs that write, and one behind a password. Most of what it covers is the shared engine — the portfolio and its chart, the collection page's search and filters, an item, the appraisal report, adding by hand, importing a spreadsheet and the gate — so it stands for the other apps built on the engine too. What is whisky's own is the open-bottle flow: a copy leaving a stack at the cost of the oldest copy still held, its value freezing, and the total not moving. It also drives the installable shell (manifest, icons, worker, offline page, the safety net), a restore of a backup over 10 MB, the health route, the not-found page and the phone layout at 360 and 412 px, all of which the other three apps share. Every server starts offline with the price refresh off, every spec takes `test` from `e2e/fixtures.ts`, and the run removes its data when it ends.
 
 ## Known gaps
 

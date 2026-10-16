@@ -44,7 +44,7 @@ Auto-refresh re-prices anything older than `COMICS_AUTO_REFRESH_HOURS` (default 
 
 ## Grade it, or wait?
 
-The grade / wait / skip verdict from the card app runs on every raw copy: the best outcome is the 9.8 price, the low outcome the 8.0 price, and the copy's own raw value is what it is worth today; the outlook also prices the slab at the grade you expect it to get. Settings hold the grading fee (default $60) and what "ready to grade" needs ($75 of upside after the fee and 40% of the raw value by default). A **Grading window** alert is raised the first time a copy clears them.
+The grade / wait / skip verdict shared with the card app runs on every raw copy, reading one price per day and waiting for three different days before it judges timing (refreshing three times in an afternoon does not make a verdict), and comparing recorded prices without predicting a grade or a sale price: the best outcome is the 9.8 price, the low outcome the 8.0 price, and the copy's own raw value is what it is worth today; the outlook also prices the slab at the grade you expect it to get. Settings hold the grading fee (default $60) and what "ready to grade" needs ($75 of upside after the fee and 40% of the raw value by default). A **Grading window** alert is raised the first time a copy clears them.
 
 ## Certificate verification
 
@@ -77,12 +77,19 @@ npm test -w @collectcollect/comics
 
 - `tests/spec.test.ts`: schema validation, cover-date normalisation, key flags, slab rules, CSV aliases, the unique-vs-stackable rule, identification mapping, the Markdown mirror and the seed.
 - `tests/cert.test.ts`: the verifier's three answers.
-- `tests/pricecharting.test.ts`: the search string, ranking by issue number and edition, the column mapping, id lookup and errors, against a fake `fetch`.
+- `tests/pricecharting.test.ts`: the search string, ranking by issue number and edition, the column mapping, id lookup, a refused token and PriceCharting's rate limit, against a fake `fetch`.
 - `tests/summary.test.ts`: raw and slabbed valuation, estimates, the signature premium, manual overrides, the outlook and the grading-window alert.
+- `tests/extras.test.ts`, `tests/health.test.ts`, `tests/installable.test.ts`, `tests/pwa.test.ts`, `tests/e2e-teardown.test.ts`: the grade panel and cover dates, the health route through the password gate, the icons and the installable shell's wiring, and the end-to-end suite's cleanup.
+
+```sh
+npm run e2e -w @collectcollect/comics
+```
+
+The end-to-end suite drives a real production build in Chromium on three servers (a seeded collection that is only read, an empty one written to, and one behind a password), each started offline with the price refresh off and removed when the run ends; every spec takes `test` from `e2e/fixtures.ts`, so a policy violation, an uncaught exception or a request that leaves the site fails it. It covers the portfolio, the collection, an issue's page, adding by hand and the password gate, the health route, the not-found page and the theme and palette. The shared pages are also driven by `apps/whisky`'s suite.
 
 ## Known gaps
 
 - The PriceCharting column-to-grade mapping is unverified (see above).
 - No live certificate lookup; the verifier checks the number's shape only.
 - No eBay or auction-house source; a raw key's market between PriceCharting's grade columns is estimated by multiplier.
-- No end-to-end suite of its own. The pages this app renders come from the shared engine and are covered end to end by `apps/whisky`, which drives a real build through the portfolio, the collection, an item, the report, adding by hand, importing a spreadsheet and the password gate. What is not covered there is the key-issue line and the certificate check, which unit tests reach but a browser does not.
+- The key-issue line and the certificate check are reached by unit tests, not by the browser suite.

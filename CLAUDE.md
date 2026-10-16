@@ -16,6 +16,30 @@ have theirs; the four domain apps have none until it has run in them).
 `next` itself is declared once, in the root `package.json`, so all six apps and the shared
 package run the same version; `CONTRIBUTING.md` has what goes where.
 
+`packages/core`'s typecheck runs `tsc` over `src` (the domain engine, its pages and
+components included), `tests/` and `vitest.config.ts` under one `tsconfig.json` with
+`noUncheckedIndexedAccess` on, then the kit's JavaScript under `tsconfig.kit.json`; the four
+domain apps and the create-domain template have the flag on too.
+
+Four files in `packages/core` are the domain apps' counterparts of code the card app keeps
+its own copy of: `src/grading.ts` (cards: the outlook and verdict in
+`apps/cards/src/lib/analytics.ts`), `src/components/OutlookChart.tsx` (cards:
+`components/charts/OutlookChart.tsx`), `src/pricing/match.ts` and
+`src/pricing/pricecharting.ts` (cards: `lib/pricing/match.ts` and
+`lib/pricing/providers/pricecharting.ts`). They behave the same where both have the code,
+and `packages/core/tests/{grading,match,pricecharting,outlook-chart,outlook-chart-long}.test.ts`
+hold the rules they share (cards' own tests hold the same rules in cards); a change to one
+is made to the other until cards imports core's.
+
+The one-command installers are `scripts/install.sh` and `scripts/install.ps1`: two scripts
+for one behaviour (apps by name or `--all`, a private `.env` written whole, a password and
+secret for all six apps, an opt-in `--lan` that writes `compose.override.yaml`, whose first
+line both recognise). `packages/core/tests/install-script.test.ts` runs install.sh against
+fake docker and curl, and pins from the text alone what install.ps1 must share with it (the
+apps, ports, prefixes and the override's first line); install.ps1 itself has not been run,
+in CI or anywhere. `packages/core/tests/compose-file.test.ts` holds all six compose services
+to the same settings, as text and through `docker compose config`.
+
 ## The domain engine
 
 `packages/core/src/domain`, `src/pages` and `src/components/domain` are one engine that
@@ -29,41 +53,39 @@ mirror, backup and restore, CSV import and export, identification, and the auth;
 app's `src/lib/engine.ts` is that one call, `src/lib/routes.ts` is `createRoutes(engine)`,
 every `route.ts` re-exports one handler from it, and its pages render `PortfolioPage`,
 `CollectionPage`, `ItemPage` and the rest from `packages/core/src/pages` with the app's
-small hooks, inside `AppShell`. `spec.envPrefix` names the app's variables:
+small hooks, inside `AppShell`. `spec.pricing.storedFields` names the kind of each field
+the app's price summary adds, so a stored summary is read back into that shape
+(`domain/stored.ts`, below). `spec.envPrefix` names the app's variables:
 `<PREFIX>_APP_PASSWORD`, `_APP_SECRET`, `_DATA_DIR`, `_DATABASE_FILE`,
 `_AUTO_REFRESH_HOURS`. The database is `collectcollect-<id>.db` and the session cookie
 `cc_<id>_session` (non-alphanumerics in the id become `_`), per `domainAuth` in
 `domain/auth.ts`, which the app's `src/proxy.ts` builds without importing the engine, so
 the proxy bundle carries no database.
 
-What the domain apps do not have: sign-in with Google (`domainAuth` is a password and
-nothing else), a record of ended sessions (`createAuthRoutes` is given no `sessions`, so
-signing out clears that browser's cookie and *Sign out everywhere* does not exist; a copy of
-the cookie stays good for 30 days, and changing the password or `<PREFIX>_APP_SECRET`
-ends them all), and a signing key kept beside the data (with no `<PREFIX>_APP_SECRET`
-the key is derived from the password, and the log says so once). The engine's CSV import
-has no `MAX_IMPORT_ROWS`, and no `linear-parsing` test holds its parsers.
+Sessions are signed with `<PREFIX>_APP_SECRET` when it is set, and otherwise with a random
+key the app keeps in `session-secret` in its data directory (`createSessionSeed`, as cards
+and skins do; it is not part of a backup). What the domain apps do not have: sign-in with
+Google (`domainAuth` is a password and nothing else), and a record of ended sessions
+(`createAuthRoutes` is given no `sessions`, so signing out clears that browser's cookie and
+*Sign out everywhere* does not exist; a copy of the cookie stays good for 30 days, and
+changing the password or `<PREFIX>_APP_SECRET` ends them all).
 
-Type checking is in two steps because the engine came from a branch written before
-`packages/core/tsconfig.json` required `noUncheckedIndexedAccess`. `tsconfig.json` is the
-strict one and **excludes** `src/domain`, `src/pages`, `src/components/domain`,
-`src/components/OutlookChart.tsx`, `src/grading.ts` and `src/pricing` (the engine's copies
-of the card app's outlook chart, grading verdict and PriceCharting client);
-`tsconfig.domain.json` extends it with only that flag off and covers those, `tests/**` and
-`vitest.config.ts`; `typecheck` runs it as the third step. A new core file goes under
-`tsconfig.json` if it passes the flag, otherwise in `tsconfig.domain.json`'s `include`
-and `tsconfig.json`'s `exclude`, so that `npm run typecheck` reaches it (the conventions
-test checks that every source is reached). The four apps' `tsconfig.json` and the
-template's have the flag off for the same reason. This is a stopgap and not a setting: the
-conventions test's `noUncheckedIndexedAccess in every TypeScript project` fails for as
-long as any project has it off, and when the engine passes it `tsconfig.domain.json`, its
-typecheck step, the exclude list and the apps' overrides go.
+Each domain app answers `GET /api/health` without a session (`domain/health.ts`:
+`{ ok, app, database }`, what the image's and Compose's health checks ask), draws its own
+not-found page, and is installable: `src/app/manifest.ts`, `sw.js/route.ts`,
+`guard.js/route.ts` and `offline/page.tsx` over `domain/pwa.ts`, and icons committed in
+`public/icons` and `public/favicon.ico`, rendered from `scripts/icon.svg` by
+`scripts/render-icons.mjs` (`npm run icons -w @collectcollect/<app>`); each app's
+`tests/installable.test.ts` holds the maskable icon to its spec's `theme.dark`, so a change
+to either is made with the other. The create-domain template carries the same routes and
+files, and the scaffolder renders a new app's icons.
 
 Tests: `packages/core/tests` (vitest: repository, routes, pricing, analytics, CSV,
-Markdown, `AppShell`) and each app's `tests` (its spec, its merge rule, its price adapter
-against a fake `fetch`). The Playwright suites are retro-games', comics' and whisky's (a
+Markdown, stored rows, `AppShell`, the installers and the Compose file) and each app's
+`tests` (its spec, its merge rule, its price adapter against a fake `fetch`, its health
+route, its installability). The Playwright suites are retro-games', comics' and whisky's (a
 read, a write and a locked server each, ports 3240–3242, 3250–3252 and 3230–3232);
-watches has none. They import `test` from `@playwright/test`, not `e2e/fixtures.ts`.
+watches has none, and whisky's stands for the shared pages and shell.
 
 ## Sign in with Google
 
@@ -78,10 +100,9 @@ its own sessions, users, Stripe, the adapters) is carried unused, since there is
 no webhook here, so a change to those modules changes the bytes here and nothing the apps
 do. `npm test` runs its self-test first (`packages/core`'s `test` script is
 `node --test src/kit/selftest.mjs && vitest run`: the kit's self-test, then core's own
-suites), and `packages/core`'s `typecheck` runs three configurations: its declarations are
-checked with the package's own `tsconfig.json`, its JavaScript with `tsconfig.kit.json`
-(the same options plus `checkJs` and Node's types), and the domain engine with
-`tsconfig.domain.json` (above); its `eslint .` lints all nineteen files.
+suites), and `packages/core`'s `typecheck` checks its declarations with the package's own
+tsconfig and its JavaScript with `tsconfig.kit.json` (the same options plus `checkJs` and
+Node's types); its `eslint .` lints all nineteen files.
 
 Sign-in with Google is a way past the gate of cards and skins (the four domain apps have
 the password alone), beside the password or in its place, for
@@ -125,17 +146,17 @@ the test.
 ## The website
 
 Each app is a website served by its own Next server, which does the work a web host
-would: `createProxy` in `packages/core/src/proxy.ts` runs for every path (cards' and
-skins' `matcher` leaves out only the dev server's hot-reload socket) and sets every security
+would: `createProxy` in `packages/core/src/proxy.ts` runs for every path (each app's
+`matcher` leaves out only the dev server's hot-reload socket) and sets every security
 header per request, Next's `/_next/` files, the not-found page and every refusal
 included; `next.config.ts` sets none, since a header frozen into the build could only
 contradict it. The values of cards and skins are written out once more, in the README's
 two machine-read blocks (`<!-- headers:cards:begin -->`, `headers:skins`): each of those
 apps' `tests/website.test.ts` holds the proxy's output equal to its block word for word,
 and `e2e/website.spec.ts` holds every live response to it. Change one, change both. An
-address with a trailing slash is redirected by the proxy (cards' and skins'
-`next.config.ts` set `skipTrailingSlashRedirect`, since Next's own redirect runs before
-the proxy and carried no header); Next's repeated-slash redirect and its 500 for `TRACE`, and Node's own 400
+address with a trailing slash is redirected by the proxy (every app's `next.config.ts`
+sets `skipTrailingSlashRedirect`, since Next's own redirect runs before the proxy and
+carried no header); Next's repeated-slash redirect and its 500 for `TRACE`, and Node's own 400
 for an unknown method and 431 for oversized headers, still leave without them, and
 `website.spec.ts` pins all four, so the README's sentence about them changes when Next or
 Node does. What only https may carry — HSTS, `upgrade-insecure-requests`, an https
@@ -146,22 +167,24 @@ from any client's `X-Forwarded-Proto`, and never for the whole deployment: a LAN
 listed beside the domain is plain http, and the cards suite's locked server is set up
 that way (`auth.spec.ts` drives it through a `.lan` name). The four domain apps run the same
 `createProxy` (the host list, the cross-site and JSON rules, the headers, the password
-gate; their `src/proxy.ts` names `/login` and `/api/auth` as public paths and nothing
-else) but are not held to the rest of this section: no README block, no
-`tests/website.test.ts`, no `e2e/website.spec.ts`, no `e2e/fixtures.ts`; no `public/`
-folder, so no `robots.txt` or `security.txt`; a `matcher` that
-leaves out `/_next/static`, `/_next/image` and `/favicon.ico`, so those answers carry no
-header; no `skipTrailingSlashRedirect`, so Next's trailing-slash redirect leaves without
-them; and a `next.config.ts` with neither `poweredByHeader: false` nor
-`experimental.proxyClientMaxBodySize`, so they send `X-Powered-By` and Next cuts a request
-body past its default 10 MB short (`packages/core/src/limits.ts` says why that matters).
+gate) with the same `matcher`, and their `next.config.ts` sets what cards' and skins' do:
+`poweredByHeader: false`, `skipTrailingSlashRedirect`, and
+`experimental.proxyClientMaxBodySize` from `MAX_REQUEST_SIZE`, without which Next cut a
+request body past 10 MB short and a larger backup failed to restore
+(`packages/core/src/limits.ts`; `packages/core/tests/domain-next-config.test.ts` reads every
+domain app's config and the template's). They are not held to the rest of this section: no
+README header block, no `tests/website.test.ts` and no `e2e/website.spec.ts`; their
+`public/` holds the icons and favicon, and no `robots.txt` or `security.txt`.
 Every source in the policy
 was measured in Chromium against the production build, by taking it out and seeing a spec
 go red (but `script-src`'s `'self'`, a fallback
 Chromium ignores beside `'strict-dynamic'`, and `worker-src`, which it fills from
 `script-src`: README, "The website"); add one only when a spec shows something real
-needs it. Every cards and skins spec imports `test` from `e2e/fixtures.ts`, not
-`@playwright/test` (`tests/website.test.ts` fails on one that does not), so every page any
+needs it. Every spec imports `test` from its app's `e2e/fixtures.ts`, not
+`@playwright/test` (cards' and skins' `tests/website.test.ts`, and
+`packages/core/tests/e2e-rules.test.ts` for every app with a Playwright config, fail on one
+that does not; the same test holds the domain apps' suites to starting their servers
+offline with `<PREFIX>_AUTO_REFRESH_HOURS=0` and removing their data when the run ends), so every page any
 test drives, in a context the test makes for itself too, fails on a policy violation, an
 uncaught exception or a request that leaves the site (but one: the top-level navigation to
 Google's sign-in page, which the test answers itself); `unwatchedContext` is for a test
@@ -175,10 +198,15 @@ holds only what a page loads: a source such as the skins icon's SVG lives beside
 script that uses it. API answers are `no-store` unless their path is on the app's
 `cachedPaths` (the proxy's header wins over a route's own). Without a session, only each app's
 `publicPaths` and the proxy's `SITE_PATHS` answer (`/_next/static`, `/robots.txt`,
-`/.well-known/security.txt`, `/guard.js`). `/guard.js` is the safety net
+`/.well-known/security.txt`, `/guard.js`). The four domain apps pass `DOMAIN_PUBLIC_PATHS`
+(`packages/core/src/domain/auth.ts`) as theirs: cards' and skins' list plus `/favicon.ico`,
+which they serve; each app's `tests/installable.test.ts` fails on a public path that nothing
+serves. An app's own chrome (its nav, tab bar, + Add, Sign out and the unread-alert count) is
+drawn only for someone signed in, in all six apps, so the login page, and an offline notice
+kept from before signing in, carry none of it. `/guard.js` is the safety net
 (`packages/core/src/guard.ts`, loaded with the nonce, before the app; `Started` tells it
-the page started, `NoScriptNote` covers no JavaScript at all); cards and skins load it,
-and the domain apps' `AppShell` loads none of the three. Cards' and skins'
+the page started, `NoScriptNote` covers no JavaScript at all); every app loads all three
+(the domain apps through `AppShell`). Cards' and skins'
 `public/.well-known/security.txt` expires on 2027-10-08 and the unit test fails once it
 has. Each app lives at the root of
 its own origin; there is no sub-path build. Trusted Types were measured and break Next's
@@ -193,15 +221,19 @@ two of a pattern's quantifiers share one run of characters (`\s*%?\s*`, a lazy `
 before `\s*$`) unless the run is bounded first, as `spaced` in `centering.ts` makes
 every run of spaces one: each of those held the whole server for seconds, and the
 centering one for more than five minutes, on a few hundred bytes to a few hundred
-kilobytes of crafted text, and the `linear-parsing` tests in cards and skins hold each reader
+kilobytes of crafted text, and the `linear-parsing` tests (cards, skins, `packages/core`,
+watches, whisky) hold each reader
 they replaced to a budget on such input, and to reading exactly what its pattern read on
 seeded short inputs drawn from the characters that matter (brackets, every line break).
 A stored row is read back field by field rather than trusted for its shape
 (`readPriceSummary`, `decode` in `scan-drafts.ts`, `readStored` and the JSON-column
-readers beside it in `cards.ts`): a restore installs rows this app never wrote, and a
+readers beside it in `cards.ts`; `readStoredSummary` and the JSON-column readers in the
+domain engine's `stored.ts`): a restore installs rows this app never wrote, and a
 reader that indexes into one it cannot read takes every page that lists
-it down. An import reads at most `MAX_IMPORT_ROWS` rows in cards and skins; the domain
-engine's does not cap them, and no `linear-parsing` test holds its parsers.
+it down. An import reads at most `MAX_IMPORT_ROWS` (5,000) rows in every app. The
+Markdown mirror's index is rewritten on a timer; while a restore holds the database lock
+the timer waits, since writing the index makes the collection folder the restore is
+swapping (cards' and skins' `tests/restore-race.test.ts`, core's `mirror-lock.test.ts`).
 
 ## Settings
 
@@ -229,3 +261,19 @@ cards' and skins' `/settings` takes its version from that app's `package.json` t
 `src/lib/version.ts` (imported, since `npm_package_version` is unset under `next start`
 and in the Docker image), which `/api/health` reports too and `tests/version.test.ts`
 pins; the domain apps have no About section and no `version.ts`.
+
+## On a phone
+
+Three things to keep true. A browser withholds some APIs from a page that is not a secure
+context (https or localhost), and a phone on the home network is not one:
+`crypto.randomUUID`, `navigator.mediaDevices`, service workers. Check for the API, never
+assume it; cards' scan draft ids come from `newDraftId()` in `src/lib/draft-id.ts`, which
+falls back to `crypto.getRandomValues`, and the Use camera button checks
+`window.isSecureContext` first. In a browser test with `isMobile`, compare
+`document.documentElement.scrollWidth` with the width the test set, never with
+`window.innerWidth`: Chromium's mobile emulation widens the layout viewport to fit an
+overflowing page, so `innerWidth` follows the overflow and that check can never fail. The
+header's theme buttons and Sign out are 44 px under `(pointer: coarse)` (`family-theme.css`,
+`.cc-mode-choice` and `.cc-signout`), and below 380 px the space around them is trimmed so
+the sticky header stays two rows at 360 px; change one, re-measure at 360 and 412 with a
+password set (the Sign out phone tests in each `auth.spec.ts` hold the one-row layout).
