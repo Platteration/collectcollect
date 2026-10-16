@@ -22,8 +22,20 @@ export async function fetchQuotes<Q>(
   const active = providers.filter((p) => p.isConfigured());
   const results = await Promise.allSettled(
     active.map(async (p) => {
-      const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new ProviderError(p.id, `${p.label} timed out`)), timeoutMs));
-      return Promise.race([p.lookup(query, fetchImpl), timeout]);
+      // Giving up on a source also tells it to stop: its signal aborts with the timeout.
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new ProviderError(p.id, `${p.label} timed out`));
+        }, timeoutMs);
+      });
+      try {
+        return await Promise.race([p.lookup(query, fetchImpl, controller.signal), timeout]);
+      } finally {
+        clearTimeout(timer);
+      }
     }),
   );
   const quotes: PriceQuote[] = [];

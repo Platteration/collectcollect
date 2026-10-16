@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ProviderError } from "@collectcollect/core/domain/spec";
+import { NO_LIMIT } from "@collectcollect/core/limiter";
+import { setPriceChartingLimit } from "@collectcollect/core/pricing/pricecharting";
 import { buildSearch, priceChartingProvider, productToQuote, scoreProduct } from "@/lib/pricing/pricecharting";
 import type { ComicQuery } from "@/lib/types";
 import { fakeFetch } from "./helpers";
@@ -13,6 +15,8 @@ const newsstand = { id: "4", "product-name": "Amazing Spider-Man #300 [Newsstand
 
 beforeEach(() => {
   process.env.PRICECHARTING_TOKEN = "test-token";
+  // The client asks PriceCharting one call a second; a test does not wait for that.
+  setPriceChartingLimit(NO_LIMIT);
 });
 afterEach(() => {
   delete process.env.PRICECHARTING_TOKEN;
@@ -54,6 +58,13 @@ describe("asking PriceCharting about a comic", () => {
     const quotes = await priceChartingProvider.lookup(query({ externalIds: { pricecharting: "1" } }), fetchImpl);
     expect(quotes[0].externalId).toBe("1");
     expect(fetchImpl.calls).toHaveLength(1);
+  });
+
+  it("says PriceCharting is rate limiting this app, whether it was asked by id or by search", async () => {
+    const limited = fakeFetch([["/api/", {}, 429]]);
+    await expect(priceChartingProvider.lookup(query(), limited)).rejects.toBeInstanceOf(ProviderError);
+    await expect(priceChartingProvider.lookup(query(), limited)).rejects.toThrow(/PriceCharting is rate limiting this app/);
+    await expect(priceChartingProvider.lookup(query({ externalIds: { pricecharting: "1" } }), limited)).rejects.toThrow(/PriceCharting is rate limiting this app/);
   });
 
   it("answers with nothing rather than a wrong issue, and reports a refused token", async () => {

@@ -167,7 +167,12 @@ export interface PriceProvider<Q = unknown> {
   isConfigured(): boolean;
   /** Load a whole catalogue before a run of lookups; optional and always safe to skip. */
   prime?(fetchImpl?: typeof fetch): Promise<void>;
-  lookup(query: Q, fetchImpl?: typeof fetch): Promise<PriceQuote[]>;
+  /**
+   * `signal` aborts when the engine stops waiting for this source, so a source
+   * that queues its calls (PriceCharting's one a second) can drop one it was
+   * given up on instead of asking later for an answer nobody will read.
+   */
+  lookup(query: Q, fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<PriceQuote[]>;
 }
 
 export class ProviderError extends Error {
