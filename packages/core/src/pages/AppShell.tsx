@@ -47,6 +47,17 @@ export function navFor(spec: Pick<Spec, "nav">): NavItem[] {
   return [...STANDARD_NAV.slice(0, 2), ...extra, ...STANDARD_NAV.slice(2)];
 }
 
+/**
+ * The destinations a phone's tab bar leaves out, in nav order: the standard
+ * Import page and any the app added to its nav. The header's row is hidden on a
+ * phone, so these are listed on Settings, the way cards and skins list theirs.
+ * Settings itself is a tab (or, if an app dropped it, this is its page).
+ */
+export function offTheTabBar(spec: Pick<Spec, "nav" | "tabs">): NavItem[] {
+  const onTabs = spec.tabs ?? STANDARD_TABS;
+  return navFor(spec).filter((item) => !onTabs.includes(item.href) && item.href !== "/settings");
+}
+
 export function appMetadata(spec: Spec): Metadata {
   return {
     title: `CollectCollect · ${spec.name}`,
