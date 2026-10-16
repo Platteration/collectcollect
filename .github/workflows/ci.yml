@@ -25,7 +25,9 @@ permissions:
 
 jobs:
   # Every workspace's lint, types and unit tests, the conventions test, a production
-  # build of both apps, and both end-to-end suites against those builds.
+  # build of all six apps, and the end-to-end suites of the five that have one
+  # (cards, skins, retro-games, comics, whisky; watches has none yet) against those
+  # builds.
   # Every job runs on a named Ubuntu release (CONVENTIONS.md, "CI"), not ubuntu-latest,
   # which is Ubuntu 26.04 from 2026-10-19:
   # Playwright 1.56.1 has no Chromium build for 26.04, so the browser install below
@@ -59,8 +61,13 @@ jobs:
 
       # Each app's suite drives a production build it makes itself, so the suite stays
       # self-contained locally; the build step above is what names a build failure as
-      # its own. Both apps boot their own servers on their own ports (3210-3211 for
-      # cards, 3220-3223 for skins) against throwaway data directories.
+      # its own. Every app boots its own servers on its own ports (3210-3211 cards,
+      # 3220-3223 skins, 3230-3232 whisky, 3240-3242 retro-games, 3250-3252 comics)
+      # against throwaway data directories, offline. The script runs each workspace's
+      # own `e2e` script once, one app after the other; it is one step of this job, not
+      # a job per app, because the browser suite belongs to `check` (CONVENTIONS.md,
+      # "CI"; apps/cards/tests/ci-runner.test.ts allows the browser install here and
+      # nowhere else).
       - run: npm run test:e2e
 
       - name: Upload the reports
@@ -73,15 +80,16 @@ jobs:
             apps/*/test-results/
           retention-days: 7
 
-  # The image is the thing people run, so it is built for both apps and the running
-  # container is asked whether it is well.
+  # The image is the thing people run, so it is built for every app and the running
+  # container is asked whether it is well: each app answers /api/health, the same
+  # route the image's HEALTHCHECK asks.
   docker:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        app: [cards, skins]
+        app: [cards, skins, retro-games, comics, watches, whisky]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
