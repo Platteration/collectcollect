@@ -23,6 +23,8 @@ export interface DomainDb {
   setDb(db: Database.Database | undefined): void;
   lockDatabase(reason: string): boolean;
   unlockDatabase(): void;
+  /** Whether a restore holds the lock right now. */
+  databaseLocked(): boolean;
   databaseExists(): boolean;
   building(): boolean;
   /** The live connection without going through the restore lock. */
@@ -201,6 +203,7 @@ export function createDomainDb(spec: Pick<DomainSpec, "id" | "envPrefix" | "fiel
     unlockDatabase() {
       state().locked = undefined;
     },
+    databaseLocked: () => Boolean(state().locked),
     unlocked: () => state().db,
   };
 }

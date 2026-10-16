@@ -290,6 +290,11 @@ export function unlockDatabase(): void {
   globalForDb.__skinsLocked = undefined;
 }
 
+/** Whether a restore or a put-back is swapping the collection out right now (lockDatabase). */
+export function databaseLocked(): boolean {
+  return Boolean(globalForDb.__skinsLocked);
+}
+
 /**
  * Close the live connection and forget it, so the file can be replaced on
  * every platform. Works while the database is locked, which is the only time

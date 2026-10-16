@@ -359,6 +359,11 @@ export function unlockDatabase(): void {
   globalForDb.__collectcollectLocked = undefined;
 }
 
+/** Whether a restore or a put-back is swapping the collection out right now (lockDatabase). */
+export function databaseLocked(): boolean {
+  return Boolean(globalForDb.__collectcollectLocked);
+}
+
 /** Swap the shared connection (used by tests to point at an in-memory database). */
 export function setDb(db: Database.Database | undefined): void {
   globalForDb.__collectcollectDb = db;

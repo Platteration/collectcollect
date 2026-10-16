@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { listLots, listSaleLots } from "../acquisitions";
-import { dataDir, getDb } from "../db";
+import { dataDir, databaseLocked, getDb } from "../db";
 import type { Category, Exterior, ItemRecord, PriceSource, Sale } from "../types";
 import { CATEGORIES, EXTERIORS } from "../types";
 import { INDEX_HEADERS, MAX_VALUE_ROWS, idFromFileName, itemFileName, itemMarkdown, type ValueRow } from "./item";
@@ -256,9 +256,19 @@ function scheduleIndex(): void {
     if (now - state.dirtySince >= INDEX_MAX_WAIT_MS) return;
     clearTimeout(state.indexTimer);
   }
-  state.indexTimer = setTimeout(() => {
+  state.indexTimer = setTimeout(function writeWhenFree() {
     state.indexTimer = null;
-    if (state.indexDirty) writeIndex();
+    if (!state.indexDirty) return;
+    // A restore or a put-back is swapping the collection folder out. Writing the
+    // index now would make a new folder where the restored one is about to be
+    // moved, and the move would fail (ENOTEMPTY); the swap rewrites the folder
+    // when it is done, and this tries again after it.
+    if (databaseLocked()) {
+      state.indexTimer = setTimeout(writeWhenFree, INDEX_QUIET_MS);
+      state.indexTimer.unref?.();
+      return;
+    }
+    writeIndex();
   }, INDEX_QUIET_MS);
   state.indexTimer.unref?.();
 }
