@@ -105,10 +105,13 @@ export async function AppShell({ engine, fontClass, footer, children }: { engine
   const unread = member ? engine.alerts.unreadCount() : 0;
   const nav = navFor(spec);
   const tabOrder = spec.tabs ?? STANDARD_TABS;
+  // When the tab bar leaves destinations out, Settings lists them (its "Go to"
+  // list), so its tab is labelled More, as in cards and skins.
+  const more = offTheTabBar(spec).length > 0;
   const tabs = nav
     .filter((i) => tabOrder.includes(i.href))
     .sort((a, b) => tabOrder.indexOf(a.href) - tabOrder.indexOf(b.href))
-    .map((i) => (i.href === "/alerts" ? { ...i, badge: unread } : i));
+    .map((i) => (i.href === "/alerts" ? { ...i, badge: unread } : i.href === "/settings" && more ? { ...i, label: "More", icon: "☰" } : i));
 
   // The theme script and the safety net need the nonce the proxy minted for
   // this request, or the content security policy refuses them: the page paints

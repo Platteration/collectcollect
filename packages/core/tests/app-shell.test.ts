@@ -115,6 +115,18 @@ describe("the shell's own chrome", () => {
     expect(opened).toBe(1);
   });
 
+  it("labels the last tab More when Settings lists what the tab bar leaves out, as cards and skins do", async () => {
+    const tabBar = (html: string) => /<nav\b[^>]*aria-label="Sections"[^>]*>([\s\S]*?)<\/nav>/.exec(html)?.[1] ?? "";
+    const { html } = await shell();
+    expect(tabBar(html)).toMatch(/<a [^>]*href="\/settings"[^>]*>[\s\S]*?More[\s\S]*?<\/a>/);
+    expect(tabBar(html)).not.toContain(">Settings<");
+    // An app whose tab bar has every destination has nothing more to list, and its tab says Settings.
+    const everything = { ...engine, spec: { ...engine.spec, tabs: ["/", "/collection", "/alerts", "/report", "/import", "/settings"] } } as typeof engine;
+    const all = renderToStaticMarkup(await AppShell({ engine: everything, fontClass: "font", children: null }));
+    expect(tabBar(all)).toContain("Settings");
+    expect(tabBar(all)).not.toContain("More");
+  });
+
   it("is drawn for everyone when the app has no password, as before", async () => {
     const { html, opened } = await shell();
     expect(html).toContain('href="/add"');

@@ -102,7 +102,8 @@ test.describe("a bottle collection on a phone", () => {
     await expect(tabs.getByRole("link")).toHaveCount(5);
     await expect(tabs.getByRole("link", { name: "Import" })).toHaveCount(0);
     await expect(page.locator("header").getByRole("link", { name: "Import" })).toBeHidden();
-    await tabs.getByRole("link", { name: "Settings" }).click();
+    // The last tab says More, since Settings lists what the bar leaves out.
+    await tabs.getByRole("link", { name: "More" }).click();
     await expect(page).toHaveURL(/\/settings$/);
     const more = page.getByRole("navigation", { name: "More sections" });
     await expect(more).toBeVisible();
