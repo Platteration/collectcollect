@@ -25,15 +25,37 @@ export function yScale(lo: number, hi: number, layout: Layout) {
   return (v: number) => layout.top + innerH - ((v - lo) / span) * innerH;
 }
 
+/** The round-numbered gridline spacing nearest a raw one: 1, 2, 5 or 10 times a power of ten. */
+function niceStep(rawStep: number): number {
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const norm = rawStep / mag;
+  return (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+}
+
+/**
+ * Gridlines inside the bounds given, leaving the bounds alone. Rounding the
+ * bounds outward to the nearest gridline (what `niceTicks` does) would undo a
+ * chart's zoom: a collection sitting between $14.9K and $15.3K would be plotted
+ * from $0 to $20K, and a week's move would flatten to nothing.
+ */
+export function niceScale(lo: number, hi: number, count = 3): { lo: number; hi: number; ticks: number[] } {
+  // An empty series gives Infinity for both bounds; draw an empty 0–1 frame.
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { lo: 0, hi: 1, ticks: [] };
+  if (hi <= lo) hi = lo + Math.max(1, Math.abs(lo) * 0.1);
+  const step = niceStep((hi - lo) / count);
+  const ticks: number[] = [];
+  // The count bounds the loop: beside bounds so large that a step is smaller
+  // than the spacing between floats, `v += step` would never move.
+  for (let v = Math.ceil(lo / step) * step; v <= hi + step / 1e6 && ticks.length <= count * 2; v += step) ticks.push(Math.round(v * 100) / 100);
+  return { lo, hi, ticks };
+}
+
 /** Round axis bounds outward to clean numbers and produce ~3 gridline values. */
 export function niceTicks(lo: number, hi: number, count = 3): { lo: number; hi: number; ticks: number[] } {
   if (hi <= lo) {
     hi = lo + Math.max(1, Math.abs(lo) * 0.1);
   }
-  const rawStep = (hi - lo) / count;
-  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
-  const norm = rawStep / mag;
-  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const step = niceStep((hi - lo) / count);
   const nlo = Math.floor(lo / step) * step;
   const nhi = Math.ceil(hi / step) * step;
   const ticks: number[] = [];
@@ -66,6 +88,20 @@ export function compactMoney(v: number): string {
   if (abs >= 1e4) return `$${(v / 1e3).toFixed(1)}K`;
   const decimals = Number.isInteger(v) || abs >= 100 ? 0 : 2;
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(v);
+}
+
+/**
+ * Axis labels for gridlines: compact money, or the full figure when the compact
+ * forms would repeat. A scale fitted to a narrow range puts its gridlines a few
+ * dollars apart, and `$15.0K` three times down an axis says nothing.
+ */
+export function tickLabels(ticks: readonly number[]): string[] {
+  const compact = ticks.map(compactMoney);
+  if (new Set(compact).size === compact.length) return compact;
+  const cents = ticks.some((v) => !Number.isInteger(v));
+  const digits = cents ? 2 : 0;
+  const full = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return ticks.map((v) => full.format(v));
 }
 
 export function shortDate(iso: string, withTime = false): string {

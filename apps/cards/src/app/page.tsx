@@ -1,9 +1,10 @@
-import { holdingsHistory } from "@collectcollect/core/holdings-history";
+import { holdingsLedger } from "@collectcollect/core/holdings-history";
 import { getDb } from "@/lib/db";
+import { costRatesByCard } from "@/lib/acquisitions";
 import { priceCoverage } from "@collectcollect/core/price-coverage";
 import { thinPoints } from "@collectcollect/core/series";
 import { costBasisByCard, latestSnapshotsByCard, listCards, recentSnapshotsByCard, snapshotValues } from "@/lib/cards";
-import { OUTLOOK_SNAPSHOTS, allocationByGame, gradingVerdict, isReadyToGrade, outlookForChart, outlookSeries, portfolioSeries, realizedReturn, totalReturn } from "@/lib/analytics";
+import { OUTLOOK_SNAPSHOTS, allocationByGame, gradingVerdict, isReadyToGrade, outlookForChart, outlookSeries, portfolioSeries, realizedReturn, totalReturn, valueTimeline } from "@/lib/analytics";
 import { imageSrc } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { Portfolio, type Holding, type Opportunity } from "@/components/Portfolio";
@@ -22,8 +23,11 @@ export default function HomePage() {
   // thins what it shows again, so a short range keeps its detail. The series
   // is summed from two figures per snapshot, not from every summary parsed.
   const pricePoints = thinPoints(portfolioSeries(cards, snapshotValues()), 20_000);
-  const history = holdingsHistory(getDb());
-  const points = thinPoints(history.points, 20_000);
+  // The recorded history, with what the copies held cost and what moved in
+  // alongside the market. Its totals are the record's own, step for step.
+  const ledger = holdingsLedger(getDb());
+  const costRates = costRatesByCard();
+  const points = thinPoints(valueTimeline(ledger, (id) => costRates.get(id)), 20_000);
   // The outlook is drawn from each card's recent history, not its whole life.
   const recent = recentSnapshotsByCard(OUTLOOK_SNAPSHOTS);
 
@@ -91,7 +95,7 @@ export default function HomePage() {
     <Portfolio
       points={points}
       pricePoints={pricePoints}
-      historyStartedAt={history.startedAt}
+      historyStartedAt={ledger.startedAt}
       freshCount={priceCoverage(cards.map(c => ({ priced: latest.get(c.id)?.summary.yourCopyValue != null, fetchedAt: latest.get(c.id)?.checkedAt ?? latest.get(c.id)?.fetchedAt }))).fresh}
       cardCount={cards.length}
       copyCount={cards.reduce((n, c) => n + c.quantity, 0)}

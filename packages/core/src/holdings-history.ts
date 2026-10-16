@@ -88,3 +88,37 @@ export function holdingsHistory(db: Database.Database): { startedAt: string; poi
   }
   return { startedAt: started.value, points };
 }
+
+/** One row of the record as the timeline reads it: what a holding was, as of a moment. */
+export interface HoldingsEvent {
+  entityId: number;
+  recordedAt: string;
+  /** Copies held after the event; 0 once everything has gone. */
+  quantity: number;
+  /** The value of one copy as of the event, or null while it has no price. */
+  unitValue: number | null;
+  rawUnitValue: number | null;
+}
+
+const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+
+/**
+ * The record row by row, for a reader that needs more than the totals
+ * `holdingsHistory` keeps: what changed at each step, not only where the sum
+ * went. A restore can install a record this app never wrote, so each row is
+ * read field by field. A row whose id, quantity or time is not what its column
+ * says (a time that is no date included) is left out, and a price that is not a
+ * number is read as no price, rather than turning every total after it into NaN.
+ */
+export function holdingsLedger(db: Database.Database): { startedAt: string; events: HoldingsEvent[] } {
+  const started = db.prepare("SELECT value FROM settings WHERE key='holdings_history_started'").get() as { value: string };
+  const rows = db.prepare("SELECT entity_id,recorded_at,quantity,unit_value,raw_unit_value FROM holdings_events ORDER BY id").all() as
+    Array<Record<"entity_id" | "recorded_at" | "quantity" | "unit_value" | "raw_unit_value", unknown>>;
+  const events: HoldingsEvent[] = [];
+  for (const row of rows) {
+    const { entity_id: entityId, recorded_at: recordedAt, quantity } = row;
+    if (!finite(entityId) || typeof recordedAt !== "string" || Number.isNaN(Date.parse(recordedAt)) || !finite(quantity) || quantity < 0) continue;
+    events.push({ entityId, recordedAt, quantity, unitValue: finite(row.unit_value) ? row.unit_value : null, rawUnitValue: finite(row.raw_unit_value) ? row.raw_unit_value : null });
+  }
+  return { startedAt: started.value, events };
+}
