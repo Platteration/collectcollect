@@ -7,6 +7,7 @@ const sample: Record<string, CardQuery> = {
   pricecharting: { game: "pokemon", name: "Charizard", setName: "Base", cardNumber: "4" },
   scryfall: { game: "mtg", name: "Black Lotus", setCode: "lea" },
   ygoprodeck: { game: "yugioh", name: "Dark Magician" },
+  ebay: { game: "pokemon", name: "Charizard", setName: "Base", cardNumber: "4" },
 };
 /** Small explicit probes only; never return credentials or a provider's raw error body. */
 export async function checkProvider(id: string, fetchImpl: typeof fetch = fetch): Promise<{ ok: boolean; message: string }> {

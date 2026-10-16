@@ -2,16 +2,19 @@ import { getDb } from "./db";
 import type {
   CardInput,
   CardRecord,
+  Centering,
   Condition,
   Game,
+  GradingReport,
   Identification,
   PriceSnapshot,
   PriceSummary,
   Settings,
 } from "./types";
-import { CONDITIONS, GAMES, GRADING_STATUSES, cleanSubgrades, flag, serial, type GradingStatus } from "./types";
+import { CONDITIONS, GAMES, GRADING_STATUSES, MAX_MONEY, MAX_QUANTITY, cleanSubgrades, flag, isCondition, isGame, serial, type GradingStatus } from "./types";
 import { addLot, costBasisByCard, deleteLot, getLot, listLots, reconcileToQuantity, recomputePurchasePrice, type AcquisitionInput } from "./acquisitions";
 import { IdentificationSchema } from "./identify/schema";
+import { readCentering, readGradingReport } from "./grading/schema";
 import { isValidUploadName } from "./images";
 import { nameKey } from "./name-key";
 import { mirrorCard, unmirrorCard } from "./markdown/mirror";
@@ -383,47 +386,20 @@ export function createCard(input: CardInput): CardRecord {
 }
 
 export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | null {
-  const existing = getCard(id);
-  if (!existing) return null;
-  const merged = normalizeInput({ ...existing, ...patch, game: patch.game ?? existing.game, name: patch.name ?? existing.name });
-  getDb()
-    .prepare(
-      `UPDATE cards SET game=@game, sport=@sport, name=@name, set_name=@setName, set_code=@setCode,
-        card_number=@cardNumber, year=@year, rarity=@rarity, variant=@variant, language=@language,
-        manufacturer=@manufacturer, team=@team, rookie=@rookie, parallel=@parallel, serial_number=@serialNumber,
-        autograph=@autograph, relic=@relic, subgrades=@subgrades,
-        quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
-        grade=@grade, cert_number=@certNumber, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
-        reference_image_url=@referenceImageUrl, accent_color=@accentColor, location=@location, external_ids=@externalIds, identification=@identification,
-        manual_ungraded=@manualUngraded, manual_graded=@manualGraded, grading_status=@gradingStatus, updated_at=@now
-       WHERE id=@id`,
-    )
-    .run({
-      ...merged,
-      id,
-      rookie: merged.rookie ? 1 : 0,
-      autograph: merged.autograph ? 1 : 0,
-      relic: merged.relic ? 1 : 0,
-      subgrades: merged.subgrades ? JSON.stringify(merged.subgrades) : null,
-      externalIds: JSON.stringify(merged.externalIds),
-      identification: merged.identification ? JSON.stringify(merged.identification) : null,
-      manualGraded: JSON.stringify(merged.manualGraded),
-      now: new Date().toISOString(),
-    });
-  if (merged.quantity !== existing.quantity) reconcileToQuantity(id, merged.quantity);
-  if (patch.purchasePrice !== undefined) {
-    // With one lot the purchase price is still something the owner sets
-    // directly. With several it is an average of them, so the edit is ignored
-    // and the recompute below puts the average back.
-    const lots = listLots(id);
-    if (lots.length === 1) {
-      getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, lots[0].id);
-    }
+  // One transaction: the row, its lots and the price derived from them change
+  // together or not at all. A failure between the row and the lots would leave
+  // a quantity the ledger does not account for.
+  const run = getDb().transaction((): CardRecord | null => {
+    const existing = getCard(id);
+    if (!existing) return null;
+    const merged = normalizeInput({ ...existing, ...patch, game: patch.game ?? existing.game, name: patch.name ?? existing.name });
     getDb()
       .prepare(
         `UPDATE cards SET game=@game, sport=@sport, name=@name, name_key=@nameKey, set_name=@setName, set_code=@setCode,
           card_number=@cardNumber, year=@year, rarity=@rarity, variant=@variant, language=@language,
-          manufacturer=@manufacturer, quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
+          manufacturer=@manufacturer, team=@team, rookie=@rookie, parallel=@parallel, serial_number=@serialNumber,
+          autograph=@autograph, relic=@relic, subgrades=@subgrades,
+          quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
           grade=@grade, cert_number=@certNumber, centering=@centering, grading_report=@gradingReport, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
           reference_image_url=@referenceImageUrl, accent_color=@accentColor, location=@location, external_ids=@externalIds, identification=@identification,
           manual_ungraded=@manualUngraded, manual_graded=@manualGraded, grading_status=@gradingStatus, updated_at=@now
@@ -433,6 +409,10 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
         ...merged,
         id,
         nameKey: nameKey(merged.name),
+        rookie: merged.rookie ? 1 : 0,
+        autograph: merged.autograph ? 1 : 0,
+        relic: merged.relic ? 1 : 0,
+        subgrades: merged.subgrades ? JSON.stringify(merged.subgrades) : null,
         centering: merged.centering ? JSON.stringify(merged.centering) : null,
         gradingReport: merged.gradingReport ? JSON.stringify(merged.gradingReport) : null,
         externalIds: JSON.stringify(merged.externalIds),

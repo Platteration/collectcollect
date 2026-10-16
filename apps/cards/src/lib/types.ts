@@ -249,6 +249,10 @@ export interface CardRecord {
   certNumber: string | null;
   /** BGS subgrades, when the slab carries them. */
   subgrades: Subgrades | null;
+  /** Measured border ratios, when typed in, read off a report, or read from the photo. */
+  centering: Centering | null;
+  /** What the grading company's report says, when recorded. */
+  gradingReport: GradingReport | null;
   purchasePrice: number | null;
   notes: string | null;
   imagePath: string | null;
@@ -299,6 +303,7 @@ export type PriceSource =
   | "pokemontcg"
   | "ygoprodeck"
   | "scryfall"
+  | "ebay"
   | "manual";
 
 export type Currency = "USD" | "EUR";

@@ -3,7 +3,8 @@ import { fakeFetch } from "./helpers";
 import { buildQuery, pickVariantKey, pokemonTcgProvider } from "@/lib/pricing/providers/pokemontcg";
 import { ygoprodeckProvider } from "@/lib/pricing/providers/ygoprodeck";
 import { scryfallProvider } from "@/lib/pricing/providers/scryfall";
-import { buildSearch, priceChartingProvider, productToQuote, scoreProduct } from "@/lib/pricing/providers/pricecharting";
+import { buildSearch, priceChartingProvider, productToQuote, scoreProduct, setPriceChartingLimit } from "@/lib/pricing/providers/pricecharting";
+import { NO_LIMIT, rateLimit } from "@collectcollect/core/limiter";
 import { cardToQuery } from "@/lib/pricing/index";
 
 describe("Pokémon TCG provider", () => {

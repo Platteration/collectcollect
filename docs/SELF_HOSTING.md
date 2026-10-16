@@ -6,14 +6,21 @@ Run exactly one app process for each data directory. SQLite data, upload snapsho
 
 ## First installation
 
-Install Docker with Compose support. From an authorized checkout:
+Install Docker with Compose support, then from the root of an authorized checkout run the one-command install for your shell:
 
 ```sh
-cp .env.example .env
-docker compose up -d --build cards
+# Linux / macOS / WSL / Git Bash
+./scripts/install.sh
 ```
 
-On PowerShell use `Copy-Item .env.example .env`. Open `http://localhost:3000`. Manual entry, CSV imports, purchases and goals need no API keys. The setup checklist links to those steps and can be reopened in Settings.
+```powershell
+# Windows PowerShell
+.\scripts\install.ps1
+```
+
+The script checks that Docker with Compose is available (and fails with a clear message if it is not), creates .env from .env.example with generated APP_SECRET and SKINS_APP_SECRET values (64 hex characters from a secure random source) and a generated APP_PASSWORD, builds and starts the cards app with docker compose up -d --build cards, and polls http://127.0.0.1:3000/api/health until the app is healthy or a bounded timeout is reached. When it finishes it prints http://localhost:3000 and the generated password once, with a warning that the password is stored in .env - keep .env private. If .env already exists the script says so, leaves it untouched, and continues without changing any secrets. API-key lines in .env are left blank; manual entry, CSV imports, purchases and goals need no API keys. Open http://localhost:3000, sign in with the printed password, then open Settings in the app and run the provider connection tests (guided checks) to verify any providers you configure. The setup checklist links to those steps and can be reopened in Settings.
+
+To do the same steps by hand instead, copy .env.example to .env, fill in your own secrets, and run docker compose up -d --build cards.
 
 For photo identification add `ANTHROPIC_API_KEY` to `.env`; for paid graded prices add `PRICECHARTING_TOKEN`; to fill a slab's grade and PSA's scans from its cert number add `PSA_API_TOKEN`. Apply environment changes with `docker compose up -d --force-recreate cards`. Settings distinguishes configuration from a tested connection. A connection test makes a small provider request; the vision check asks whether the configured model is available without sending a photo.
 

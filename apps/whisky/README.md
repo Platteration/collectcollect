@@ -41,7 +41,7 @@ There are two ways to open one. **Open a bottle** on a sealed bottle's page take
 ## Price sources
 
 - **Manual entry** is the only source today. Type what a sealed bottle is worth on its page, and enter past values with dates (an auction hammer price, a retailer's price on a day) so the chart has a line. Refresh does nothing on its own and says so.
-- **TODO:** an auction-house source. Whisky Auctioneer, Scotch Whisky Auctions and Whisky Hammer publish hammer prices per lot but no API; WhiskyBase keeps a market page per bottling. Any of them is a `PriceProvider<BottleQuery>` registered in `src/lib/spec.ts`; the query carries distillery, expression, age, vintage, bottling year and size, which is what those lots are keyed by.
+- **Frozen — deliberately manual-only:** no auction or market source is planned; this app stays a manual-pricing engine-validation app, and a provider would only be added behind the existing `PriceProvider<BottleQuery>` slot in `src/lib/spec.ts` if the app graduates.
 
 Price-move alerts still fire when a value you enter moves by more than the threshold in Settings.
 

@@ -30,10 +30,13 @@ export function hostAllowed(value: string, configured = process.env.ALLOWED_HOST
 }
 
 /** Browser provenance is checked even when the optional password is disabled. */
-export function requestSecurityError(request: Request): { status: number; message: string } | null {
+export function requestSecurityError(
+  request: Request,
+  opts: { https?: boolean; anyHost?: boolean } = {},
+): { status: number; message: string } | null {
   const host = request.headers.get("host") ?? new URL(request.url).host;
   const parsed = authority(host);
-  if (!parsed || !hostAllowed(host)) {
+  if (!opts.anyHost && (!parsed || !hostAllowed(host))) {
     return { status: 403, message: "This server does not answer to that host name. Set ALLOWED_HOSTS to add it." };
   }
   if (READ_METHODS.has(request.method.toUpperCase())) return null;
@@ -43,7 +46,7 @@ export function requestSecurityError(request: Request): { status: number; messag
   const origin = request.headers.get("origin");
   if (origin) {
     try {
-      const expected = new URL(`${isSecureRequest(request) ? "https:" : "http:"}//${host}`).origin;
+      const expected = new URL(`${(opts.https ?? isSecureRequest(request)) ? "https:" : "http:"}//${host}`).origin;
       if (new URL(origin).origin !== expected || origin === "null") throw new Error("Different origin");
     } catch {
       return { status: 403, message: "Cross-site request refused." };

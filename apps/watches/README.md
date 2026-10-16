@@ -39,7 +39,7 @@ Each watch's page has a service log: date and what was done. Entries are added a
 ## Price sources
 
 - **Manual entry** is the only source today. Type what a watch is worth on its page (it overrides everything), and enter past values with dates so the chart has a line: an auction result, a dealer's offer, a Chrono24 median on a given day. Refresh does nothing on its own, and says so.
-- **TODO:** a market source. Chrono24 has no public API and forbids scraping; WatchCharts sells API access; auction houses (Phillips, Christie's, Sotheby's, Loupe This) publish results that would each need an adapter. Any of them is a `PriceProvider<WatchQuery>` registered in `src/lib/spec.ts`; the query already carries the brand, model and reference number.
+- **Frozen — deliberately manual-only:** no market source is planned; this app stays a manual-pricing engine-validation app, and a provider would only be added behind the existing `PriceProvider<WatchQuery>` slot in `src/lib/spec.ts` if the app graduates.
 
 Price-move alerts still fire when a value you enter moves by more than the threshold in Settings.
 

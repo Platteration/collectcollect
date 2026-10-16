@@ -2,6 +2,7 @@ import type { CardRecord, PriceQuote, PriceSource, PriceSummary, Settings } from
 import type { CardQuery, PriceProvider } from "./types";
 import { ProviderError } from "./types";
 import { priceChartingProvider } from "./providers/pricecharting";
+import { ebayProvider } from "./providers/ebay";
 import { pokemonTcgProvider } from "./providers/pokemontcg";
 import { ygoprodeckProvider } from "./providers/ygoprodeck";
 import { scryfallProvider } from "./providers/scryfall";
@@ -13,6 +14,7 @@ export const PROVIDERS: PriceProvider[] = [
   pokemonTcgProvider,
   scryfallProvider,
   ygoprodeckProvider,
+  ebayProvider,
 ];
 
 export function providersFor(game: CardQuery["game"]): PriceProvider[] {
@@ -70,7 +72,7 @@ export async function fetchQuotes(
   return { quotes, errors };
 }
 
-const SOURCE_PRIORITY: PriceSource[] = ["manual", "pricecharting", "pokemontcg", "scryfall", "ygoprodeck"];
+const SOURCE_PRIORITY: PriceSource[] = ["manual", "pricecharting", "pokemontcg", "scryfall", "ygoprodeck", "ebay"];
 
 function manualQuote(manual: ManualPrices | undefined, fetchedAt: string): PriceQuote | null {
   const graded = Object.fromEntries(
@@ -222,6 +224,30 @@ export function summarize(
     // byte for byte what it was before the sources were kept.
     ...(Object.keys(gradedSources).length ? { gradedSources } : {}),
   };
+}
+
+/**
+ * What a refresh compares to decide whether it learned anything: every figure
+ * the app shows or sums, and what each source matched, but not when it was
+ * asked. Two summaries the same by this measure are the same price, and the
+ * second is a check, not a snapshot.
+ */
+export function sameSummary(a: PriceSummary, b: PriceSummary): boolean {
+  const project = (s: PriceSummary) =>
+    JSON.stringify({
+      ungraded: s.ungraded,
+      ungradedSource: s.ungradedSource,
+      graded: s.graded,
+      gradedSource: s.gradedSource,
+      estimatedGraded: s.estimatedGraded,
+      yourCopyValue: s.yourCopyValue,
+      yourCopyBasis: s.yourCopyBasis,
+      quotes: s.quotes.map((q) => ({ source: q.source, currency: q.currency, ungraded: q.ungraded, ungradedVariants: q.ungradedVariants, graded: q.graded, externalId: q.externalId ?? null })),
+      // A source that failed last time and answered this time is worth a row,
+      // or the page would go on showing an error that has cleared.
+      errors: s.errors,
+    });
+  return project(a) === project(b);
 }
 
 export function cardToQuery(

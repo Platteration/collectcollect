@@ -54,9 +54,9 @@ export const spec: DomainSpec<Watch, WatchSettings, SimpleExtras, WatchQuery> = 
     { id: "caseMaterial", label: "Case material", keyOf: (w) => w.caseMaterial, labelOf: (k) => MATERIALS[k as keyof typeof MATERIALS] ?? k, unclassifiedNote: "no case material recorded" },
   ],
   pricing: {
-    // TODO: a real source. Chrono24 has no public API and forbids scraping; WatchCharts sells API access
-    // (https://watchcharts.com); auction results (Phillips, Christie's, Sotheby's, Loupe This) would need a per-house adapter.
-    // A PriceProvider<WatchQuery> registered here is all any of them needs; the query already carries brand, model and reference.
+    // Manual pricing is deliberate — this app is frozen as a manual-pricing engine-validation app with no market source planned.
+    // If it ever graduates, a provider would only be added behind this existing PriceProvider slot; the query already carries brand, model and reference.
+    // No provider is planned while frozen.
     providers: [manualProvider("No market source is wired up yet. Type what each watch is worth, and enter past values with dates so the chart has a line to draw.")],
     query: (w) => ({ brand: w.brand, model: w.model, referenceNumber: w.referenceNumber }),
     summarize: ({ item, quotes, errors, fetchedAt }) => summarizeSimple({ item, quotes, errors, fetchedAt, priority: [] }),

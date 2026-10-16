@@ -12,6 +12,7 @@ import {
   type PcProduct,
   type PcPriceField,
 } from "@collectcollect/core/pricing/pricecharting";
+import { rateLimit, retryAfterMs, type RateLimit } from "@collectcollect/core/limiter";
 
 /**
  * PriceCharting (https://www.pricecharting.com/api-documentation). Requires a
@@ -160,17 +161,18 @@ export const priceChartingProvider: PriceProvider = {
   optional: true,
   note: "Set PRICECHARTING_TOKEN (paid API) to get graded PSA/BGS/CGC/SGC prices for every category. The only sports-card price source; there is no free sports API.",
   isConfigured: isPriceChartingConfigured,
-  async lookup(q, fetchImpl = fetch) {
+  async lookup(q, fetchImpl = fetch, signal?: AbortSignal) {
     const token = priceChartingToken();
     if (!token) return [];
+    const pacedFetch = (url: string | URL) => paced(fetchImpl, String(url), signal);
     const knownId = q.externalIds?.pricecharting;
     if (knownId) {
-      const product = await fetchProduct(token, knownId, fetchImpl);
+      const product = await fetchProduct(token, knownId, pacedFetch as typeof fetch);
       if (product) return [productToQuote(product)];
     }
     let products: PcProduct[];
     try {
-      products = await searchProducts(token, buildSearch(q), fetchImpl);
+      products = await searchProducts(token, buildSearch(q), pacedFetch as typeof fetch);
     } catch (e) {
       if (e instanceof PriceChartingError) throw new ProviderError("pricecharting", e.message);
       throw e;

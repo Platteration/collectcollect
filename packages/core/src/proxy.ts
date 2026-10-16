@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Auth, Revoked } from "./auth";
-import { isSecureRequest } from "./net";
+import { cookieSecure, servedOverHttps } from "./net";
 import { requestSecurityError } from "./request-guard";
 
 /**
@@ -284,9 +284,6 @@ export function createProxy(auth: Auth, options: ProxyOptions | string[]) {
       url.pathname = pathname.replace(/\/+$/, "") || "/";
       return secure(NextResponse.redirect(url, 308));
     }
-
-    const refused = requestSecurityError(request);
-    if (refused) return secure(NextResponse.json({ error: refused.message }, { status: refused.status }));
 
     if (!auth.authEnabled()) return next();
 

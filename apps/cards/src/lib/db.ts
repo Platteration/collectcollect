@@ -156,6 +156,9 @@ const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "cards", column: "autograph", ddl: "ALTER TABLE cards ADD COLUMN autograph INTEGER NOT NULL DEFAULT 0" },
   { table: "cards", column: "relic", ddl: "ALTER TABLE cards ADD COLUMN relic INTEGER NOT NULL DEFAULT 0" },
   { table: "cards", column: "subgrades", ddl: "ALTER TABLE cards ADD COLUMN subgrades TEXT" },
+  { table: "cards", column: "name_key", ddl: "ALTER TABLE cards ADD COLUMN name_key TEXT" },
+  { table: "cards", column: "centering", ddl: "ALTER TABLE cards ADD COLUMN centering TEXT" },
+  { table: "cards", column: "grading_report", ddl: "ALTER TABLE cards ADD COLUMN grading_report TEXT" },
 ];
 
 /**
