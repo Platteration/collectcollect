@@ -430,6 +430,11 @@ export interface DomainSpec<
   emptyNote?: string;
 }
 
+/** What an app calls itself on a home screen, in the install prompt and in the safety net's note: "CollectCollect Whisky". */
+export function appTitle(spec: Pick<DomainSpec, "name">): string {
+  return `CollectCollect ${spec.name}`;
+}
+
 /** The camelCase key as a snake_case column and front-matter key. */
 export function columnOf(key: string): string {
   return key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
