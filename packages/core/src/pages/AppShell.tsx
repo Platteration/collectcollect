@@ -116,7 +116,7 @@ export async function AppShell({ engine, fontClass, footer, children }: { engine
               ))}
             </div>
 
-            <div className="ml-auto flex items-center gap-2 md:ml-0">
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2 max-[23.75rem]:gap-1 md:ml-0">
               <ThemeToggle themeColor={spec.theme} />
               {engine.auth.authEnabled() && <SignOut />}
               <Link href="/add" className="btn-primary whitespace-nowrap">

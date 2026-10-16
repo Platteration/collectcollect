@@ -46,7 +46,7 @@ export function SignOut({ everywhere = false }: { everywhere?: boolean }) {
   return (
     <button
       type="button"
-      className="rounded-md px-2 py-1.5 text-sm hover:bg-[var(--surface-raised)]"
+      className="cc-signout rounded-md px-2 py-1.5 text-sm hover:bg-[var(--surface-raised)]"
       style={{ color: "var(--muted)" }}
       onClick={leave}
       disabled={busy}
