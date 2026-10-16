@@ -3,8 +3,9 @@ import { expect, test } from "@playwright/test";
 test.describe("adding a comic by hand", () => {
   test("saves what was typed and opens it", async ({ page }) => {
     await page.goto("/add");
+    // The whole label, required mark included: "Issue" alone also names the form's "First issue" and "Last issue" checkboxes.
     await page.getByLabel("Title / series").fill("Saga");
-    await page.getByLabel("Issue").fill("2");
+    await page.getByLabel("Issue *", { exact: true }).fill("2");
     await page.getByLabel("Quantity").fill("2");
     await page.getByLabel("Paid, each (USD)").fill("12");
     await page.getByRole("button", { name: "Save comic" }).click();
@@ -18,13 +19,13 @@ test.describe("adding a comic by hand", () => {
   test("takes a second identical raw comic as another copy rather than a second row", async ({ page }) => {
     await page.goto("/add");
     await page.getByLabel("Title / series").fill("Batman");
-    await page.getByLabel("Issue").fill("500");
+    await page.getByLabel("Issue *", { exact: true }).fill("500");
     await page.getByRole("button", { name: "Save comic" }).click();
     await expect(page.getByText(/Saved Batman to your comics/)).toBeVisible();
 
     await page.goto("/add");
     await page.getByLabel("Title / series").fill("Batman");
-    await page.getByLabel("Issue").fill("500");
+    await page.getByLabel("Issue *", { exact: true }).fill("500");
     await page.getByRole("button", { name: "Save comic" }).click();
     await expect(page.getByText(/Added as another copy of Batman/)).toBeVisible();
   });

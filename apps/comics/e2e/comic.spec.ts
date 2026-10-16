@@ -20,7 +20,9 @@ test.describe("one comic", () => {
     await expect(page.getByRole("heading", { name: "The Amazing Spider-Man #300" })).toBeVisible();
     // One object: there is no such thing as another copy of it.
     await expect(page.getByRole("button", { name: "Bought more" })).toHaveCount(0);
-    await expect(page.getByText("2036123-004")).toBeVisible();
+    // The cert number is said twice: beside the slab label and as a fact in the record.
+    await expect(page.getByText("cert 2036123-004", { exact: true })).toBeVisible();
+    await expect(page.getByRole("definition").filter({ hasText: /^2036123-004$/ })).toBeVisible();
     await expect(page.getByText("Todd McFarlane cover; 25th anniversary issue.")).toBeVisible();
   });
 
@@ -28,7 +30,8 @@ test.describe("one comic", () => {
     await page.goto("/collection?q=Incredible+Hulk");
     await page.getByRole("link", { name: /Incredible Hulk/ }).click();
     await expect(page.getByRole("heading", { name: "The Incredible Hulk #181" })).toBeVisible();
-    await expect(page.getByText("Not priced")).toBeVisible();
+    // Exactly the figure: the line under it also says "Not priced yet".
+    await expect(page.getByText("Not priced", { exact: true })).toBeVisible();
   });
 
   test("has nothing at an id that is not there", async ({ page }) => {
