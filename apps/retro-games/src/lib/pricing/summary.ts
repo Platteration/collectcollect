@@ -167,9 +167,9 @@ export function gradeWindowAlert(args: { item: ItemRecord<Game>; history: Array<
   const before = outlookSeries(history, grading, null, GAME_GRADE_KEYS);
   const after = [...before, ...outlookSeries([{ id: Number.MAX_SAFE_INTEGER, fetchedAt: next.fetchedAt, summary: next }], grading, null, GAME_GRADE_KEYS)];
   const wasReady = before.length > 0 && isReadyToGrade(before, gradingVerdict(before), grading);
-  const ready = isReadyToGrade(after, gradingVerdict(after), grading);
-  if (!ready || wasReady) return [];
-  const last = after[after.length - 1];
+  // The latest point, when it clears the owner's thresholds.
+  const last = isReadyToGrade(after, gradingVerdict(after), grading) ? after[after.length - 1] : undefined;
+  if (!last || wasReady) return [];
   return [
     {
       kind: "grade_window",

@@ -52,7 +52,7 @@ describe("asking PriceCharting about a game", () => {
     const fetchImpl = fakeFetch([["/api/products?", { status: "success", products: [other, pal, choice, us] }]]);
     const quotes = await priceChartingProvider.lookup(query(), fetchImpl);
     expect(quotes).toHaveLength(1);
-    expect(quotes[0].externalId).toBe("1");
+    expect(quotes[0]?.externalId).toBe("1");
     expect(fetchImpl.calls[0]).toContain("q=Super%20Mario%2064%20Nintendo%2064");
     expect(fetchImpl.calls[0]).toContain("t=test-token");
   });
@@ -63,7 +63,7 @@ describe("asking PriceCharting about a game", () => {
       ["/api/products?", { status: "success", products: [pal] }],
     ]);
     const quotes = await priceChartingProvider.lookup(query({ externalIds: { pricecharting: "1" } }), fetchImpl);
-    expect(quotes[0].externalId).toBe("1");
+    expect(quotes[0]?.externalId).toBe("1");
     expect(fetchImpl.calls).toHaveLength(1);
     expect(fetchImpl.calls[0]).toContain("/api/product?");
   });
@@ -74,7 +74,7 @@ describe("asking PriceCharting about a game", () => {
       ["/api/products?", { status: "success", products: [us] }],
     ]);
     const quotes = await priceChartingProvider.lookup(query({ externalIds: { pricecharting: "gone" } }), fetchImpl);
-    expect(quotes[0].externalId).toBe("1");
+    expect(quotes[0]?.externalId).toBe("1");
     expect(fetchImpl.calls).toHaveLength(2);
   });
 

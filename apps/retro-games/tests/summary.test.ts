@@ -71,7 +71,7 @@ describe("what a copy is worth", () => {
     expect(byKey.ungradedSource).toBe("Your own price");
     const outright = summarize({ ...game(), manualValue: 42 }, [quote(tiers)]);
     expect(outright).toMatchObject({ yourCopyValue: 42, yourCopyBasis: "Your own price" });
-    expect(outright.quotes[0].source).toBe("manual");
+    expect(outright.quotes[0]?.source).toBe("manual");
   });
 
   it("has no value, and says why, when nothing answered", () => {
@@ -118,7 +118,7 @@ describe("grade it, or wait", () => {
     const alerts = gradeWindowAlert({ item, history, next: { ...next, fetchedAt: "2026-03-01T00:00:00.000Z" }, settings });
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toMatchObject({ kind: "grade_window", itemId: item.id });
-    expect(alerts[0].body).toMatch(/\$6,400\.00 of upside/);
+    expect(alerts[0]?.body).toMatch(/\$6,400\.00 of upside/);
     // Already ready last time: nothing new to say.
     const again = gradeWindowAlert({ item, history: [...history, { id: 3, fetchedAt: "2026-03-01T00:00:00.000Z", summary: next }], next: { ...next, fetchedAt: "2026-04-01T00:00:00.000Z" }, settings });
     expect(again).toEqual([]);

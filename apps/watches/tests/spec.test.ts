@@ -47,9 +47,9 @@ describe("the watch schema", () => {
   it("reads the words a spreadsheet uses", () => {
     const preview = engine.csv.previewImport(["make,name,ref,serial,winding,material,box papers,condition,paid,service", "Rolex,Submariner,124060,7K2R4X81,auto,SS,full set,LNIB,9100,2024-02-02: Pressure test"].join("\n"));
     expect(preview.usable).toBe(1);
-    expect(preview.rows[0].input).toMatchObject({ brand: "Rolex", model: "Submariner", referenceNumber: "124060", serialNumber: "7K2R4X81", movement: "automatic", caseMaterial: "steel", boxPapers: "both", condition: "excellent", purchasePrice: 9100 });
+    expect(preview.rows[0]?.input).toMatchObject({ brand: "Rolex", model: "Submariner", referenceNumber: "124060", serialNumber: "7K2R4X81", movement: "automatic", caseMaterial: "steel", boxPapers: "both", condition: "excellent", purchasePrice: 9100 });
     engine.csv.applyImport(preview);
-    expect(engine.repo.listItems()[0].serviceHistory).toEqual([{ date: "2024-02-02", notes: "Pressure test" }]);
+    expect(engine.repo.listItems()[0]?.serviceHistory).toEqual([{ date: "2024-02-02", notes: "Pressure test" }]);
   });
 });
 
@@ -59,7 +59,9 @@ describe("one specific object, always", () => {
     expect(engine.repo.intakeItem(speedy).result).toBe("created");
     expect(engine.repo.listItems()).toHaveLength(2);
     expect(engine.repo.listItems().every((w) => w.quantity === 1)).toBe(true);
-    expect(() => engine.repo.addAcquisition(engine.repo.listItems()[0].id, { quantity: 1 })).toThrow(/one specific object/);
+    const [first] = engine.repo.listItems();
+    if (!first) throw new Error("the watches are not listed");
+    expect(() => engine.repo.addAcquisition(first.id, { quantity: 1 })).toThrow(/one specific object/);
     expect(engine.repo.createItem({ ...speedy, quantity: 3 }).quantity).toBe(1);
   });
 });
@@ -113,7 +115,7 @@ describe("the collection on disk and in the exports", () => {
     expect(items.filter((w) => (w.serviceHistory?.length ?? 0) > 0).length).toBeGreaterThanOrEqual(2);
     const points = portfolioSeries(items, engine.repo.allSnapshots());
     expect(points.length).toBeGreaterThan(3);
-    expect(points[points.length - 1].value).toBeGreaterThan(30000);
+    expect(points.at(-1)?.value).toBeGreaterThan(30000);
     expect(() => loadSeed(engine)).toThrow(/empty/);
   });
 });

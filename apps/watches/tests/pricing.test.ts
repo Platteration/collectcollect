@@ -32,8 +32,8 @@ describe("pricing a watch", () => {
     engine.refresh.addManualSnapshot(watch.id, { value: 12300, at: "2026-03-01" });
     const history = engine.repo.listSnapshots(watch.id);
     expect(history.map((s) => s.summary.yourCopyValue)).toEqual([12300, 12800, 11800]);
-    expect(history[0].summary.yourCopyBasis).toBe("Entered by hand");
-    expect(history[2].summary.yourCopyBasis).toBe("Chrono24 median");
+    expect(history[0]?.summary.yourCopyBasis).toBe("Entered by hand");
+    expect(history[2]?.summary.yourCopyBasis).toBe("Chrono24 median");
     expect(engine.valuation(watch, history[0])).toEqual({ value: 12300, basis: "Entered by hand" });
     expect(() => engine.refresh.addManualSnapshot(watch.id, { value: "lots" })).toThrow(/number/);
   });
@@ -46,6 +46,6 @@ describe("pricing a watch", () => {
     const alerts = engine.alerts.listAlerts();
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toMatchObject({ kind: "price_move", itemId: watch.id });
-    expect(alerts[0].title).toMatch(/Rolex Submariner up 20.0%/);
+    expect(alerts[0]?.title).toMatch(/Rolex Submariner up 20.0%/);
   });
 });

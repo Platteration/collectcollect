@@ -19,7 +19,7 @@ describe("one specific object or a stack", () => {
     expect(a.result).toBe("created");
     expect(b.result).toBe("merged");
     expect(engine.repo.listItems()).toHaveLength(1);
-    expect(engine.repo.listItems()[0].quantity).toBe(3);
+    expect(engine.repo.listItems()[0]?.quantity).toBe(3);
 
     const c = engine.repo.intakeItem({ name: "Example", maker: "Acme", signed: true });
     const d = engine.repo.intakeItem({ name: "Example", maker: "Acme", signed: true });

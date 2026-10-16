@@ -34,7 +34,7 @@ describe("the bottle schema", () => {
   it("reads the words a spreadsheet uses", () => {
     const preview = engine.csv.previewImport(["brand,name,age,strength,size,country,packaging,unopened,qty,paid", "Springbank,10 Year Old,10,46,700,Scotland,Boxed,yes,3,75"].join("\n"));
     expect(preview.usable).toBe(1);
-    expect(preview.rows[0].input).toMatchObject({ distillery: "Springbank", expression: "10 Year Old", ageStatement: 10, abv: 46, bottleSize: 700, region: "scotland_blend", packaging: "box", sealed: true, quantity: 3, purchasePrice: 75 });
+    expect(preview.rows[0]?.input).toMatchObject({ distillery: "Springbank", expression: "10 Year Old", ageStatement: 10, abv: 46, bottleSize: 700, region: "scotland_blend", packaging: "box", sealed: true, quantity: 3, purchasePrice: 75 });
   });
 });
 
@@ -43,6 +43,7 @@ describe("a stack, or one specific bottle", () => {
     expect(engine.repo.intakeItem({ ...oogie, purchasePrice: 82 }).result).toBe("created");
     expect(engine.repo.intakeItem({ ...oogie, purchasePrice: 90, quantity: 2 }).result).toBe("merged");
     const [item] = engine.repo.listItems();
+    if (!item) throw new Error("the merged stack is not listed");
     expect(item.quantity).toBe(3);
     expect(engine.ledger.listLots(item.id).map((l) => [l.quantity, l.unitCost])).toEqual([
       [1, 82],
@@ -70,7 +71,9 @@ describe("a stack, or one specific bottle", () => {
     const open = engine.repo.listItems().filter((b) => !b.sealed);
     expect(open).toHaveLength(2);
     expect(open.every((b) => b.quantity === 1)).toBe(true);
-    expect(() => engine.repo.addAcquisition(open[0].id, { quantity: 1 })).toThrow(/one specific object/);
+    const [first] = open;
+    if (!first) throw new Error("the open bottles are not listed");
+    expect(() => engine.repo.addAcquisition(first.id, { quantity: 1 })).toThrow(/one specific object/);
   });
 });
 

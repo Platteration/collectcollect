@@ -90,7 +90,7 @@ describe("grade it, or wait", () => {
     const next = { ...summarize(item, [quote(grades)]), fetchedAt: "2026-03-01T00:00:00.000Z" };
     const alerts = gradeWindowAlert({ item, history, next, settings });
     expect(alerts).toHaveLength(1);
-    expect(alerts[0].title).toBe("Good time to grade: The Amazing Spider-Man #300");
+    expect(alerts[0]?.title).toBe("Good time to grade: The Amazing Spider-Man #300");
     expect(gradingVerdict([...outlookFor(item, history, settings), ...outlookFor(item, [{ id: 3, fetchedAt: next.fetchedAt, summary: next }], settings)]).kind).toBe("prime");
     expect(gradeWindowAlert({ item, history: [...history, { id: 3, fetchedAt: next.fetchedAt, summary: next }], next: { ...next, fetchedAt: "2026-04-01T00:00:00.000Z" }, settings })).toEqual([]);
   });
