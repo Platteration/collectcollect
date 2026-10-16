@@ -4,6 +4,7 @@ import { useId } from "react";
 import { money } from "../format";
 import type { OutlookPoint } from "../grading";
 import { INK, bandPath, compactMoney, linePath, niceTicks, shortDate, timeTicks, useContainerWidth, useCrosshair, xScale, yScale, type Layout } from "../charts/chart-utils";
+import { extent } from "../series";
 
 interface Props {
   series: OutlookPoint[];
@@ -20,11 +21,14 @@ interface Props {
 export function OutlookChart({ series, compact = false, rawLabel = "Your raw copy" }: Props) {
   const { ref, width } = useContainerWidth<HTMLDivElement>(compact ? 320 : 800);
   const narrow = width < 480;
-  const layout: Layout = compact ? { width, height: 90, left: 4, right: 4, top: 6, bottom: 6 } : { width, height: narrow ? 200 : 260, left: 8, right: narrow ? 48 : 56, top: 12, bottom: 24 };
+  const layout: Layout = compact
+    ? { width, height: 90, left: 4, right: 4, top: 6, bottom: 6 }
+    : { width, height: narrow ? 200 : 260, left: 8, right: narrow ? 48 : 56, top: 12, bottom: 24 };
   const dated = series.map((p) => ({ ...p, time: new Date(p.t).getTime() }));
   const times = dated.map((p) => p.time);
   const all = series.flatMap((p) => [p.min, p.max, p.raw]);
-  const { lo, hi, ticks } = niceTicks(Math.min(...all, 0), Math.max(...all, 1));
+  const [minAll, maxAll] = extent(all);
+  const { lo, hi, ticks } = niceTicks(Math.min(minAll, 0), Math.max(maxAll, 1));
   const sx = xScale(times, layout);
   const sy = yScale(lo, hi, layout);
   // Each point carries its own x position, so drawing never looks one up by index.
@@ -53,7 +57,8 @@ export function OutlookChart({ series, compact = false, rawLabel = "Your raw cop
     `upside after the ${money(last.fee)} fee ${money(last.upside)}.` +
     (compact ? "" : " Use the left and right arrow keys to read each point.");
   const spoken = active
-    ? `${shortDate(active.t, true)}: ${active.maxLabel} ${money(active.max)}, ${active.minLabel} ${money(active.min)}, raw ${money(active.raw)}, upside after the ${money(active.fee)} fee ${money(active.upside)}.`
+    ? `${shortDate(active.t, true)}: ${active.maxLabel} ${money(active.max)}, ${active.minLabel} ${money(active.min)}, ` +
+      `raw ${money(active.raw)}, upside after the ${money(active.fee)} fee ${money(active.upside)}.`
     : "";
 
   return (
@@ -121,13 +126,17 @@ export function OutlookChart({ series, compact = false, rawLabel = "Your raw cop
           <rect key={i} x={x - 12} y={0} width={24} height={layout.height} fill="transparent" onPointerEnter={() => setIndex(i)} />
         ))}
       </svg>
+      {/* The tooltip is drawn for the eye; this is the same thing, spoken. */}
       {!compact && (
         <p className="sr-only" role="status" aria-live="polite">
           {spoken}
         </p>
       )}
       {active && (
-        <div className="tooltip-surface pointer-events-none absolute top-0 z-10 rounded-md px-2 py-1 text-xs" style={{ left: `${(active.x / layout.width) * 100}%`, transform: active.x > layout.width / 2 ? "translateX(-105%)" : "translateX(8px)" }}>
+        <div
+          className="tooltip-surface pointer-events-none absolute top-0 z-10 rounded-md px-2 py-1 text-xs"
+          style={{ left: `${(active.x / layout.width) * 100}%`, transform: active.x > layout.width / 2 ? "translateX(-105%)" : "translateX(8px)" }}
+        >
           <div style={{ color: "var(--muted)" }}>{shortDate(active.t, true)}</div>
           <Row color={INK.max} label={active.maxLabel} value={active.max} />
           <Row color={INK.min} label={active.minLabel} value={active.min} />

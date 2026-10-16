@@ -1,9 +1,11 @@
 /**
- * Small text-matching helpers shared by every price provider.
+ * Small text-matching helpers shared by every price provider of the domain
+ * apps, so a game or a comic is matched against a catalogue by the rules the
+ * card app matches a card by.
  *
- * Moved here from the card app so that a game, a comic or a sports card can
- * be matched against a catalogue with the same rules; the card app re-exports
- * them from its old path.
+ * The card app still keeps its own copy (apps/cards/src/lib/pricing/match.ts);
+ * the two behave the same, and a change to one is made to the other.
+ * `norm` is the one function only this copy has.
  */
 
 export function tokens(text: string | null | undefined): string[] {

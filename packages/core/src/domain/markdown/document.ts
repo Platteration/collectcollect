@@ -1,5 +1,5 @@
 import type { Acquisition } from "../acquisitions";
-import { money, parseDocument, readFenced, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "../../markdown/format";
+import { money, parseDocument, readFenced, readLotPart, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "../../markdown/format";
 import { bool, num, str } from "../normalize";
 import type { DomainSpec, Identification, ItemInput, ItemRecord, PriceSnapshot, PriceSummary, Sale } from "../spec";
 import { columnOf, optionLabel } from "../spec";
@@ -83,17 +83,21 @@ function lotsCell(lots: Array<{ quantity: number; unitCost: number | null; acqui
     .join(" · ");
 }
 
-const LOT_RE = /^\s*(\d+)\s*@\s*(.*?)\s*(?:\((\d{4}-\d{2}-\d{2})\))?\s*$/;
-
+/**
+ * The lots a sale was cut from, read back from its cell. A file read back in is
+ * text someone else may have written, so each part is read by `readLotPart`, a
+ * scan, as the card app reads it: the pattern this used to be (a lazy `(.*?)`
+ * between two `\s*`) held the server for seconds on a few thousand spaces.
+ */
 function parseLotsCell(text: string): ParsedSaleLot[] {
   const out: ParsedSaleLot[] = [];
   if (!text) return out;
   for (const part of text.split("·")) {
-    const match = LOT_RE.exec(part);
-    if (!match) continue;
-    const quantity = Number(match[1]);
+    const lot = readLotPart(part);
+    if (!lot) continue;
+    const quantity = Number(lot.quantity);
     if (!Number.isInteger(quantity) || quantity < 1) continue;
-    out.push({ quantity, unitCost: readMoney(match[2] ?? ""), acquiredOn: match[3] ?? null });
+    out.push({ quantity, unitCost: readMoney(lot.cost), acquiredOn: lot.day });
   }
   return out;
 }

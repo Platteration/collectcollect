@@ -1,8 +1,9 @@
+import { rateLimit, retryAfterMs, type RateLimit } from "../limiter";
 import { round2, tokenOverlap, tokens } from "./match";
 
 /**
  * The PriceCharting API (https://www.pricecharting.com/api-documentation),
- * shared by every app that prices against it.
+ * shared by every domain app that prices against it.
  *
  * One paid token covers every category they publish — video games, trading
  * cards, comic books and more — and every category answers with the same
@@ -12,6 +13,11 @@ import { round2, tokenOverlap, tokens } from "./match";
  * live here, and each app supplies its own field mapping.
  *
  * Prices come back in cents.
+ *
+ * The card app keeps its own client (apps/cards/src/lib/pricing/providers/
+ * pricecharting.ts) with its card-specific mapping and ranking. The two ask
+ * PriceCharting the same way, at the same pace, and know the same price
+ * fields; a change to either is made to both.
  */
 
 export interface PcProduct {
@@ -29,6 +35,9 @@ export interface PcProduct {
   "bgs-10-price"?: number;
   "condition-17-price"?: number;
   "condition-18-price"?: number;
+  "condition-19-price"?: number;
+  "condition-20-price"?: number;
+  "condition-21-price"?: number;
   "retail-loose-buy"?: number;
   "retail-loose-sell"?: number;
   "retail-cib-buy"?: number;
@@ -37,7 +46,12 @@ export interface PcProduct {
   "retail-new-sell"?: number;
 }
 
-/** Every field that can hold a price, in the order PriceCharting lists them. */
+/**
+ * Every field that can hold a price, in the order PriceCharting lists them.
+ * For trading cards the last six are the agencies' 10s: bgs-10 is a BGS 10,
+ * condition-17 a CGC 10, 18 an SGC 10, 19 a CGC 10 Pristine, 20 a BGS 10
+ * Black Label and 21 a TAG 10.
+ */
 export type PcPriceField =
   | "loose-price"
   | "cib-price"
@@ -47,7 +61,10 @@ export type PcPriceField =
   | "manual-only-price"
   | "bgs-10-price"
   | "condition-17-price"
-  | "condition-18-price";
+  | "condition-18-price"
+  | "condition-19-price"
+  | "condition-20-price"
+  | "condition-21-price";
 
 export const PC_PRICE_FIELDS: PcPriceField[] = [
   "loose-price",
@@ -59,6 +76,9 @@ export const PC_PRICE_FIELDS: PcPriceField[] = [
   "bgs-10-price",
   "condition-17-price",
   "condition-18-price",
+  "condition-19-price",
+  "condition-20-price",
+  "condition-21-price",
 ];
 
 export class PriceChartingError extends Error {
@@ -99,9 +119,52 @@ export function pricesFrom(p: PcProduct, mapping: Array<[PcPriceField, string]>)
   return out;
 }
 
-/** Fetch one product by its PriceCharting id. Null when it is not there or the request failed. */
-export async function fetchProduct(token: string, id: string, fetchImpl: typeof fetch = fetch): Promise<PcProduct | null> {
-  const res = await fetchImpl(`https://www.pricecharting.com/api/product?t=${encodeURIComponent(token)}&id=${encodeURIComponent(id)}`);
+/**
+ * PriceCharting allows one call a second and revokes a key that keeps
+ * exceeding it. A refresh runs a few items at once and each lookup can make
+ * two calls, so the pacing is one queue for the whole process rather than
+ * one per lookup. It lives on the global object, like a database handle,
+ * because a bundler can load this module more than once (a route and a page
+ * each get a copy) and a development reload makes a fresh one: a limiter per
+ * copy would each think it had the whole budget. It is read from there on
+ * every call, so a copy loaded later sees a limit a test replaced.
+ */
+const globalForLimiter = globalThis as unknown as { __priceChartingLimiter?: RateLimit };
+
+function limiter(): RateLimit {
+  return (globalForLimiter.__priceChartingLimiter ??= rateLimit(1, 1000));
+}
+
+/** Tests only: replace the shared limit so a test does not wait a real second. */
+export function setPriceChartingLimit(next: RateLimit): void {
+  globalForLimiter.__priceChartingLimiter = next;
+}
+
+/**
+ * One paced request. A refusal pauses every PriceCharting call, from every
+ * lookup, for as long as it asks (a minute when it does not say), rather than
+ * letting each queued call collect a refusal of its own. An aborted signal
+ * ends the wait for a turn, so a lookup that was given up on does not ask
+ * PriceCharting anything later.
+ */
+async function paced(fetchImpl: typeof fetch, url: string, signal?: AbortSignal): Promise<Response> {
+  await limiter().take(signal);
+  if (signal?.aborted) throw new PriceChartingError("Gave up waiting for a turn to ask PriceCharting.");
+  const res = await fetchImpl(url, { signal });
+  if (res.status === 429) {
+    const wait = retryAfterMs(res.headers.get("retry-after"), Date.now(), 60_000);
+    limiter().cooldown(wait);
+    throw new PriceChartingError(`PriceCharting is rate limiting this app; every PriceCharting lookup waits ${Math.ceil(wait / 1000)} seconds before asking again.`);
+  }
+  return res;
+}
+
+/**
+ * Fetch one product by its PriceCharting id. Null when it is not there or
+ * the request failed; a refusal to serve this app at this pace is an error.
+ */
+export async function fetchProduct(token: string, id: string, fetchImpl: typeof fetch = fetch, signal?: AbortSignal): Promise<PcProduct | null> {
+  const res = await paced(fetchImpl, `https://www.pricecharting.com/api/product?t=${encodeURIComponent(token)}&id=${encodeURIComponent(id)}`, signal);
   if (!res.ok) return null;
   const body = (await res.json()) as PcProduct & { status?: string };
   return body.status === "success" && body["product-name"] ? body : null;
@@ -112,8 +175,8 @@ export async function fetchProduct(token: string, id: string, fetchImpl: typeof 
  * across every category, so callers rank them with `scoreProduct` or their
  * own scoring and keep the best.
  */
-export async function searchProducts(token: string, query: string, fetchImpl: typeof fetch = fetch): Promise<PcProduct[]> {
-  const res = await fetchImpl(`https://www.pricecharting.com/api/products?t=${encodeURIComponent(token)}&q=${encodeURIComponent(query)}`);
+export async function searchProducts(token: string, query: string, fetchImpl: typeof fetch = fetch, signal?: AbortSignal): Promise<PcProduct[]> {
+  const res = await paced(fetchImpl, `https://www.pricecharting.com/api/products?t=${encodeURIComponent(token)}&q=${encodeURIComponent(query)}`, signal);
   if (!res.ok) throw new PriceChartingError(`PriceCharting returned HTTP ${res.status}`);
   const body = (await res.json()) as { status?: string; products?: PcProduct[]; "error-message"?: string };
   if (body.status && body.status !== "success") {
@@ -165,6 +228,6 @@ export function scoreProduct(q: ProductMatch, p: PcProduct): number {
 
 /** The best candidate, or null when nothing plausibly matches. */
 export function bestProduct<T extends PcProduct>(products: T[], score: (p: T) => number, floor = 1.5): T | null {
-  const [best] = products.map((p) => ({ p, s: score(p) })).sort((a, b) => b.s - a.s);
-  return !best || best.s < floor ? null : best.p;
+  const top = products.map((p) => ({ p, s: score(p) })).sort((a, b) => b.s - a.s)[0];
+  return top === undefined || top.s < floor ? null : top.p;
 }

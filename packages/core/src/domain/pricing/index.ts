@@ -24,11 +24,21 @@ export async function fetchQuotes<Q>(
   // without being matched back to `active` by position.
   const answers = await Promise.all(
     active.map(async (p): Promise<{ quotes: PriceQuote[]; error: PriceError | null }> => {
-      const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new ProviderError(p.id, `${p.label} timed out`)), timeoutMs));
+      // Giving up on a source also tells it to stop: its signal aborts with the timeout.
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new ProviderError(p.id, `${p.label} timed out`));
+        }, timeoutMs);
+      });
       try {
-        return { quotes: await Promise.race([p.lookup(query, fetchImpl), timeout]), error: null };
+        return { quotes: await Promise.race([p.lookup(query, fetchImpl, controller.signal), timeout]), error: null };
       } catch (err) {
         return { quotes: [], error: { source: err instanceof ProviderError ? err.source : p.id, message: err instanceof Error ? err.message : String(err) } };
+      } finally {
+        clearTimeout(timer);
       }
     }),
   );

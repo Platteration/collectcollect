@@ -59,7 +59,7 @@ describe("a sealed copy's grade-or-wait panel", () => {
 
   it("says the copy clears the owner's thresholds, with the upside after the fee, when it does", () => {
     const panel = html(pageOf(sealed, rising).afterPrice);
-    expect(panel).toContain("Good time to grade");
+    expect(panel).toContain("Near the best recorded premium");
     expect(panel).toContain("Clears your thresholds: $6,400.00 of upside after the $100.00 fee.");
     expect(panel).not.toContain("estimate from the multiplier");
   });
