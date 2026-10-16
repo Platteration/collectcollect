@@ -47,6 +47,9 @@ playwright-report/
 blob-report/
 # what scripts/release-candidate.sh packages
 release/
+# written by `scripts/install.sh --lan` to publish the apps on this network;
+# an owner's choice for one machine, not something to commit
+compose.override.yaml
 
 # editors
 .vscode/

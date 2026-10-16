@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { domainDataDir } from "./data-dir";
 import { columnOf, type DomainSpec, type FieldSpec } from "./spec";
 
 /**
@@ -131,14 +132,13 @@ CREATE TABLE IF NOT EXISTS settings (
 
 export function createDomainDb(spec: Pick<DomainSpec, "id" | "envPrefix" | "fields">): DomainDb {
   const dbFileName = `collectcollect-${spec.id}.db`;
-  const dataDirEnv = `${spec.envPrefix}_DATA_DIR`;
   const dbFileEnv = `${spec.envPrefix}_DATABASE_FILE`;
   const globalKey = `__collectcollect_${spec.id.replace(/[^a-z0-9]/gi, "_")}`;
   const store = globalThis as unknown as Record<string, { db?: Database.Database; locked?: string } | undefined>;
   const state = () => (store[globalKey] ??= {});
 
   function dataDir(): string {
-    const dir = process.env[dataDirEnv] ? path.resolve(process.env[dataDirEnv]!) : path.resolve(process.cwd(), "data");
+    const dir = domainDataDir(spec.envPrefix);
     fs.mkdirSync(dir, { recursive: true });
     return dir;
   }
