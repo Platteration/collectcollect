@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { discardDeferredMirror, flushDeferredMirror, intakeCardWithin } from "./cards";
 import { getDb } from "./db";
 import { headerKey, parseCsv } from "@collectcollect/core/csv";
-import { isCondition, isGame, type CardInput, type Condition, type Game } from "./types";
+import { cleanSubgrades, flag, isCondition, isGame, type CardInput, type Condition, type Game } from "./types";
 import { lookup } from "@collectcollect/core/lookup";
 
 /**
@@ -18,14 +18,27 @@ const COLUMNS: Record<string, string[]> = {
   cardNumber: ["number", "cardnumber", "collectornumber", "no", "cardno"],
   year: ["year", "season"],
   rarity: ["rarity"],
-  variant: ["variant", "printing", "finish", "parallel", "foil"],
+  variant: ["variant", "printing", "finish", "foil"],
   language: ["language", "lang"],
   manufacturer: ["manufacturer", "brand", "publisher"],
+  // Sports cards. A parallel is its own card and "serial" is the numbering
+  // stamped on it ("12/99"), not a grader's cert number.
+  team: ["team", "club"],
+  rookie: ["rookie", "rc", "rookiecard", "isrookie"],
+  parallel: ["parallel", "refractor", "parallelname", "insert"],
+  serialNumber: ["serialnumber", "serial", "numbered", "numberedto", "serialnumbered", "printrun"],
+  autograph: ["autograph", "auto", "autographed", "signed", "signature"],
+  relic: ["relic", "memorabilia", "patch", "jersey", "gameused"],
+  // The four grades a BGS label prints. "sub" keeps them apart from centering as measured.
+  subCentering: ["subgradecentering", "subcentering", "centering", "centeringgrade"],
+  subCorners: ["subgradecorners", "subcorners", "corners", "cornersgrade"],
+  subEdges: ["subgradeedges", "subedges", "edges", "edgesgrade"],
+  subSurface: ["subgradesurface", "subsurface", "surface", "surfacegrade"],
   quantity: ["quantity", "qty", "count", "copies"],
   condition: ["condition", "cond", "gradecondition"],
   gradingCompany: ["gradingcompany", "grader", "gradingservice", "company"],
   grade: ["grade", "cardgrade"],
-  certNumber: ["certnumber", "cert", "certification", "serial"],
+  certNumber: ["certnumber", "cert", "certification", "certno"],
   purchasePrice: ["purchaseprice", "pricepaid", "cost", "paid", "buyprice"],
   notes: ["notes", "comment", "comments", "description"],
   // Header matching is exact after normalising, so the phrasings people
@@ -166,7 +179,8 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
     if (!name) return { line, input: null, problem: "No card name in this row", warning: null };
 
     const rawGame = headerKey(value(row, "game"));
-    const game = lookup(GAME_ALIASES, rawGame) ?? defaults.game ?? (isGame(rawGame) ? rawGame : null);
+    // A sports spreadsheet rarely has a game column; a sport named on a row with no game settles it.
+    const game = lookup(GAME_ALIASES, rawGame) ?? defaults.game ?? (isGame(rawGame) ? rawGame : !rawGame && value(row, "sport") ? "sports" : null);
     if (!game) {
       return {
         line,
@@ -200,6 +214,13 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
         variant: value(row, "variant") || null,
         language: value(row, "language") || null,
         manufacturer: value(row, "manufacturer") || null,
+        team: value(row, "team") || null,
+        rookie: flag(value(row, "rookie")),
+        parallel: value(row, "parallel") || null,
+        serialNumber: value(row, "serialNumber") || null,
+        autograph: flag(value(row, "autograph")),
+        relic: flag(value(row, "relic")),
+        subgrades: cleanSubgrades({ centering: value(row, "subCentering"), corners: value(row, "subCorners"), edges: value(row, "subEdges"), surface: value(row, "subSurface") }),
         quantity: Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1,
         condition: condition ?? "NM",
         gradingCompany: company,

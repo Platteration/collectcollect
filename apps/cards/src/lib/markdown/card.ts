@@ -10,7 +10,7 @@ import type {
   PriceSummary,
   Sale,
 } from "../types";
-import { CONDITIONS, GAMES, GAME_IDS, GRADING_STATUSES } from "../types";
+import { CONDITIONS, GAMES, GAME_IDS, GRADING_STATUSES, cleanSubgrades, flag } from "../types";
 import { CenteringRatiosSchema, IdentificationSchema } from "../identify/schema";
 import { readCentering, readGradingReport } from "../grading/schema";
 import { capsFor, describeCentering } from "../grading/centering";
@@ -67,6 +67,14 @@ export interface ParsedCard {
 const STORED_IDENTIFICATION = IdentificationSchema.extend({
   // The numeric centering ratios came later still, so they may be absent too.
   condition_assessment: IdentificationSchema.shape.condition_assessment.extend({ centering_ratios: CenteringRatiosSchema.nullish() }).nullish(),
+  // The sports fields arrived later still; a file written before them is still an identification.
+  team: IdentificationSchema.shape.team.nullish(),
+  rookie: IdentificationSchema.shape.rookie.nullish(),
+  parallel: IdentificationSchema.shape.parallel.nullish(),
+  serial_number: IdentificationSchema.shape.serial_number.nullish(),
+  autograph: IdentificationSchema.shape.autograph.nullish(),
+  relic: IdentificationSchema.shape.relic.nullish(),
+  grading: IdentificationSchema.shape.grading.extend({ subgrades: IdentificationSchema.shape.grading.shape.subgrades.nullish() }),
 });
 
 export interface ParsedSaleLot {
@@ -119,6 +127,12 @@ function detail(card: CardRecord): string {
     card.year,
     card.rarity,
     card.variant,
+    card.team,
+    card.parallel,
+    card.serialNumber,
+    card.rookie ? "RC" : null,
+    card.autograph ? "Auto" : null,
+    card.relic ? "Relic" : null,
     card.language && card.language.toLowerCase() !== "english" ? card.language : null,
   ]
     .filter(Boolean)
@@ -301,11 +315,19 @@ export function cardMarkdown(bundle: CardBundle, opts: { photoHref?: (name: stri
     variant: card.variant,
     language: card.language,
     manufacturer: card.manufacturer,
+    team: card.team,
+    // Written when true only, so the file of a card that is none of these reads as it always did.
+    rookie: card.rookie || undefined,
+    parallel: card.parallel,
+    serial_number: card.serialNumber,
+    autograph: card.autograph || undefined,
+    relic: card.relic || undefined,
     quantity: card.quantity,
     condition: card.condition,
     grading_company: card.gradingCompany,
     grade: card.grade,
     cert_number: card.certNumber,
+    subgrades: card.subgrades,
     centering: card.centering,
     grading_report: card.gradingReport,
     grading_status: card.gradingStatus,
@@ -542,11 +564,18 @@ export function parseCardMarkdown(text: string): ParsedCard | null {
     variant: str(data.variant),
     language: str(data.language),
     manufacturer: str(data.manufacturer),
+    team: str(data.team),
+    rookie: flag(data.rookie),
+    parallel: str(data.parallel),
+    serialNumber: str(data.serial_number),
+    autograph: flag(data.autograph),
+    relic: flag(data.relic),
     quantity: quantity === null ? 1 : Math.max(0, Math.round(quantity)),
     condition: conditionValue,
     gradingCompany: str(data.grading_company),
     grade: str(data.grade),
     certNumber: str(data.cert_number),
+    subgrades: cleanSubgrades(data.subgrades),
     centering,
     gradingReport,
     purchasePrice: num(data.purchase_price),

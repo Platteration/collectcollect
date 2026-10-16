@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb, initializeDatabase, openDatabase, setDb } from "@/lib/db";
 import { HasSalesError, addAcquisition, addSnapshot, allSnapshots, collectionTotals, countCards, createCard, deleteCard, findSimilar, getCard, latestSnapshotsByCard, latestValuesByCard, listCards, listSnapshots, markChecked, recentSnapshotsByCard, recomputeAllLatest, snapshotValues, updateCard } from "@/lib/cards";
-import { verifyLotInvariant } from "@/lib/acquisitions";
+import { listLots, verifyLotInvariant } from "@/lib/acquisitions";
 import { deleteSale, recordSale } from "@/lib/sales";
 import { createAlert } from "@/lib/alerts";
 import { getSettings, saveSettings } from "@/lib/settings";
@@ -707,5 +707,166 @@ describe("a stored row the write path would have refused", () => {
     expect(read.imagePath).toBeNull();
     expect(read.referenceImageUrl).toBeNull();
     expect(read.accentColor).toBeNull();
+  });
+});
+
+describe("sports cards", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  const trout = { game: "sports", sport: "baseball", name: "Mike Trout", setName: "Topps Chrome", cardNumber: "US175", year: 2011 } as const;
+  const SPORTS_COLUMNS = ["team", "rookie", "parallel", "serial_number", "autograph", "relic", "subgrades"];
+
+  it("keeps the team, the flags, the parallel, the numbering and BGS subgrades", () => {
+    const card = createCard({ ...trout, team: "Los Angeles Angels", rookie: "yes" as never, parallel: "Gold Refractor", serialNumber: "12 of 50", autograph: true, relic: 0 as never, gradingCompany: "BGS", grade: "9.5", subgrades: { centering: "9.5", corners: 9, edges: "10", surface: null } as never });
+    expect(card).toMatchObject({ team: "Los Angeles Angels", rookie: true, parallel: "Gold Refractor", serialNumber: "12/50", autograph: true, relic: false, subgrades: { centering: 9.5, corners: 9, edges: 10, surface: null } });
+    expect(getCard(card.id)).toMatchObject({ rookie: true, autograph: true, relic: false, subgrades: { centering: 9.5 } });
+    const plain = createCard({ ...trout });
+    expect(plain).toMatchObject({ team: null, rookie: false, parallel: null, serialNumber: null, autograph: false, relic: false, subgrades: null });
+    // Subgrades outside the scale, or an empty set, are no subgrades.
+    expect(createCard({ ...trout, subgrades: { centering: 11, corners: null, edges: null, surface: null } }).subgrades).toBeNull();
+    // A flag is not a number: Number(true) is 1, which is a grade.
+    expect(createCard({ ...trout, subgrades: { centering: true, corners: [9], edges: "", surface: 0 } as never }).subgrades).toBeNull();
+  });
+
+  it("writes every column a card had before the sports fields beside them", () => {
+    // createCard once lost name_key, centering and grading_report when sports columns
+    // were added next to them: the key is what finds a duplicate, the other two are
+    // measurements nobody can type back in.
+    const card = createCard({
+      ...trout,
+      team: "Los Angeles Angels",
+      serialNumber: "12/50",
+      centering: { front: { lr: "55/45", tb: "52/48" } },
+      gradingReport: tagReport(),
+      gradingCompany: "TAG",
+      grade: "10",
+      subgrades: { centering: 10, corners: 10, edges: 10, surface: 10 },
+    });
+    expect(card.centering).toEqual({ front: { lr: [55, 45], tb: [52, 48] }, back: { lr: null, tb: null } });
+    expect(card.gradingReport).toMatchObject({ company: "TAG", cert: "A1234567" });
+    expect(card.subgrades).toEqual({ centering: 10, corners: 10, edges: 10, surface: 10 });
+    expect(getDb().prepare("SELECT name_key FROM cards WHERE id = ?").get(card.id)).toEqual({ name_key: "mike trout" });
+    // Found by the key straight away, not after the next restart's backfill.
+    expect(findSimilar({ game: "sports", name: "MIKE TROUT" }).map((c) => c.id)).toEqual([card.id]);
+  });
+
+  it("keeps the sports fields through an edit that does not mention them, and changes them when it does", () => {
+    const card = createCard({ ...trout, team: "Angels", rookie: true, parallel: "Gold Refractor", serialNumber: "12/50", relic: true, subgrades: { centering: 9, corners: 9, edges: 9, surface: 9 }, centering: { front: { lr: "55/45" } } });
+    const moved = updateCard(card.id, { location: "Box A" })!;
+    expect(moved).toMatchObject({ team: "Angels", rookie: true, parallel: "Gold Refractor", serialNumber: "12/50", relic: true, subgrades: { centering: 9 }, centering: card.centering });
+    const edited = updateCard(card.id, { team: "Los Angeles Angels", rookie: false, parallel: null, serialNumber: "13 / 50", relic: false, subgrades: { centering: 9.5, corners: null, edges: null, surface: null } })!;
+    expect(edited).toMatchObject({ team: "Los Angeles Angels", rookie: false, parallel: null, serialNumber: "13/50", relic: false, subgrades: { centering: 9.5, corners: null } });
+    expect(updateCard(card.id, { subgrades: null })?.subgrades).toBeNull();
+    // The measured centering was never touched by any of it.
+    expect(getCard(card.id)?.centering).toEqual(card.centering);
+  });
+
+  it("asks the sources afresh when the parallel, the autograph or the relic changes, and not for the rest", () => {
+    // The guides list a Refractor, an autographed card and a relic card each as a product of its own.
+    const matched = () => {
+      const c = createCard({ ...trout, parallel: "Refractor", team: "Angels" });
+      return updateCard(c.id, { externalIds: { pricecharting: "77" }, referenceImageUrl: "https://img.example/77.png" })!;
+    };
+    for (const change of [{ parallel: "Gold Refractor" }, { autograph: true }, { relic: true }]) {
+      const edited = updateCard(matched().id, change)!;
+      expect(edited.externalIds, JSON.stringify(change)).toEqual({});
+      expect(edited.referenceImageUrl, JSON.stringify(change)).toBeNull();
+    }
+    for (const change of [{ team: "Padres" }, { rookie: true }, { serialNumber: "12/99" }, { subgrades: { centering: 9, corners: null, edges: null, surface: null } }, { parallel: " refractor " }]) {
+      expect(updateCard(matched().id, change)?.externalIds, JSON.stringify(change)).toEqual({ pricecharting: "77" });
+    }
+  });
+
+  it("never merges a serial-numbered card, and never merges into one", async () => {
+    const { intakeCard } = await import("@/lib/cards");
+    const first = intakeCard({ ...trout, parallel: "Gold Refractor", serialNumber: "12/50" });
+    const second = intakeCard({ ...trout, parallel: "Gold Refractor", serialNumber: "12/50" });
+    expect(first.result).toBe("created");
+    expect(second.result).toBe("created");
+    // A copy of the same parallel without numbering is not a copy of a numbered one either.
+    expect(intakeCard({ ...trout, parallel: "Gold Refractor" }).result).toBe("created");
+    expect(listCards()).toHaveLength(3);
+  });
+
+  it("does not let a numbered card make a base copy ambiguous, or take its place", async () => {
+    const { intakeCard } = await import("@/lib/cards");
+    // The numbered card is held first and is the only card that looks like the incoming copy.
+    intakeCard({ ...trout, serialNumber: "7/25" });
+    const base = intakeCard({ ...trout });
+    expect(base.result).toBe("created");
+    // Now there is one base row and one numbered row: a base copy stacks on the base row alone.
+    const again = intakeCard({ ...trout });
+    expect(again).toMatchObject({ result: "merged" });
+    if (again.result !== "merged") throw new Error("expected a merge");
+    expect(again.card).toMatchObject({ quantity: 2, serialNumber: null });
+    expect(listCards().map((c) => `${c.serialNumber ?? "base"}:${c.quantity}`).sort()).toEqual(["7/25:1", "base:2"]);
+  });
+
+  it("stacks base copies together and keeps a parallel apart from them", async () => {
+    const { intakeCard } = await import("@/lib/cards");
+    expect(intakeCard({ ...trout }).result).toBe("created");
+    expect(intakeCard({ ...trout }).result).toBe("merged");
+    expect(intakeCard({ ...trout, parallel: "Refractor" }).result).toBe("created");
+    expect(intakeCard({ ...trout, parallel: " refractor " }).result).toBe("merged");
+    expect(intakeCard({ ...trout, parallel: "Gold   Refractor" }).result).toBe("created");
+    expect(intakeCard({ ...trout, parallel: "gold refractor" }).result).toBe("merged");
+    const cards = listCards();
+    expect(cards).toHaveLength(3);
+    expect(cards.map((c) => c.quantity)).toEqual([2, 2, 2]);
+    // Each of the three took its copy from its own purchase lot.
+    expect(cards.every((c) => listLots(c.id).length === 2)).toBe(true);
+  });
+
+  it("still keeps a slab, a variant and a language apart on top of that", async () => {
+    const { intakeCard } = await import("@/lib/cards");
+    createCard({ ...trout, parallel: "Refractor", gradingCompany: "PSA", grade: "9" });
+    // Same parallel, but a raw copy of it is not the slab: stops and asks, as it always did.
+    expect(intakeCard({ ...trout, parallel: "Refractor" }).result).toBe("ambiguous");
+    expect(intakeCard({ ...trout, parallel: "Refractor", gradingCompany: "PSA", grade: "9" }).result).toBe("merged");
+    expect(listCards()).toHaveLength(1);
+  });
+
+  it("says which copies may share a row", async () => {
+    const { mayShareRow } = await import("@/lib/cards");
+    const base = { serialNumber: null, parallel: null };
+    expect(mayShareRow(base, { serialNumber: null, parallel: null })).toBe(true);
+    expect(mayShareRow({ serialNumber: null, parallel: "Gold Refractor" }, { serialNumber: "", parallel: "  gold refractor" })).toBe(true);
+    expect(mayShareRow(base, { serialNumber: "12/99", parallel: null })).toBe(false);
+    expect(mayShareRow({ serialNumber: "12/99", parallel: null }, base)).toBe(false);
+    expect(mayShareRow({ serialNumber: "12/99", parallel: null }, { serialNumber: "12 of 99", parallel: null })).toBe(false);
+    expect(mayShareRow(base, { parallel: "Refractor" })).toBe(false);
+    expect(mayShareRow({ serialNumber: null, parallel: "Refractor" }, {})).toBe(false);
+  });
+
+  it("adds the new columns to a database from before they existed, and does so once", () => {
+    const older = openDatabase(":memory:");
+    for (const column of SPORTS_COLUMNS) older.exec(`ALTER TABLE cards DROP COLUMN ${column}`);
+    older.exec("INSERT INTO cards (game, name, created_at, updated_at) VALUES ('sports', 'Ken Griffey Jr.', '2020-01-01', '2020-01-01')");
+    older.exec("INSERT INTO cards (game, name, centering, created_at, updated_at) VALUES ('sports', 'Frank Thomas', '{\"front\":{\"lr\":[55,45],\"tb\":null},\"back\":{\"lr\":null,\"tb\":null}}', '2020-01-02', '2020-01-02')");
+    initializeDatabase(older);
+    // Opening it again is not a second migration.
+    expect(() => initializeDatabase(older)).not.toThrow();
+    setDb(older);
+    const columns = (getDb().prepare("PRAGMA table_info(cards)").all() as Array<{ name: string }>).map((c) => c.name);
+    expect(columns).toEqual(expect.arrayContaining(SPORTS_COLUMNS));
+    expect(columns.filter((c) => SPORTS_COLUMNS.includes(c))).toHaveLength(SPORTS_COLUMNS.length);
+    expect(listCards().find((c) => c.name === "Ken Griffey Jr.")).toMatchObject({ team: null, rookie: false, parallel: null, serialNumber: null, autograph: false, relic: false, subgrades: null });
+    // What the older rows already held is untouched by the migration.
+    expect(listCards().find((c) => c.name === "Frank Thomas")?.centering).toEqual({ front: { lr: [55, 45], tb: null }, back: { lr: null, tb: null } });
+    expect(createCard({ ...trout, serialNumber: "1/1" }).serialNumber).toBe("1/1");
+  });
+
+  it("reads a row a restore left in a shape the write path would refuse", () => {
+    const card = createCard({ ...trout });
+    const row = (set: string, ...values: unknown[]) => getDb().prepare(`UPDATE cards SET ${set} WHERE id = ?`).run(...values, card.id);
+    row("rookie = ?, autograph = ?, relic = ?, serial_number = ?, subgrades = ?", "yes", "", 2, " 12 of 99 ", '{"centering":9.5,"corners":99,"edges":"x","surface":null}');
+    expect(getCard(card.id)).toMatchObject({ rookie: false, autograph: false, relic: false, serialNumber: "12/99", subgrades: { centering: 9.5, corners: null, edges: null, surface: null } });
+    // JSON that is not an object, and one that is not JSON, are no subgrades and do not stop the page.
+    for (const stored of ["7", '"9"', "[9,9,9,9]", "null", "{not json"]) {
+      row("subgrades = ?", stored);
+      expect(getCard(card.id)?.subgrades, stored).toBeNull();
+    }
+    row("serial_number = ?", "   ");
+    expect(getCard(card.id)?.serialNumber).toBeNull();
   });
 });

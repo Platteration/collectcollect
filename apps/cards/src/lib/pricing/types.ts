@@ -10,6 +10,8 @@ export interface CardQuery {
   cardNumber?: string | null;
   year?: number | null;
   variant?: string | null;
+  /** A sports card's parallel as a price guide names it: "Gold Refractor", with "Auto" and "Relic" when it has them. */
+  parallel?: string | null;
   manufacturer?: string | null;
   externalIds?: Record<string, string>;
 }

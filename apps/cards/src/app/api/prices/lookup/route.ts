@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
 import { BodyLimitError, readJsonLimited } from "@collectcollect/core/http";
-import { fetchQuotes, summarize } from "@/lib/pricing";
+import { fetchQuotes, queryParallel, summarize } from "@/lib/pricing";
 import type { CardQuery } from "@/lib/pricing/types";
 import { getSettings } from "@/lib/settings";
 import { isCondition, isGame } from "@/lib/types";
@@ -11,7 +11,7 @@ import { isCondition, isGame } from "@/lib/types";
  * identification). Body: CardQuery plus optional condition / grading fields.
  */
 export async function POST(request: Request) {
-  let body: Partial<CardQuery> & { condition?: string; gradingCompany?: string | null; grade?: string | null };
+  let body: Partial<CardQuery> & { condition?: string; gradingCompany?: string | null; grade?: string | null; autograph?: boolean; relic?: boolean };
   // A card's identity is well under 16 KB; a runaway client cannot buffer more.
   try {
     body = (await readJsonLimited(request, 16 * 1024)) as typeof body;
@@ -30,6 +30,8 @@ export async function POST(request: Request) {
     cardNumber: body.cardNumber ?? null,
     year: body.year ?? null,
     variant: body.variant ?? null,
+    // The card's parallel, with its autograph and relic, as the search names them.
+    parallel: queryParallel({ parallel: typeof body.parallel === "string" ? body.parallel : null, autograph: body.autograph === true, relic: body.relic === true }),
     manufacturer: body.manufacturer ?? null,
     externalIds: body.externalIds ?? {},
   };

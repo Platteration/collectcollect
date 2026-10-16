@@ -137,10 +137,19 @@ export interface Identification {
   language: string | null;
   manufacturer: string | null;
   subject: string | null;
+  /** Sports cards. Absent on identifications made before these existed. */
+  team?: string | null;
+  rookie?: boolean | null;
+  parallel?: string | null;
+  serial_number?: string | null;
+  autograph?: boolean | null;
+  relic?: boolean | null;
   grading: {
     company: string | null;
     grade: string | null;
     cert_number: string | null;
+    /** The four grades a BGS label prints; absent on identifications made before this existed. */
+    subgrades?: Subgrades | null;
   };
   condition_notes: string | null;
   /** Condition read from the photo; absent on identifications made before this existed. */
@@ -165,6 +174,69 @@ export interface Identification {
   search_query: string;
 }
 
+/**
+ * The four grades a Beckett (BGS) label prints beside the overall grade, typed
+ * in or read off the slab in a photo. They are not the grading company's
+ * report, which a card keeps in `gradingReport` with a front and a back for
+ * each aspect, and not the card's measured centering (`centering`, the border
+ * ratios): a subgrade is a number on the 1 to 10 scale.
+ */
+export interface Subgrades {
+  centering: number | null;
+  corners: number | null;
+  edges: number | null;
+  surface: number | null;
+}
+
+export const SUBGRADE_KEYS = ["centering", "corners", "edges", "surface"] as const;
+
+/** `C 9.5 · Co 9 · E 9.5 · S 10` */
+export function subgradesLabel(s: Subgrades | null | undefined): string {
+  if (!s) return "";
+  const short: Record<keyof Subgrades, string> = { centering: "C", corners: "Co", edges: "E", surface: "S" };
+  return SUBGRADE_KEYS.filter((k) => s[k] !== null).map((k) => `${short[k]} ${s[k]}`).join(" · ");
+}
+
+/** Flags arrive as booleans from the form, 0/1 from the database, and "yes", "RC" or "x" from a spreadsheet. */
+export function flag(v: unknown): boolean {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  const s = String(v ?? "").trim().toLowerCase();
+  return ["1", "true", "yes", "y", "x", "rc", "auto", "relic", "\u2713"].includes(s);
+}
+
+/**
+ * "12/99" however it was typed: "12 / 99", "12 of 99", "#12/99". Anything else
+ * that is not blank is kept as typed ("1/1", "SP", "Gold /50" are all things a
+ * card says). Linear on any text: each run of digits is followed by a different
+ * kind of character, so no two quantifiers share a run.
+ */
+export function serial(v: unknown): string | null {
+  const s = v === null || v === undefined ? null : String(v).trim() || null;
+  if (!s) return null;
+  const m = s.match(/^#?\s*(\d+)\s*(?:\/|of)\s*(\d+)$/i);
+  return m ? `${m[1]}/${m[2]}` : s;
+}
+
+/** Subgrades are numbers on the 1 to 10 scale or absent; a set with nothing in it is no set at all. */
+export function cleanSubgrades(input: unknown): Subgrades | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const raw = input as Record<string, unknown>;
+  const out: Subgrades = { centering: null, corners: null, edges: null, surface: null };
+  let any = false;
+  for (const key of SUBGRADE_KEYS) {
+    const v = Object.hasOwn(raw, key) ? raw[key] : null;
+    // Only a number or the text of one: Number(true) is 1, and Number([9]) is 9.
+    if (typeof v !== "number" && !(typeof v === "string" && v.trim() !== "")) continue;
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 1 && n <= 10) {
+      out[key] = n;
+      any = true;
+    }
+  }
+  return any ? out : null;
+}
+
 export interface CardRecord {
   id: number;
   game: Game;
@@ -178,11 +250,20 @@ export interface CardRecord {
   variant: string | null;
   language: string | null;
   manufacturer: string | null;
+  /** Sports cards: the team, whether it is a rookie card, the parallel or refractor, and the serial numbering ("12/99"). */
+  team: string | null;
+  rookie: boolean;
+  parallel: string | null;
+  serialNumber: string | null;
+  autograph: boolean;
+  relic: boolean;
   quantity: number;
   condition: Condition;
   gradingCompany: string | null;
   grade: string | null;
   certNumber: string | null;
+  /** The four grades a BGS label prints, when the slab carries them. */
+  subgrades: Subgrades | null;
   /** Measured border ratios, typed in, read off a report, or read from the photo. */
   centering: Centering | null;
   /** The grading company's report on this slab, when one has been fetched or entered. */

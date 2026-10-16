@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseCardMarkdown } from "@/lib/markdown/card";
+import { previewImport } from "@/lib/import";
+import { serial } from "@/lib/types";
 import { goalRecord } from "@/lib/goals/markdown";
 import { looksLikeOneRatio, parseCentering, parseSide } from "@/lib/grading/centering";
 import { readCentering } from "@/lib/grading/schema";
@@ -209,5 +211,82 @@ describe("the scans read exactly what the patterns they replaced read", () => {
     expect(disagreements(files, goalRecord, recordBefore)).toEqual([]);
     const caveats = drawn(["glare", ".", ";", ",", "!", ...spacing], 20_000, 17);
     expect(disagreements(caveats, caveatSentence, (caveat) => caveat.replace(/[.;,]?\s*$/, ""))).toEqual([]);
+  });
+});
+
+describe("a sports card's serial number", () => {
+  // The pattern is "an optional #, a number, a slash or 'of', a number": every run of
+  // digits or spaces is followed by a different kind of character. These are the inputs
+  // a pattern with two quantifiers over the same run would have taken seconds over.
+  it("is read in linear time from a number, a run of spaces or a run of 'of' that never ends the way a serial does", () => {
+    const hostile = [
+      `${"1".repeat(64_000)}x`,
+      `1${spaces(64_000)}x`,
+      `1/${spaces(64_000)}x`,
+      `#${spaces(64_000)}1/`,
+      `${"1/".repeat(32_000)}x`,
+      `1${"of".repeat(32_000)}`,
+      `${"1 ".repeat(32_000)}/1`,
+    ];
+    for (const text of hostile) {
+      const run = timed(() => serial(text));
+      expect(run.value, text.slice(0, 12)).toBe(text.trim());
+      expect(run.ms, text.slice(0, 12)).toBeLessThan(BUDGET_MS);
+    }
+    // A very long number on both sides is a serial, and is read in the same time.
+    const long = timed(() => serial(`${"1".repeat(30_000)} OF ${"2".repeat(30_000)}`));
+    expect(long.value).toBe(`${"1".repeat(30_000)}/${"2".repeat(30_000)}`);
+    expect(long.ms).toBeLessThan(BUDGET_MS);
+  });
+
+  it("is read in linear time wherever a file or a spreadsheet can put it", () => {
+    const text = `${"1".repeat(64_000)}x`;
+    const row = timed(() => previewImport(["name,game,serial", `Mike Trout,sports,${text}`].join("\n")));
+    expect(row.value.rows[0]?.input?.serialNumber).toBe(text);
+    expect(row.ms).toBeLessThan(BUDGET_MS);
+    const card = timed(() => parseCardMarkdown(['---', 'name: "Mike Trout"', 'game: "sports"', `serial_number: "${text}"`, `subgrades: {"centering":"${"9".repeat(64_000)}"}`, "---", "", "# Mike Trout", ""].join("\n")));
+    expect(card.value?.input.serialNumber).toBe(text);
+    expect(card.value?.input.subgrades).toBeNull();
+    expect(card.ms).toBeLessThan(BUDGET_MS);
+  });
+
+  it("still reads the forms a person types", () => {
+    for (const typed of ["12/99", "12 / 99", "12 of 99", "12OF99", "#12/99", "# 12 / 99", " 12/99 "]) expect(serial(typed), typed).toBe("12/99");
+    for (const kept of ["1/1", "SP", "Gold /50", "12-99", "12/", "/99", "12 99", "12/99 x"]) expect(serial(kept), kept).toBe(kept);
+    expect(serial("  ")).toBeNull();
+    expect(serial(null)).toBeNull();
+    expect(serial(undefined)).toBeNull();
+  });
+
+  it("reads exactly the grammar it documents, on short strings drawn from the characters that matter", () => {
+    // The same grammar written as a scan: '#'?, spaces, digits, spaces, '/' or 'of', spaces, digits, end.
+    const before = (text: string): string | null => {
+      const s = text.trim();
+      if (!s) return null;
+      let i = 0;
+      const skip = () => {
+        while (i < s.length && /\s/.test(s[i]!)) i++;
+      };
+      const digits = () => {
+        const from = i;
+        while (i < s.length && s[i]! >= "0" && s[i]! <= "9") i++;
+        return s.slice(from, i);
+      };
+      if (s[i] === "#") i++;
+      skip();
+      const a = digits();
+      skip();
+      if (s[i] === "/") i++;
+      else if (s.slice(i, i + 2).toLowerCase() === "of") i += 2;
+      else return s;
+      skip();
+      const b = digits();
+      return a && b && i === s.length ? `${a}/${b}` : s;
+    };
+    const inputs = drawn(["1", "12", "99", "/", "of", "OF", "#", "x", " ", "  ", "\t", "\u00a0", "\n", "\r", "\u2028"], 30_000, 23, 9);
+    // Reaching the cases that matter: a good many of them are serials written some other way, and a good many are not serials.
+    expect(inputs.filter((text) => /^\d+\/\d+$/.test(serial(text) ?? "") && serial(text) !== text.trim()).length).toBeGreaterThan(300);
+    expect(inputs.filter((text) => text.trim() && !/^\d+\/\d+$/.test(serial(text) ?? "")).length).toBeGreaterThan(300);
+    expect(disagreements(inputs, serial, before)).toEqual([]);
   });
 });

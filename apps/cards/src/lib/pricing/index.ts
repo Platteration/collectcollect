@@ -249,7 +249,20 @@ export function sameSummary(a: PriceSummary, b: PriceSummary): boolean {
   return project(a) === project(b);
 }
 
-export function cardToQuery(card: Pick<CardRecord, "game" | "name" | "sport" | "setName" | "setCode" | "cardNumber" | "year" | "variant" | "manufacturer" | "externalIds">): CardQuery {
+/**
+ * A parallel, an autograph and a relic are each their own listing at every
+ * price guide, so they go into the search the way the guides name them.
+ * Null for a card that is none of these, which searches as it always did.
+ */
+export function queryParallel(card: { parallel?: string | null; autograph?: boolean | null; relic?: boolean | null }): string | null {
+  const words = [card.parallel?.trim() || null, card.autograph ? "Auto" : null, card.relic ? "Relic" : null].filter(Boolean).join(" ");
+  return words || null;
+}
+
+export function cardToQuery(
+  card: Pick<CardRecord, "game" | "name" | "sport" | "setName" | "setCode" | "cardNumber" | "year" | "variant" | "manufacturer" | "externalIds"> &
+    Partial<Pick<CardRecord, "parallel" | "autograph" | "relic">>,
+): CardQuery {
   return {
     game: card.game,
     name: card.name,
@@ -259,6 +272,7 @@ export function cardToQuery(card: Pick<CardRecord, "game" | "name" | "sport" | "
     cardNumber: card.cardNumber,
     year: card.year,
     variant: card.variant,
+    parallel: queryParallel(card),
     manufacturer: card.manufacturer,
     externalIds: card.externalIds,
   };

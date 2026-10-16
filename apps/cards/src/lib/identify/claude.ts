@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { IdentificationSchema } from "./schema";
-import type { Identification } from "../types";
+import { cleanSubgrades, type Identification } from "../types";
 import { prepareForVision } from "../images";
 
 export const DEFAULT_MODEL = "claude-opus-5";
@@ -25,7 +25,7 @@ export class IdentifyError extends Error {
   }
 }
 
-const SYSTEM_PROMPT = `You identify collectible trading cards from photographs for a personal collection catalog.
+export const SYSTEM_PROMPT = `You identify collectible trading cards from photographs for a personal collection catalog.
 
 You will receive one or more photos of a single card (front, and sometimes the back or a grading slab label). Determine exactly which card it is: the game or category, the printed name, the set it belongs to, the collector number, the year, rarity and any printing variant that affects value (holo, reverse holo, 1st edition, shadowless, foil, refractor, parallel, autograph, short print, and so on).
 
@@ -34,7 +34,7 @@ Guidance:
 - Pokémon: distinguish Base Set / Base Set 2 / Shadowless / 1st Edition and Japanese vs. English printings when possible; report the number with its denominator (e.g. 4/102).
 - Yu-Gi-Oh!: report the set code printed under the artwork (e.g. LOB-001, SDK-001) and the rarity finish.
 - Magic: report the set code and collector number from the bottom-left, and whether the card is foil.
-- Sports cards: give the player name, the year and manufacturer/product (e.g. 2011 Topps Update), the card number, and any parallel, refractor, rookie (RC) or autograph designation.
+- Sports cards: give the player name, the team, the year and manufacturer/product (e.g. 2011 Topps Update), the card number, whether it is a rookie card (RC logo or "Rookie"), the parallel or refractor by its colour and ratio as printed on the back or the foil (Gold Refractor, Silver Prizm, Blue Wave 1:25), serial numbering exactly as stamped (12/99), and whether it carries an autograph or a jersey/patch relic. On a BGS label, read the four subgrades.
 - If the card is in a grading company's slab, read the label for the company, grade and certification number.
 - Assess condition only from what the photo actually shows. Report centering, corners, edges and surface separately, and give a conservative-to-optimistic range for the 10-point grade a raw card would likely receive. Give the centering as border ratios too (left/right and top/bottom, front and back when visible, each adding up to 100, the left or top border first), as a grader would write them. Be sceptical: most cards pulled from a binder are not gem mint, glare and low resolution hide scratches and whitening, and a photo of the front alone cannot rule out back damage. Say so in the caveat rather than guessing past the evidence. For a card already in a slab, leave the estimated grades null and read the printed grade instead.
 - If you cannot be sure, give your best single answer with an honest confidence and list the plausible alternatives.`;
@@ -128,7 +128,7 @@ export async function identifyCard(images: ImageInput[], hint?: string, timeoutM
   return normalize(parsed);
 }
 
-function normalize(id: Identification): Identification {
+export function normalize(id: Identification): Identification {
   const trim = (s: string | null) => (s && s.trim() ? s.trim() : null);
   return {
     ...id,
@@ -143,10 +143,18 @@ function normalize(id: Identification): Identification {
     manufacturer: trim(id.manufacturer),
     subject: trim(id.subject),
     condition_notes: trim(id.condition_notes),
+    team: trim(id.team ?? null),
+    rookie: Boolean(id.rookie),
+    parallel: trim(id.parallel ?? null),
+    serial_number: trim(id.serial_number ?? null),
+    autograph: Boolean(id.autograph),
+    relic: Boolean(id.relic),
     grading: {
       company: trim(id.grading.company),
       grade: trim(id.grading.grade),
       cert_number: trim(id.grading.cert_number),
+      // Held to the 1 to 10 scale, like a typed one: the model reads these off a label.
+      subgrades: cleanSubgrades(id.grading.subgrades),
     },
     condition_assessment: id.condition_assessment
       ? {
