@@ -1,9 +1,56 @@
-# Illustrated tabletop visual language
+# Cohesive hobby visual language
 
-Keep the game readable and the interface simple. Use warm ivory (#f5f0e6) or deep ink (#19232d) behind opaque paper/panel surfaces, with muted sea-glass and amber accents. Use 8 / 12 / 16 point corner radii and the existing 4 point spacing rhythm. Body text stays in the platform sans-serif family; weight establishes hierarchy.
+Cards, Skins, Retro Games, Comics, Watches and Whisky share a visual family, not a
+single workflow. Keep collection browsing artwork-forward, portfolios numerical,
+and capture/review tools focused. Preserve each hobby's terminology and recorded
+condition or grading data.
 
-Depth is shallow: a crisp outline, one short lower edge, and one small upper-left highlight. Keep boards face-on and hit areas aligned to the grid. Anime influence belongs in bold silhouettes, crown markings and restrained effects, with no extra decoration over legal moves, selection, errors or player markers.
+## Shared appearance
 
-Preserve existing cosmetic choices and accessibility settings. Color is supported by existing labels, rings, symbols and patterns. Card artwork and chart semantics remain authoritative in the collection apps.
+`packages/core/src/family-theme.css` is loaded by the shared `ThemeToggle`. It
+coordinates backgrounds, opaque panels, raised surfaces, buttons, focus rings,
+and chart surfaces. The existing platform body font and condensed display face
+remain. Depth stays shallow: a crisp outline, short lower edge and subtle upper
+highlight. Existing app layouts and navigation remain in place.
 
-Before merging, inspect light/dark modes, a narrow phone layout, selected pieces/cells, moves and end states. Run the repository typecheck and existing tests.
+The one exception is the card itself, which is a physical object and is drawn as one: its face tilts up to ten degrees towards the pointer, catches the light, and carries the wear its grade implies (soft corners, whitened edges, dust, fingerprints, print lines, scratches, dents, yellowing, stains and a crease as the grade falls; only dust and a print line may cross the middle of the art), a holo or foil finish shows an overlay rainbow in one of five patterns that tints the art rather than covering it, a raw card may curl a few degrees, and a graded card sits inside a three-plane slab. That depth stops at the card's edge; the panel it sits on keeps the shallow treatment above.
+
+Light, Dark and System are separate from the eight palettes: Teal (sea glass),
+Amber, Sky, Indigo, Violet, Plum, Copper and Slate. Teal retains the warm-paper /
+deep-ink default. The header offers the same palette choices as Settings.
+
+`appearance.ts` retains the `theme` and `colorScheme` localStorage keys. Choices
+apply across routes and same-origin tabs. Separate app origins, ports and devices
+do not automatically synchronize preferences. If storage is blocked, a visible
+warning accompanies an in-memory choice, which lasts only in that loaded page.
+System mode follows OS changes. Printing temporarily uses light mode, then
+restores the current preference. Browser chrome follows the resolved background;
+installed icon artwork and static launch-screen metadata are not regenerated.
+
+## Meaning is not decoration
+
+A palette never assigns financial or categorical chart colors: gains remain green,
+losses red, with signs and labels carrying direction. Artwork, slab/company labels,
+rarity colors and grade data are not recolored. Chart hover halos use their actual
+panel surface. Do not use an aesthetic accent to communicate profit or loss.
+
+## Integration and checks
+
+Cards and Skins draw their own layouts. Retro Games, Comics, Watches and Whisky
+share `packages/core/src/pages/AppShell.tsx`, which came from the older
+`claude/scaffold-five-apps-y6pgsp` branch; do not replace newer storage/security
+code with older scaffold code just to share appearance. Every layout's inline
+script applies the stored theme and palette before the first paint, under the
+request's nonce, and each app's Settings offers the same palettes as its header.
+
+The added `family-theme.test.ts` files guard palette definitions and text/focus
+contrast. The `family-theme.spec.ts` browser tests cover navigation, cross-tab
+updates, blocked storage, print restoration and phone menu bounds.
+`packages/core/tests/app-shell.test.ts` holds the shared shell's script to the
+nonce and to what it applies, and the `appearance.spec.ts` browser tests of Retro
+Games, Comics and Whisky choose every theme and palette on a phone-sized screen,
+from the header and from Settings. Before merging,
+run the repository lint, typecheck, unit, build and browser suites and inspect all
+apps in both modes. Check selected, hover, keyboard focus, disabled, error, empty,
+print and reduced-motion states. An isolated CSS/control fixture is not a substitute
+for those full-application and physical-device checks.

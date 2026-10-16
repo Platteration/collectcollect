@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import Link from "next/link";
 import type { DomainSpec, NavItem } from "../domain/spec";
 import { SignOut } from "../components/SignOut";
@@ -13,11 +14,12 @@ import { ThemeToggle } from "../components/ThemeToggle";
  */
 
 /**
- * Resolve the stored preference to a concrete theme before the first paint, so
- * the page never flashes the wrong one. Everything else in the app, CSS
- * variables and Tailwind's dark: utilities alike, keys off this one attribute.
+ * Resolve the stored theme and color scheme before the first paint, so the
+ * page never flashes the wrong one. Everything else in the app, CSS variables
+ * and Tailwind's dark: utilities alike, keys off these attributes. The same
+ * script as the cards and skins layouts', kept in step with appearance.ts.
  */
-const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("theme")||"system";var d=p==="dark"||(p!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.setAttribute("data-theme",d?"dark":"light")}catch(e){}})()`;
+export const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("theme")||"system";var d=p==="dark"||(p!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.setAttribute("data-theme",d?"dark":"light");var s=localStorage.getItem("colorScheme")||"teal";document.documentElement.setAttribute("data-scheme",s)}catch(e){}})()`;
 
 const STANDARD_NAV: NavItem[] = [
   { href: "/", label: "Portfolio", icon: "▲" },
@@ -66,7 +68,7 @@ export function appViewport(spec: Spec): Viewport {
   };
 }
 
-export function AppShell({ engine, fontClass, footer, children }: { engine: ShellEngine; fontClass: string; footer?: string; children: React.ReactNode }) {
+export async function AppShell({ engine, fontClass, footer, children }: { engine: ShellEngine; fontClass: string; footer?: string; children: React.ReactNode }) {
   const { spec } = engine;
   const unread = engine.alerts.unreadCount();
   const nav = navFor(spec);
@@ -76,11 +78,16 @@ export function AppShell({ engine, fontClass, footer, children }: { engine: Shel
     .sort((a, b) => tabOrder.indexOf(a.href) - tabOrder.indexOf(b.href))
     .map((i) => (i.href === "/alerts" ? { ...i, badge: unread } : i));
 
+  // The theme script needs the nonce the proxy minted for this request, or the
+  // content security policy refuses it and the page paints in the wrong theme
+  // and palette until the app starts.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+
   return (
-    <html lang="en" data-theme="light" className={`${fontClass} h-full antialiased`} suppressHydrationWarning>
+    <html lang="en" data-theme="light" data-scheme="teal" className={`${fontClass} h-full antialiased`} suppressHydrationWarning>
       {/* eslint-disable-next-line @next/next/no-head-element -- an App Router layout's head, not a pages/ one; the lint rule keys off this folder's name */}
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body className="flex min-h-full flex-col">
         <header
