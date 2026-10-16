@@ -578,6 +578,21 @@ maybe("scripts/install.sh --lan", () => {
     expect(several.out).not.toContain("203.0.113.9");
   });
 
+  it("asks Windows for the computer's address when it runs under Git Bash, and drops the carriage return", () => {
+    fake("powershell.exe", `printf '192.168.0.7\\r\\n'`);
+    const r = run(["--lan"]);
+    expect(r.out).toContain("cards: http://192.168.0.7:3000");
+    expect(calls().filter((c) => c.startsWith("docker compose up"))).toHaveLength(1);
+  });
+
+  it("finds the address of the default interface on a Mac, where there is no `ip`", () => {
+    fs.rmSync(path.join(bin, "ip"));
+    fake("route", 'echo "   route to: default"\necho "  interface: en0"');
+    fake("ipconfig", '[ "$1 $2" = "getifaddr en0" ] && echo 192.168.1.30');
+    const r = run(["--lan"]);
+    expect(r.out).toContain("cards: http://192.168.1.30:3000");
+  });
+
   it("warns when .env would make the apps turn the phone away", () => {
     expect(run(["--lan"]).code).toBe(0);
     fs.appendFileSync(path.join(work, ".env"), "ALLOWED_HOSTS=cards.example.com\nCOOKIE_SECURE=1\n");
