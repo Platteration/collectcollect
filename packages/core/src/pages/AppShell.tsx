@@ -1,8 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import Link from "next/link";
-import type { DomainSpec, NavItem } from "../domain/spec";
+import { appTitle, type DomainSpec, type NavItem } from "../domain/spec";
+import { NoScriptNote } from "../components/NoScriptNote";
+import { ServiceWorker } from "../components/ServiceWorker";
 import { SignOut } from "../components/SignOut";
+import { Started } from "../components/Started";
 import { TabBar } from "../components/TabBar";
 import { ThemeToggle } from "../components/ThemeToggle";
 
@@ -51,8 +54,19 @@ export function appMetadata(spec: Spec): Metadata {
   return {
     title: `CollectCollect · ${spec.name}`,
     description: spec.description,
-    applicationName: `CollectCollect ${spec.name}`,
+    applicationName: appTitle(spec),
     appleWebApp: { capable: true, title: `CC ${spec.name}`, statusBarStyle: "default" },
+    // What makes it installable: the app's own manifest route and the icons in
+    // its public folder (see domain/pwa.ts). The favicon is the one file a
+    // browser also asks for by its fixed address.
+    manifest: "/manifest.webmanifest",
+    icons: {
+      icon: [
+        { url: "/favicon.ico", sizes: "any" },
+        { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      ],
+      apple: "/icons/apple-touch-icon.png",
+    },
   };
 }
 
@@ -78,18 +92,25 @@ export async function AppShell({ engine, fontClass, footer, children }: { engine
     .sort((a, b) => tabOrder.indexOf(a.href) - tabOrder.indexOf(b.href))
     .map((i) => (i.href === "/alerts" ? { ...i, badge: unread } : i));
 
-  // The theme script needs the nonce the proxy minted for this request, or the
-  // content security policy refuses it and the page paints in the wrong theme
-  // and palette until the app starts.
+  // The theme script and the safety net need the nonce the proxy minted for
+  // this request, or the content security policy refuses them: the page paints
+  // in the wrong theme and palette until the app starts, and a page that
+  // failed to start says nothing.
   const nonce = (await headers()).get("x-nonce") ?? undefined;
 
   return (
     <html lang="en" data-theme="light" data-scheme="teal" className={`${fontClass} h-full antialiased`} suppressHydrationWarning>
       {/* eslint-disable-next-line @next/next/no-head-element -- an App Router layout's head, not a pages/ one; the lint rule keys off this folder's name */}
       <head>
+        {/* The safety net, in a file of its own (packages/core/src/guard.ts): a
+            page whose scripts fail to arrive or throw while starting says so. */}
+        <script src="/guard.js" nonce={nonce} async />
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body className="flex min-h-full flex-col">
+        <NoScriptNote app={appTitle(spec)} />
+        <Started />
+        <ServiceWorker />
         <header
           className="safe-top sticky top-0 z-20 border-b backdrop-blur"
           style={{ borderColor: "var(--line)", background: "color-mix(in srgb, var(--background) 88%, transparent)" }}
