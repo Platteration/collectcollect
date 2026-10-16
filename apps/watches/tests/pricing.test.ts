@@ -11,6 +11,9 @@ describe("pricing a watch", () => {
     const statuses = engine.statuses();
     expect(statuses.find((s) => s.id === "manual")).toMatchObject({ configured: true });
     expect(statuses.find((s) => s.id === "manual")?.note).toMatch(/Type what each watch is worth/);
+    // No source is planned, so the note must not promise one is coming.
+    expect(statuses.find((s) => s.id === "manual")?.note).toMatch(/^No market source is wired up\. /);
+    expect(statuses.find((s) => s.id === "manual")?.note).not.toMatch(/\byet\b/i);
   });
 
   it("values a watch at what the owner said, and a refresh changes nothing", async () => {

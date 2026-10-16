@@ -127,7 +127,7 @@ The app is installable. Add it to a home screen and it opens without browser chr
 
 A small service worker makes that work and lets the shell open without a network, showing a plain "no connection" page. It deliberately never caches API responses or page HTML: prices, grades and the collection itself change, and a stale answer about what something is worth would be worse than no answer. Nor does it answer anything under `/api/`, a page's address included, so the way to Google and back during a sign-in always reaches the server.
 
-Five destinations fit on the tab bar; the last one is labelled *More* and leads to Settings, where the rest are listed. The skins app is installable in the same way, with its own icon and its own service worker. Because a service worker's scope is an origin and each app's worker clears every cache it does not own, the two apps have to be served from different origins — which two ports are, and which two paths on one host are not.
+Five destinations fit on the tab bar; the last one is labelled *More* and leads to Settings, where the rest are listed. The skins app is installable in the same way, with its own icon and its own service worker. Because a service worker's scope is an origin and each app's worker clears every cache it does not own, the two apps have to be served from different origins — which two ports are, and which two paths on one host are not. The four apps on the domain engine ship no manifest, icon or service worker, so on a phone they are web pages and not installed apps, and have no offline shell. Over plain http on a home network none of the six is installable either, since a browser offers a service worker to secure pages only; [Testing from a phone](docs/SELF_HOSTING.md#testing-from-a-phone) says what works at an `http://` address and what Tailscale Serve adds.
 
 A page that is not there — a deleted card's, or a mistyped address — is a 404 drawn inside the app, with the header still there to leave by. A page that fails to render says so on the page, with the error, rather than going blank.
 
@@ -141,10 +141,12 @@ Four more collections run on a shared **domain engine** in `packages/core/src/do
 | --- | --- | --- | --- | --- |
 | [Retro games](apps/retro-games/README.md) | 3002 | cartridges and discs, loose / CIB / sealed / graded (WATA, VGA, CGC), box, manual and cart condition, variants | graded copies are unique; identical loose, CIB or sealed copies stack | PriceCharting by completeness (paid), manual; grade-or-wait verdict on sealed and complete copies |
 | [Comics](apps/comics/README.md) | 3003 | single issues, key-issue flags, raw or slabbed (CGC, CBCS, PGX), page quality, signature series | slabs are unique; identical raw copies stack | PriceCharting by grade (paid, column mapping unverified), manual; cert-verification stub; grade-or-wait verdict on raw copies |
-| [Watches](apps/watches/README.md) | 3004 | brand, model, reference, private serial, movement, case, dial, box and papers, service history | always unique | deliberately manual-only / frozen — no market source planned; manual with dated history; insurance appraisal with serial and photo switches |
-| [Whisky](apps/whisky/README.md) | 3005 | distillery, expression, age, cask, strength, size, bottle or batch, sealed or open, fill level | sealed identical bottles stack, numbered and open bottles are unique | deliberately manual-only / frozen — no market source planned; manual with dated history; an opened bottle's value is frozen and left out of the total |
+| [Watches](apps/watches/README.md) | 3004 | brand, model, reference, private serial, movement, case, dial, box and papers, service history | always unique | manual only, no market source is planned: values typed in, with dated history points; insurance appraisal with serial and photo switches |
+| [Whisky](apps/whisky/README.md) | 3005 | distillery, expression, age, cask, strength, size, bottle or batch, sealed or open, fill level | sealed identical bottles stack, numbered and open bottles are unique | manual only, no auction source is planned: values typed in, with dated history points; an opened bottle's value is frozen and left out of the total |
 
-They keep the conventions of the two older apps: everything self-hosted and local-first, one SQLite file per app in its own data directory (`<PREFIX>_DATA_DIR`), an optional password (`<PREFIX>_APP_PASSWORD`), hourly auto-refresh (`<PREFIX>_AUTO_REFRESH_HOURS`), and every item mirrored to Markdown under `data/collection`. Photo identification and PriceCharting use the same keys as the card app. Each has unit tests for its schema, its merge rule and its price adapter against a fake `fetch`. The pages they share are driven end to end by the whisky app's Playwright suite, so a change to the engine's portfolio, collection, item, report, add, import or login pages is caught for all of them at once.
+They keep the conventions of the two older apps: everything self-hosted and local-first, one SQLite file per app in its own data directory (`<PREFIX>_DATA_DIR`), an optional password (`<PREFIX>_APP_PASSWORD`), hourly auto-refresh (`<PREFIX>_AUTO_REFRESH_HOURS`), and every item mirrored to Markdown under `data/collection`. Photo identification and PriceCharting use the same keys as the card app. Each has unit tests for its schema, its merge rule and its price adapter against a fake `fetch`. The pages they share are driven end to end by the Playwright suites of retro games, comics and whisky (watches has none, so its pages are held only by the engine's own unit tests and by the other three suites, which render the same code), so a change to the engine's portfolio, collection, item, report, add, import or login pages is caught by three of the four at once.
+
+They are not held to everything the two older apps are. Their gate is the password alone: no sign-in with Google, and no *Sign out everywhere* (signing out clears that browser's cookie; a copy of it stays good for 30 days, so change the password, or `<PREFIX>_APP_SECRET`, to end every session). Their security headers come from the same `createProxy` but are pinned by no README block and no website test (see [The website](#the-website)). They log no warning at startup for having no password; their Settings page says so instead. They have no About section. Their import is not capped at 5,000 rows, and their pages are not installable.
 
 ## The skins app
 
@@ -282,8 +284,8 @@ records, rather than refuses over, two copies of a folder.
 
 ## Running it
 
-For a persistent cards-only installation, see [Self-hosting](docs/SELF_HOSTING.md).
-Manual entry and CSV import work without API keys. The first-run checklist links
+For a persistent installation, see [Self-hosting](docs/SELF_HOSTING.md): it starts the
+card app and says how to start the other five. Manual entry and CSV import work without API keys. The first-run checklist links
 to setup, provider connection tests, and backups.
 
 ```bash
@@ -300,31 +302,34 @@ Production: `npm run build && npm start`. Everything is stored locally in `apps/
 
 Docker: `docker compose up -d --build cards` starts the card app on 3000 with its
 own named volume at `/data`. Add skins with `docker compose up -d --build skins`
-on port 3001. `docker compose up --build` still starts both apps. To build an image
+on port 3001, and the others the same way: `retro-games` on 3002, `comics` on 3003,
+`watches` on 3004 and `whisky` on 3005, each with a volume of its own.
+`docker compose up --build` starts all six. To build an image
 directly, pick the app with a build argument:
 
 ```bash
 docker build -t collectcollect .                            # the card app
 docker build -t collectcollect-skins --build-arg APP=skins .
+docker build -t collectcollect-whisky --build-arg APP=whisky .   # or retro-games, comics, watches
 ```
 
-Compose gives each app a 2 GB memory limit: a request body is buffered whole, up to 64 MB, so a few uploads or restores at once are the high-water mark. `bash scripts/release-candidate.sh <version>` validates a release candidate of the card image on this machine — the whole gate, a container boot, a goal surviving a restart — and packages the image with the candidate Compose file into `release/`, publishing nothing ([Self-hosting](docs/SELF_HOSTING.md) says how to try one).
+Compose gives cards and skins a 2 GB memory limit: a request body is buffered whole, up to 64 MB, so a few uploads or restores at once are the high-water mark. `bash scripts/release-candidate.sh <version>` validates a release candidate of the card image on this machine — the whole gate, a container boot, a goal surviving a restart — and packages the image with the candidate Compose file into `release/`, publishing nothing ([Self-hosting](docs/SELF_HOSTING.md) says how to try one).
 
-**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach (each app says so in its log at startup). Failed attempts are rate limited — eight a minute per client, reserved before the password is checked, so firing guesses in parallel buys nothing — and changing the password invalidates existing sessions. Each session carries an id: signing out ends that one, wherever a copy of its cookie went, and *Sign out everywhere* on the Settings page ends every session issued so far — for the phone that was lost or the browser left signed in. The record lives in `sessions.json` in the data directory, and a sign-out that cannot be written there says so rather than reporting success. The login page shows nothing of the app — no navigation, no unread-alert count — to someone who is not signed in. The cookie is signed with a random key kept beside it in `session-secret`, so a stolen cookie is no help to anyone guessing the password; `APP_SECRET` replaces that key if you would rather set one (make it random, `openssl rand -hex 32`: under sign-in with Google with no password beside it, one shorter than 32 bytes signs nobody in, below). Neither file is in a backup: a restore onto a new machine asks for the password once more. So does upgrading past the point either was introduced, since older sessions are not recognised.
+**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach (cards and skins say so in their log at startup; the other four, on their Settings page). Failed attempts are rate limited — eight a minute per client, reserved before the password is checked, so firing guesses in parallel buys nothing — and changing the password invalidates existing sessions. Each session carries an id: signing out ends that one, wherever a copy of its cookie went, and *Sign out everywhere* on the Settings page ends every session issued so far — for the phone that was lost or the browser left signed in. The record lives in `sessions.json` in the data directory, and a sign-out that cannot be written there says so rather than reporting success. The login page shows nothing of the app — no navigation, no unread-alert count — to someone who is not signed in. The cookie is signed with a random key kept beside it in `session-secret`, so a stolen cookie is no help to anyone guessing the password; `APP_SECRET` replaces that key if you would rather set one (make it random, `openssl rand -hex 32`: under sign-in with Google with no password beside it, one shorter than 32 bytes signs nobody in, below). Neither file is in a backup: a restore onto a new machine asks for the password once more. So does upgrading past the point either was introduced, since older sessions are not recognised. The domain apps (`RETRO_GAMES_APP_PASSWORD`, `COMICS_`, `WATCHES_`, `WHISKY_`) have the same limiter and the same 30-day cookie, but keep no `sessions.json` and no `session-secret`: a cookie is signed with the app's `<PREFIX>_APP_SECRET`, or, without one, with a key derived from the password (the log says so, once), so give each a long password or a secret of its own (`openssl rand -hex 32`).
 
-**Sign in with Google.** Beside the password, or in its place, the app can let you in with a Google account: yours, and only the accounts you name. It needs a Google OAuth client of type *Web application* whose authorised redirect URI is the app's address followed by `api/auth/google/callback` (`https://cards.example.com/api/auth/google/callback`), and these variables: `APP_URL`, that address (the site's root, https, or `http://localhost` and `http://127.0.0.1` on this machine), `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and who may sign in: `GOOGLE_ALLOWED_SUBS`, Google's ids for the accounts, and/or `GOOGLE_ALLOWED_EMAILS`, addresses Google says are verified, each a comma- or space-separated list (an address is compared without regard to case). Prefer ids. An id names one Google account for good; an address is only as good as Google's check of it, and only for a `gmail.com` address or one in a Google Workspace domain does Google answer for the address itself: for any other, Google checked it once, when the account was made, and a domain that lapses and is registered again, or a mailbox provider that gives the address to someone else, can put another Google account behind the same verified address. The log names the id of each account let in by its address alone (once per account while the server runs), so the first sign-in tells you the id to move to `GOOGLE_ALLOWED_SUBS`. The login page then offers *Sign in with Google*: the browser goes to Google and comes back to `api/auth/google/callback`, where the app checks the answer — the code flow with PKCE, a state and a nonce held in a short-lived `__Host-` cookie, signed (not encrypted) with a random key the server process makes for itself and never with the key sessions are signed with, since anyone may start a sign-in (one under way when the server restarts goes back to the login page), and Google's signature, issuer, audience, expiry and nonce on the ID token (the shared kit's `google.js`, kept in `packages/core/src/kit`) — and then the list. An account on it gets the same session cookie the password gives, so it lasts 30 days, *Sign out* and *Sign out everywhere* end it, and the login page and the gate treat it alike; anything else lands back on the login page, which says "Sign-in didn't complete." once. The log names Google's id for an account the list turned away, so a first sign-in tells you the number to add; beyond that and the id of an account let in by its address (above), nothing from Google is shown or logged. The callback calls Google at most ten times a minute for one client (counted as the login limiter counts one, below). Setting any `GOOGLE_` variable turns the gate on whether or not the rest holds: until it does, nobody can sign in that way, the login page says it is not fully set up, and the log names what is missing or malformed, never a value — an empty list counts as missing, since it would let in every Google account there is. With no password, sessions are signed with the random key in `session-secret` or an `APP_SECRET` of at least 32 bytes, and never with one derived from nothing: nothing else secret goes into a session's signature then, so a key a person chose could be guessed offline from one cookie and used to sign sessions that *Sign out everywhere* cannot end. Where neither can be had, nobody can sign in and the log says why. Changing who may sign in ends every session, the password's included, as changing the password does (and so does turning sign-in with Google on or off). Google tells the app the account's id and, when it is verified, its address; the app compares them with the list and stores neither for an account it lets in — the session cookie names no one — and writes only an id to the log: of an account it turned away, or of one it let in by its address alone. Sign-in with Google works at `APP_URL` alone: Google returns only there and its cookie is `Secure`, so it needs https (or this machine), and the login page's button goes there from any other name the app answers to; a plain-http home address keeps the password. `APP_URL` and `APP_BASE_URL` (below) are normally the same https address, set twice for two jobs: `APP_BASE_URL`, which both apps read under that one name, tells the app which requests arrived over https (it can stay unset where a trusted proxy says so in `X-Forwarded-Proto`), while `APP_URL` is where Google sends the browser back, so it is the site's root and each app has its own (`SKINS_APP_URL` for skins).
+**Sign in with Google.** Beside the password, or in its place, the app can let you in with a Google account: yours, and only the accounts you name. It needs a Google OAuth client of type *Web application* whose authorised redirect URI is the app's address followed by `api/auth/google/callback` (`https://cards.example.com/api/auth/google/callback`), and these variables: `APP_URL`, that address (the site's root, https, or `http://localhost` and `http://127.0.0.1` on this machine), `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and who may sign in: `GOOGLE_ALLOWED_SUBS`, Google's ids for the accounts, and/or `GOOGLE_ALLOWED_EMAILS`, addresses Google says are verified, each a comma- or space-separated list (an address is compared without regard to case). Prefer ids. An id names one Google account for good; an address is only as good as Google's check of it, and only for a `gmail.com` address or one in a Google Workspace domain does Google answer for the address itself: for any other, Google checked it once, when the account was made, and a domain that lapses and is registered again, or a mailbox provider that gives the address to someone else, can put another Google account behind the same verified address. The log names the id of each account let in by its address alone (once per account while the server runs), so the first sign-in tells you the id to move to `GOOGLE_ALLOWED_SUBS`. The login page then offers *Sign in with Google*: the browser goes to Google and comes back to `api/auth/google/callback`, where the app checks the answer — the code flow with PKCE, a state and a nonce held in a short-lived `__Host-` cookie, signed (not encrypted) with a random key the server process makes for itself and never with the key sessions are signed with, since anyone may start a sign-in (one under way when the server restarts goes back to the login page), and Google's signature, issuer, audience, expiry and nonce on the ID token (the shared kit's `google.js`, kept in `packages/core/src/kit`) — and then the list. An account on it gets the same session cookie the password gives, so it lasts 30 days, *Sign out* and *Sign out everywhere* end it, and the login page and the gate treat it alike; anything else lands back on the login page, which says "Sign-in didn't complete." once. The log names Google's id for an account the list turned away, so a first sign-in tells you the number to add; beyond that and the id of an account let in by its address (above), nothing from Google is shown or logged. The callback calls Google at most ten times a minute for one client (counted as the login limiter counts one, below). Setting any `GOOGLE_` variable turns the gate on whether or not the rest holds: until it does, nobody can sign in that way, the login page says it is not fully set up, and the log names what is missing or malformed, never a value — an empty list counts as missing, since it would let in every Google account there is. With no password, sessions are signed with the random key in `session-secret` or an `APP_SECRET` of at least 32 bytes, and never with one derived from nothing: nothing else secret goes into a session's signature then, so a key a person chose could be guessed offline from one cookie and used to sign sessions that *Sign out everywhere* cannot end. Where neither can be had, nobody can sign in and the log says why. Changing who may sign in ends every session, the password's included, as changing the password does (and so does turning sign-in with Google on or off). Google tells the app the account's id and, when it is verified, its address; the app compares them with the list and stores neither for an account it lets in — the session cookie names no one — and writes only an id to the log: of an account it turned away, or of one it let in by its address alone. Sign-in with Google works at `APP_URL` alone: Google returns only there and its cookie is `Secure`, so it needs https (or this machine), and the login page's button goes there from any other name the app answers to; a plain-http home address keeps the password. `APP_URL` and `APP_BASE_URL` (below) are normally the same https address, set twice for two jobs: `APP_BASE_URL`, which every app reads under that one name, tells the app which requests arrived over https (it can stay unset where a trusted proxy says so in `X-Forwarded-Proto`), while `APP_URL` is where Google sends the browser back, so it is the site's root and each app has its own (`SKINS_APP_URL` for skins).
 
 > Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
 
-**Behind a proxy.** The login limiter and the per-route limits count attempts per client. Without a proxy every client is one client, and the `X-Forwarded-For` header is ignored — anyone can send one. Set `TRUST_PROXY=1` only when a reverse proxy in front of the app sets that header, and it will be read — as will `X-Forwarded-Proto`, which is what lets the session cookie be marked `Secure` and the response carry HSTS when the proxy terminates TLS. Without it, `X-Forwarded-Proto` is believed nowhere: Next writes `https` into the address of any request whose header so much as contains it, from anyone, so the apps read neither. Both are read from the right: proxies append to these headers, so the rightmost entry is what your proxy saw and anything left of it is whatever the client typed; behind more than one proxy, `TRUSTED_PROXY_HOPS` says how many. `COOKIE_SECURE=1` (or `0`) settles the cookie's `Secure` flag outright, for a proxy the app cannot be told about. Compose binds both apps to `127.0.0.1`; put the proxy in front and change the bind address there, since neither app speaks TLS.
+**Behind a proxy.** The login limiter and the per-route limits count attempts per client. Without a proxy every client is one client, and the `X-Forwarded-For` header is ignored — anyone can send one. Set `TRUST_PROXY=1` only when a reverse proxy in front of the app sets that header, and it will be read — as will `X-Forwarded-Proto`, which is what lets the session cookie be marked `Secure` and the response carry HSTS when the proxy terminates TLS. Without it, `X-Forwarded-Proto` is believed nowhere: Next writes `https` into the address of any request whose header so much as contains it, from anyone, so the apps read neither. Both are read from the right: proxies append to these headers, so the rightmost entry is what your proxy saw and anything left of it is whatever the client typed; behind more than one proxy, `TRUSTED_PROXY_HOPS` says how many. `COOKIE_SECURE=1` (or `0`) settles the cookie's `Secure` flag outright, for a proxy the app cannot be told about. These names (`TRUST_PROXY`, `TRUSTED_PROXY_HOPS`, `COOKIE_SECURE`) are each read by all six apps under that one name, so one `.env` gives all of them the same answer; `COOKIE_SECURE=1` in particular makes every app treat every address, `localhost` included, as https and refuse a plain-http write. Compose binds every app to `127.0.0.1`; put the proxy in front and change the bind address there, since no app speaks TLS.
 
-**Host names and other sites.** Whether or not a password is set, each app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` / `.home.arpa` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`, and the proxy has to pass the original `Host` header through. The list replaces those defaults rather than adding to them, so name every way the instance is still reached (`ALLOWED_HOSTS=cards.example.com,192.168.1.20,cardbox.local`); `*` turns the check off. The health route ignores the list, since a container checks itself by address. Requests that a browser sends from anywhere but the app's own origin are refused for anything but a read, so a page you happen to visit cannot restore a backup over your collection or spend your API budget: `Sec-Fetch-Site` must say `same-origin`, and an `Origin` must match scheme, name and port. Behind a proxy that ends TLS, tell the app so — `TRUST_PROXY=1` with `X-Forwarded-Proto`, `APP_BASE_URL=https://…` or `COOKIE_SECURE=1` — or every write from the browser is refused as coming from another origin. `APP_BASE_URL` speaks for the address it names alone, name and port as the proxy passes them in `Host`: the LAN address or name listed beside the domain is reached over plain http, since neither app serves TLS, and keeps working that way. `COOKIE_SECURE=1` says every page is https, so it is for an instance reached only through the proxy. `curl` and scripts, which send no browser origin headers, are unaffected, but a body sent to the JSON API must say `Content-Type: application/json` (a `text/plain` form is something any page can send without asking, and its bytes can parse as JSON), or it is answered 415; a write with neither a body nor a `Content-Type`, such as a `DELETE` or a price refresh from a script, needs no header, and uploads, restores and folder imports stay `multipart/form-data`.
+**Host names and other sites.** Whether or not a password is set, each app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` / `.home.arpa` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`, and the proxy has to pass the original `Host` header through. The list replaces those defaults rather than adding to them, so name every way the instance is still reached (`ALLOWED_HOSTS=cards.example.com,192.168.1.20,cardbox.local`); `*` turns the check off. The health route ignores the list, since a container checks itself by address. Requests that a browser sends from anywhere but the app's own origin are refused for anything but a read, so a page you happen to visit cannot restore a backup over your collection or spend your API budget: `Sec-Fetch-Site` must say `same-origin`, and an `Origin` must match scheme, name and port. Behind a proxy that ends TLS, tell the app so — `TRUST_PROXY=1` with `X-Forwarded-Proto`, `APP_BASE_URL=https://…` or `COOKIE_SECURE=1` — or every write from the browser is refused as coming from another origin. `APP_BASE_URL` speaks for the address it names alone, name and port as the proxy passes them in `Host`: the LAN address or name listed beside the domain is reached over plain http, since no app serves TLS, and keeps working that way. It is one name read by all six apps, so one value in `.env` can name one address, and an app served at another port (or host) is treated as plain http and has its https writes refused; under Compose, give each service its own in `environment:` (Self-hosting, [Testing from a phone](docs/SELF_HOSTING.md#testing-from-a-phone)). `ALLOWED_HOSTS` matches names and not ports, so one list serves them all. `COOKIE_SECURE=1` says every page is https, so it is for an instance reached only through the proxy. `curl` and scripts, which send no browser origin headers, are unaffected, but a body sent to the JSON API must say `Content-Type: application/json` (a `text/plain` form is something any page can send without asking, and its bytes can parse as JSON), or it is answered 415; a write with neither a body nor a `Content-Type`, such as a `DELETE` or a price refresh from a script, needs no header, and uploads, restores and folder imports stay `multipart/form-data`.
 
 **Webhooks.** The alert webhook is posted to by the server itself, so it has to be an address on the public internet: `localhost`, `*.local`, and any private, loopback, link-local or reserved address (carrier-grade NAT, benchmarking, multicast and the like) are refused when saved, a name that resolves to one is refused at delivery, and the request does not follow redirects. The name is resolved once, inside the connection itself, and every address it answers with is checked before the one connected to is used, so a DNS answer that changes between a check and the request cannot point the post at your own network; each delivery opens a connection of its own, and an address carrying a user name or password is refused.
 
-**What every response carries** is in [The website](#the-website) below. `GET /api/health` answers without a session — `{ ok, app, version, database, scheduler: { enabled, running, lastRunAt } }`, and nothing more, since it answers anyone — for a container health check or a proxy. `database` is true only when a query has just run through the live connection: a database file whose restore journal cannot be replayed reports false, with the reason in the log rather than the response, and an install with no database yet reports false without one being created. `ok` means the process answers.
+**What every response carries** is in [The website](#the-website) below. In cards and skins `GET /api/health` answers without a session — `{ ok, app, version, database, scheduler: { enabled, running, lastRunAt } }`, and nothing more, since it answers anyone — for a container health check or a proxy; the four domain apps have no such route. `database` is true only when a query has just run through the live connection: a database file whose restore journal cannot be replayed reports false, with the reason in the log rather than the response, and an install with no database yet reports false without one being created. `ok` means the process answers.
 
-**Limits on the expensive routes.** Identifying a photo (10 a minute), uploading (30), refreshing every price (6), pricing one card (120, since a scan or a bulk refresh sends one per card), reading a folder or a Steam inventory back in (6), importing a spreadsheet (30), downloading a backup or the folder (6), and restoring a backup or putting one back (6) each refuse with a 429 and a `Retry-After` past their limit. They are in memory and per process — protection against a runaway client or a double-clicked button, not a public API's defence. No request body is accepted past 64 MB: each app's proxy makes Next buffer every body, and past its buffer Next would hand a route a body cut short rather than refuse it, so the buffer is set to that and every route's ceiling sits under it. Only one whole-collection price refresh runs at a time, whoever asks: a second is told so with a 409, since the answer it wants is already being produced.
+**Limits on the expensive routes.** In cards and skins, identifying a photo (10 a minute), uploading (30), refreshing every price (6), pricing one card (120, since a scan or a bulk refresh sends one per card), reading a folder or a Steam inventory back in (6), importing a spreadsheet (30), downloading a backup or the folder (6), and restoring a backup or putting one back (6) each refuse with a 429 and a `Retry-After` past their limit. They are in memory and per process — protection against a runaway client or a double-clicked button, not a public API's defence. In cards and skins no request body is accepted past 64 MB: each app's proxy makes Next buffer every body, and past its buffer Next would hand a route a body cut short rather than refuse it, so the buffer is set to that and every route's ceiling sits under it. The domain apps set no such buffer, so Next's default of 10 MB applies to them. Only one whole-collection price refresh runs at a time, whoever asks: a second is told so with a 409, since the answer it wants is already being produced. The domain apps have none of these per-route limits (the sign-in limiter is the only one).
 
 ### The website
 
@@ -338,7 +343,9 @@ reverse proxy in front should pass them through and add no policy of its own —
 two policies on one response are both enforced, and the stricter wins wherever
 they differ. Each app lives at the root of its own origin (its cookies, service
 worker and links all assume `/`), so give each one its own host name or port
-rather than a path on a shared one.
+rather than a path on a shared one. What follows describes cards and skins, whose
+headers are pinned here; the four domain apps are the exception set out at the end of
+the section.
 
 These are the headers each app sends on every response when it is served over
 https. Over plain http (the default on a home network) the same, less
@@ -476,6 +483,19 @@ page needs. `security.txt` expires on 2027-10-08, and each app's
 only routes and each app's `public/` folder are reachable, which the browser
 suite checks address by address.
 
+**The domain apps are the exception.** Retro games, comics, watches and whisky run the
+same `createProxy`, so they refuse a host name they were not deployed under, a browser's
+cross-site write and a JSON write that does not say it is JSON, and send the same
+policy, with `img-src 'self'` and no camera, over http or https as above. But nothing pins
+what they send: there is no block above for them, no `tests/website.test.ts`, no
+`e2e/website.spec.ts`, and their browser specs import `test` from `@playwright/test`. Their
+`proxy.ts` leaves out `/_next/static`, `/_next/image` and `/favicon.ico` from its matcher,
+so those answers carry no header, and their `next.config.ts` sets neither
+`skipTrailingSlashRedirect` (Next's own trailing-slash redirect leaves without headers)
+nor `poweredByHeader: false` (they send `X-Powered-By`) nor a request-body buffer. They
+have no `public/` folder, so no `robots.txt` and no `security.txt`, and they load no
+`/guard.js`. When one of these is added, it belongs here and in `CLAUDE.md`.
+
 ## Development
 
 ```bash
@@ -483,15 +503,17 @@ npm run dev               # the card app's development server (npm run skins for
 npm run check             # lint, typecheck, unit tests and the conventions test: the gate before a push
 npm run build             # production build of every workspace
 npm start                 # the card app from its build; npm run start:skins for the other
-npm test                  # unit tests (vitest), every workspace
-npm run test:e2e          # builds both apps, then both end-to-end suites (playwright; each boots its own servers and cleans up after)
+npm test                  # unit tests (vitest), every workspace; core's also runs the sign-in kit's self-test
+npm run test:e2e          # builds every app, then each end-to-end suite: cards, skins, retro-games, comics, whisky (playwright; each boots its own servers and cleans up after; watches has none)
 npm run test:all          # unit tests, then the end-to-end suites
 npm run test:conventions  # the repository's shape against CONVENTIONS.md
 npm run typecheck         # tsc in every workspace, after generating Next route types
 npm run lint              # eslint in every workspace, the shared package included
 ```
 
-`npm run e2e` is kept as another name for `npm run test:e2e`, which builds first.
+`npm run e2e` is kept as another name for `npm run test:e2e`, which builds first. The
+suites use fixed ports, three or four each: 3210–3211 for cards, 3220–3223 for skins,
+3230–3232 for whisky, 3240–3242 for retro games and 3250–3252 for comics.
 
 The four apps on the domain engine each have a root shortcut for their
 development server: `npm run retro-games` (port 3002), `npm run comics` (3003),
@@ -507,8 +529,8 @@ Node 22 or later; `.nvmrc` says so for version managers and `engines` for npm,
 which warns under an older one. `CONTRIBUTING.md` has the checks a change is
 expected to pass. CI runs on every push, on pull requests, by hand and weekly:
 one `check` job runs lint, typecheck, the unit tests, the conventions test,
-both builds and both end-to-end suites; a `docker` job builds both images,
-boots each and asks it how it is; and an `audit` job runs the shared gate,
+the build of every app and every end-to-end suite (`npm run test:e2e`); a `docker` job
+builds the cards and skins images, boots each and asks it how it is; and an `audit` job runs the shared gate,
 `node .github/audit/npm-audit.mjs`: `npm audit --omit=dev` against the
 lockfile, red on every high or critical advisory that
 `.github/audit/accepted.json` does not accept (this repository keeps no such
@@ -525,9 +547,11 @@ submissions, alert rules, and the gate: the password, and sign-in with Google
 against a fake Google (`scripts/fake-google.mjs`: its own RSA key, token
 endpoint and consent screen) handed to the routes in place of `fetch`, with
 the kit's own self-test (`packages/core/src/kit/selftest.mjs`) run by
-`npm test`.
+`npm test`; and, for the domain engine, its repository, ledger, routes, pricing, CSV,
+Markdown and `AppShell` (`packages/core/tests`) and each of its four apps' spec, merge rule
+and price adapter.
 
-The end-to-end suite drives a real production build in Chromium against a
+The cards and skins end-to-end suites drive a real production build in Chromium against a
 throwaway data directory. Identification is intercepted in the browser, and the
 servers under test are started with no network at all (`scripts/e2e-offline.mjs`),
 so a price lookup made on the server fails at once and says so; the tests never
@@ -539,7 +563,7 @@ sign-in with Google beside it (cards) and on its own (skins). Google's half of
 a sign-in is played the same way: its sign-in page by the test, answered at the
 protocol with a redirect back to the app, and its token endpoint and keys by
 the fake that `scripts/e2e-google.mjs` puts in front of the server's `fetch`.
-Every spec imports its `test` from `e2e/fixtures.ts` (each app's
+Every cards and skins spec imports its `test` from `e2e/fixtures.ts` (those apps'
 `tests/website.test.ts` fails on one that does not), so any page a test drives,
 in a browser context of the test's own making too, fails it on a content
 security policy violation, an uncaught exception or a request that leaves the
@@ -549,11 +573,23 @@ tests whose pages break them on purpose. `e2e/website.spec.ts` drives each app's
 main flow and starts every page it has, holding every response to the README's
 headers (see [The website](#the-website)).
 
-The type checker runs strict, with `noUncheckedIndexedAccess` on in every
-workspace: an element read out of an array or a table is `undefined` until the
-code has said what happens when it is not there. Every such read is narrowed
-rather than asserted — a `!` that turned out to be wrong is exactly the kind
-of silent wrong number this app exists to avoid.
+The retro-games, comics and whisky suites drive their app's production build in
+Chromium too, on three servers each (a seeded collection that is only read, an empty one
+that is written to, and one behind a password), each with a throwaway data directory:
+the engine's pages (portfolio, collection, an item, adding by hand and, in retro games and
+whisky, the report and the spreadsheet import), the gate, and the theme and palette. They start the servers with `npm start` and do not cut their
+network (`scripts/e2e-offline.mjs`) or hold their pages to the content security policy: the
+rules in the paragraph above are cards' and skins'.
+
+The type checker runs strict, with `noUncheckedIndexedAccess` on in cards, skins and
+everything in `packages/core` but the domain engine: an element read out of an array or a
+table is `undefined` until the code has said what happens when it is not there. Every such
+read is narrowed rather than asserted — a `!` that turned out to be wrong is exactly the
+kind of silent wrong number this app exists to avoid. The domain engine (the folders and
+files `packages/core/tsconfig.domain.json` lists), the four apps built on it and the
+`create-domain` template have the flag off, because they came from a branch written before
+it was required, and `npm run test:conventions` fails on that one check until they are
+narrowed.
 
 ## Project layout
 
@@ -585,7 +621,7 @@ kit/                     The shared sign-in kit, copied byte for byte and never 
 sessions.ts              Ended sessions, kept in one small file beside the data
 proxy.ts                 The per-request gate: request-guard.ts, session check, CSP nonce, security headers
 forwarded.ts             Which X-Forwarded-* entry may be believed: the one a trusted proxy wrote
-limits.ts                The largest request body either app accepts, and the proxy buffer set from it
+limits.ts                The largest request body cards and skins accept, and the proxy buffer set from it
 restore-validation.ts    What a restored database may carry: no foreign triggers or views, the app's own indexes
 request-guard.ts         The host list, the cross-site write check and the JSON rule, ahead of the password
 net.ts, http.ts          What may be a webhook, whether a request came over TLS; route helpers
@@ -600,9 +636,9 @@ lookup.ts, series.ts     Prototype-safe table lookup; extent and thinning for lo
 appearance.ts            Light, dark or system and the palette: stored, applied, kept in step across tabs
 family-theme.css         The eight palettes' grounds, panels and accents, and the header's palette menu
 manifest.ts, service-worker.ts
-                         The installable app shell both apps share; each app only names itself
-guard.ts                 The safety net every page loads first, served at /guard.js
-charts/, components/     Chart geometry and the components both apps draw with, including the
+                         The installable app shell cards and skins share; each only names itself
+guard.ts                 The safety net every cards and skins page loads first, served at /guard.js
+charts/, components/     Chart geometry and the components the apps draw with, including the
                          not-found, error and offline pages, the service worker registration,
                          the safety net's Started signal and the no-JavaScript note
 domain/                  The domain engine the four newer apps run on: from an app's spec, its

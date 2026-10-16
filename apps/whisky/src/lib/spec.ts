@@ -88,7 +88,7 @@ export const spec: DomainSpec<Bottle, BottleSettings, SimpleExtras, BottleQuery>
     // Manual pricing is deliberate — this app is frozen as a manual-pricing engine-validation app with no market source planned.
     // If it ever graduates, a provider would only be added behind this existing PriceProvider slot; the query already carries distillery, expression, age, vintage, bottling year and size.
     // No provider is planned while frozen.
-    providers: [manualProvider("No auction source is wired up yet. Type what a sealed bottle is worth, and enter past hammer prices with dates so the chart has a line to draw.")],
+    providers: [manualProvider("No auction source is wired up. Type what a sealed bottle is worth, and enter past hammer prices with dates so the chart has a line to draw.")],
     query: (b) => ({ distillery: b.distillery, expression: b.expression, ageStatement: b.ageStatement, vintage: b.vintage, bottlingYear: b.bottlingYear, bottleSize: b.bottleSize }),
     summarize: ({ item, quotes, errors, fetchedAt }) => summarizeSimple({ item, quotes, errors, fetchedAt, priority: [] }),
     describe: (s) => (s.market === null ? "" : `${s.marketSource}: ${money(s.market)}`),

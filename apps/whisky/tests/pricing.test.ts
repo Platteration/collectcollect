@@ -7,6 +7,9 @@ describe("pricing a bottle", () => {
   it("has a manual-entry source and nothing else", () => {
     expect(spec.pricing.providers.map((p) => p.id)).toEqual(["manual"]);
     expect(engine.statuses().find((s) => s.id === "manual")?.note).toMatch(/hammer prices/);
+    // No source is planned, so the note must not promise one is coming.
+    expect(engine.statuses().find((s) => s.id === "manual")?.note).toMatch(/^No auction source is wired up\. /);
+    expect(engine.statuses().find((s) => s.id === "manual")?.note).not.toMatch(/\byet\b/i);
   });
 
   it("values a sealed bottle at what the owner said, and draws the chart from dated entries", async () => {
