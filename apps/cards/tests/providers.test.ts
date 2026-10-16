@@ -5,6 +5,7 @@ import { ygoprodeckProvider } from "@/lib/pricing/providers/ygoprodeck";
 import { scryfallProvider } from "@/lib/pricing/providers/scryfall";
 import { buildSearch, priceChartingProvider, productToQuote, scoreProduct, setPriceChartingLimit, type PcProduct } from "@/lib/pricing/providers/pricecharting";
 import { NO_LIMIT, rateLimit } from "@collectcollect/core/limiter";
+import { cardToQuery, queryParallel } from "@/lib/pricing/index";
 
 describe("Pokémon TCG provider", () => {
   it("builds a name+number query", () => {
@@ -296,6 +297,71 @@ describe("what a provider refuses to call a match", () => {
         ["pricecharting.com", { status: "success", products: [{ id: "9", "product-name": "Holo Rare Wall Poster", "console-name": "Pokemon Promo", "loose-price": 500 }] }],
       ]);
       expect(await priceChartingProvider.lookup({ game: "pokemon", name: "Charizard Holo", setName: "Base Set" }, fetchImpl)).toEqual([]);
+    } finally {
+      delete process.env.PRICECHARTING_TOKEN;
+    }
+  });
+});
+
+describe("sports card searches", () => {
+  const trout = { game: "sports", name: "Mike Trout", cardNumber: "US175", setName: "Topps Update", year: 2011 } as const;
+
+  it("puts the parallel, the autograph and the relic into the PriceCharting search", () => {
+    const query = cardToQuery({
+      game: "sports",
+      name: "Mike Trout",
+      sport: "baseball",
+      setName: "Topps Chrome",
+      setCode: null,
+      cardNumber: "US175",
+      year: 2011,
+      variant: null,
+      manufacturer: "Topps",
+      parallel: "Gold Refractor",
+      autograph: true,
+      relic: false,
+      externalIds: {},
+    });
+    expect(query.parallel).toBe("Gold Refractor Auto");
+    expect(buildSearch(query)).toBe("2011 Topps Chrome Mike Trout #US175 Gold Refractor Auto");
+    // A base card without any of that searches as before.
+    expect(cardToQuery({ game: "sports", name: "Mike Trout", sport: null, setName: null, setCode: null, cardNumber: null, year: null, variant: null, manufacturer: null, externalIds: {} }).parallel).toBeNull();
+    expect(queryParallel({ parallel: "  ", autograph: false, relic: null })).toBeNull();
+    expect(queryParallel({ parallel: null, autograph: true, relic: true })).toBe("Auto Relic");
+  });
+
+  it("leaves a trading card's search alone", () => {
+    expect(buildSearch({ game: "pokemon", name: "Charizard", cardNumber: "4/102", setName: "Base Set", parallel: "Reverse" })).toBe("Charizard #4 Base Set");
+  });
+
+  it("ranks the listing that names the parallel above the base card when the copy is one", () => {
+    const base = { id: "1", "product-name": "Mike Trout #US175", "console-name": "2011 Topps Update", "loose-price": 5000 };
+    const gold = { id: "2", "product-name": "Mike Trout #US175 [Gold Refractor]", "console-name": "2011 Topps Update", "loose-price": 90000 };
+    const plain = { ...trout };
+    expect(scoreProduct(plain, base)).toBeGreaterThan(scoreProduct(plain, gold));
+    const withParallel = { ...plain, parallel: "Gold Refractor" };
+    expect(scoreProduct(withParallel, gold)).toBeGreaterThan(scoreProduct(withParallel, base));
+    // The colour counts on its own: for a Gold Refractor, the Gold listing outranks a Blue Refractor's.
+    const blue = { id: "3", "product-name": "Mike Trout #US175 [Blue Refractor]", "console-name": "2011 Topps Update", "loose-price": 30000 };
+    expect(scoreProduct(withParallel, gold)).toBeGreaterThan(scoreProduct(withParallel, blue));
+  });
+
+  it("asks PriceCharting for the parallel and takes the listing that names it", async () => {
+    process.env.PRICECHARTING_TOKEN = "t";
+    setPriceChartingLimit(NO_LIMIT);
+    try {
+      const products: PcProduct[] = [
+        { id: "1", "product-name": "Mike Trout #US175", "console-name": "Baseball Cards 2011 Topps Update", "loose-price": 5000 },
+        { id: "2", "product-name": "Mike Trout #US175 [Gold Refractor]", "console-name": "Baseball Cards 2011 Topps Update", "loose-price": 90000, "manual-only-price": 400000 },
+      ];
+      const fetchImpl = fakeFetch([["api/products", { status: "success", products }]]);
+      const quotes = await priceChartingProvider.lookup(cardToQuery({ ...trout, sport: "baseball", setCode: null, variant: null, manufacturer: "Topps", parallel: "Gold Refractor", externalIds: {} }), fetchImpl);
+      expect(quotes[0]).toMatchObject({ externalId: "2", ungraded: 900, graded: { "PSA 10": 4000 } });
+      const asked = decodeURIComponent(String((fetchImpl as unknown as { mock: { calls: Array<[string]> } }).mock.calls[0]?.[0]));
+      expect(asked).toContain("Gold Refractor");
+      // The same player's base card, asked for without a parallel, is the base listing.
+      const base = await priceChartingProvider.lookup(cardToQuery({ ...trout, sport: "baseball", setCode: null, variant: null, manufacturer: "Topps", externalIds: {} }), fetchImpl);
+      expect(base[0]).toMatchObject({ externalId: "1", ungraded: 50 });
     } finally {
       delete process.env.PRICECHARTING_TOKEN;
     }

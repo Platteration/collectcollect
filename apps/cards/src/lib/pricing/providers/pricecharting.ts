@@ -90,6 +90,9 @@ export function buildSearch(q: CardQuery): string {
     if (q.setName) parts.push(q.setName);
     parts.push(q.name);
     if (num) parts.push(`#${num}`);
+    // A named parallel is its own product on PriceCharting ("Gold Refractor"),
+    // and so are an autograph and a relic: they go into the search.
+    if (q.parallel) parts.push(q.parallel);
   } else {
     parts.push(q.name);
     if (num) parts.push(`#${num}`);
@@ -120,12 +123,16 @@ export function scoreProduct(q: CardQuery, p: PcProduct): number {
   if (q.manufacturer) score += tokenOverlap(q.manufacturer, console);
   const consoleTokens = new Set(tokens(console));
   if (CATEGORY_HINTS[q.game].some((h) => consoleTokens.has(h) || console.toLowerCase().includes(h))) score += 1;
-  const v = (q.variant ?? "").toLowerCase();
+  const v = `${q.variant ?? ""} ${q.parallel ?? ""}`.toLowerCase();
   const pn = productName.toLowerCase();
   for (const kw of ["reverse", "holo", "1st edition", "shadowless", "refractor", "auto", "foil", "parallel"]) {
     if (v.includes(kw) && pn.includes(kw)) score += 0.5;
     if (!v.includes(kw) && pn.includes(kw) && kw !== "holo") score -= 0.5;
   }
+  // The parallel's own words ("gold", "prizm") count for each one the listing
+  // names, so the listing of the parallel outranks the base card when the copy is one.
+  const named = new Set(tokens(productName));
+  for (const word of tokens(q.parallel)) if (named.has(word)) score += 0.5;
   return score;
 }
 

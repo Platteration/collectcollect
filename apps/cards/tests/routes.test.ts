@@ -620,4 +620,36 @@ describe("what the routes do with a sports card", () => {
     expect(refractor.ids).toHaveLength(1);
     expect(refractor.ids).not.toContain(base.id);
   });
+
+  it("prices a card that is not saved yet with its parallel, autograph and relic in the search", async () => {
+    vi.stubEnv("PRICECHARTING_TOKEN", "t");
+    const { fakeFetch } = await import("./helpers");
+    const { NO_LIMIT } = await import("@collectcollect/core/limiter");
+    const { setPriceChartingLimit } = await import("@/lib/pricing/providers/pricecharting");
+    setPriceChartingLimit(NO_LIMIT);
+    const fetchImpl = fakeFetch([
+      [
+        "api/products",
+        {
+          status: "success",
+          products: [
+            { id: "1", "product-name": "Mike Trout #US175", "console-name": "Baseball Cards 2011 Topps Chrome", "loose-price": 5000 },
+            { id: "2", "product-name": "Mike Trout #US175 [Gold Refractor] [Autographed]", "console-name": "Baseball Cards 2011 Topps Chrome", "loose-price": 90000 },
+          ],
+        },
+      ],
+    ]);
+    vi.stubGlobal("fetch", fetchImpl);
+    const { POST } = await import("@/app/api/prices/lookup/route");
+    const res = await POST(json("http://localhost/api/prices/lookup", "POST", { ...trout, manufacturer: "Topps", parallel: "Gold Refractor", autograph: true, relic: false }));
+    expect(res.status).toBe(200);
+    const { summary } = await read<{ summary: { quotes: Array<{ externalId?: string }> } }>(res);
+    expect(summary.quotes[0]?.externalId).toBe("2");
+    const asked = decodeURIComponent(String((fetchImpl as unknown as { mock: { calls: Array<[string]> } }).mock.calls[0]?.[0]));
+    expect(asked).toContain("Mike Trout #US175 Gold Refractor Auto");
+    // A parallel that is not text, and a flag that is not a flag, are not put into a search.
+    const odd = await POST(json("http://localhost/api/prices/lookup", "POST", { ...trout, parallel: { toString: "x" }, autograph: "true", relic: 1 }));
+    expect(odd.status).toBe(200);
+    expect(decodeURIComponent(String((fetchImpl as unknown as { mock: { calls: Array<[string]> } }).mock.calls[1]?.[0]))).not.toMatch(/Auto|Relic|object/);
+  });
 });
