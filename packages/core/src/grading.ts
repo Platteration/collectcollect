@@ -8,13 +8,12 @@ import { extent } from "./series";
  * reasoning: how much a graded outcome would add over what the copy is worth
  * today, whether that gap is at its widest, and whether it clears the fee.
  *
- * The card app keeps its own version of the verdict (gradingVerdict and
- * isReadyToGrade in apps/cards/src/lib/analytics.ts), which also reads a
- * measured centering and records where each price came from. What is shared
- * is the rule that decides the verdict, and a change to one is made to the
- * other: a verdict reads one price per day, needs three days of them, and
- * says "recorded" because it compares what was recorded here and predicts
- * nothing.
+ * The card app keeps its own version (gradingVerdict and isReadyToGrade in
+ * apps/cards/src/lib/analytics.ts), which also reads a measured centering and
+ * records where each price came from. The rule that decides the verdict is the
+ * same in both, and a change to it is made to both: one price a day, three
+ * days before timing is judged, and wording that compares what was recorded
+ * and predicts nothing.
  *
  * It works on any summary that carries an ungraded price, real graded prices
  * keyed by grade, and estimated graded prices keyed the same way.
