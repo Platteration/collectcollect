@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createCard, findSimilar, latestSnapshotsByCard, listCards } from "@/lib/cards";
+import { createCard, findSimilar, latestSnapshotsByCard, listCards, mayShareRow } from "@/lib/cards";
 import { errorMessage, jsonError } from "@/lib/http";
 import { BodyLimitError, readJsonLimited } from "@collectcollect/core/http";
 import type { CardInput } from "@/lib/types";
@@ -12,8 +12,11 @@ export async function GET(request: Request) {
     if (!isGame(game)) return jsonError("Unknown game");
     const name = url.searchParams.get("name") ?? "";
     if (!name.trim()) return NextResponse.json({ cards: [] });
+    // A numbered card, and a different parallel, are not the same card again, so
+    // a form that names one asks for the cards this copy could be added to.
+    const incoming = { serialNumber: url.searchParams.get("serial"), parallel: url.searchParams.get("parallel") };
     return NextResponse.json({
-      cards: findSimilar({ game, name, cardNumber: url.searchParams.get("number"), setName: url.searchParams.get("set") }),
+      cards: findSimilar({ game, name, cardNumber: url.searchParams.get("number"), setName: url.searchParams.get("set") }).filter((c) => mayShareRow(c, incoming)),
     });
   }
   // A filter that names no game is refused rather than ignored: a list of

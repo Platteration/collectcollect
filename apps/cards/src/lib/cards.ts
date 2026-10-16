@@ -9,7 +9,7 @@ import type {
   PriceSummary,
   Settings,
 } from "./types";
-import { CONDITIONS, GAMES, GRADING_STATUSES, MAX_MONEY, isCondition, isGame, MAX_QUANTITY, type Centering, type GradingReport, type GradingStatus } from "./types";
+import { CONDITIONS, GAMES, GRADING_STATUSES, MAX_MONEY, cleanSubgrades, flag, isCondition, isGame, MAX_QUANTITY, serial, type Centering, type GradingReport, type GradingStatus, type Subgrades } from "./types";
 import { readCentering, readGradingReport } from "./grading/schema";
 import { addLot, costBasisByCard, deleteLot, getLot, listLots, reconcileToQuantity, recomputePurchasePrice, type AcquisitionInput } from "./acquisitions";
 import { IdentificationSchema } from "./identify/schema";
@@ -35,11 +35,18 @@ export interface CardRow {
   variant: string | null;
   language: string | null;
   manufacturer: string | null;
+  team: string | null;
+  rookie: number;
+  parallel: string | null;
+  serial_number: string | null;
+  autograph: number;
+  relic: number;
   quantity: number;
   condition: string;
   grading_company: string | null;
   grade: string | null;
   cert_number: string | null;
+  subgrades: string | null;
   centering: string | null;
   grading_report: string | null;
   purchase_price: number | null;
@@ -104,11 +111,19 @@ export function rowToCard(row: CardRow): CardRecord {
     variant: row.variant,
     language: row.language,
     manufacturer: row.manufacturer,
+    team: row.team,
+    // A flag is 1 or nothing: a restored row can hold anything in the column.
+    rookie: row.rookie === 1,
+    parallel: row.parallel,
+    serialNumber: serial(row.serial_number),
+    autograph: row.autograph === 1,
+    relic: row.relic === 1,
     quantity: row.quantity,
     condition: isCondition(row.condition) ? row.condition : "NM",
     gradingCompany: row.grading_company,
     grade: row.grade,
     certNumber: row.cert_number,
+    subgrades: readStored<Subgrades>(row.subgrades, cleanSubgrades),
     centering: readStored<Centering>(row.centering, readCentering),
     gradingReport: readStored<GradingReport>(row.grading_report, readGradingReport),
     purchasePrice: row.purchase_price,
@@ -213,6 +228,10 @@ const StoredIdentification = IdentificationSchema.partial().extend({
   // Partial inside too: an identification made before a field such as
   // centering_ratios existed is still a real one.
   grading: IdentificationSchema.shape.grading.partial().optional(),
+  // The sports flags came later: absent, or null, in an older identification.
+  rookie: IdentificationSchema.shape.rookie.nullish(),
+  autograph: IdentificationSchema.shape.autograph.nullish(),
+  relic: IdentificationSchema.shape.relic.nullish(),
   condition_assessment: IdentificationSchema.shape.condition_assessment.partial().nullish(),
 });
 
@@ -255,11 +274,18 @@ export function normalizeInput(input: CardInput): Required<
     variant: str(input.variant),
     language: str(input.language),
     manufacturer: str(input.manufacturer),
+    team: str(input.team),
+    rookie: flag(input.rookie),
+    parallel: str(input.parallel),
+    serialNumber: serial(input.serialNumber),
+    autograph: flag(input.autograph),
+    relic: flag(input.relic),
     quantity,
     condition,
     gradingCompany: str(input.gradingCompany),
     grade: str(input.grade),
     certNumber: str(input.certNumber),
+    subgrades: cleanSubgrades(input.subgrades),
     // Both readers throw with a reason, as a bad quantity does, so a malformed
     // ratio or report is refused at the door rather than stored and shown.
     centering: readCentering(input.centering),
@@ -333,17 +359,23 @@ export function createCard(input: CardInput): CardRecord {
       // the key for the writers, for findSimilar and for the backfill, so the
       // stored value and the value looked up cannot fold differently.
       `INSERT INTO cards (game, sport, name, name_key, set_name, set_code, card_number, year, rarity, variant,
-        language, manufacturer, quantity, condition, grading_company, grade, cert_number, centering, grading_report, purchase_price,
+        language, manufacturer, team, rookie, parallel, serial_number, autograph, relic, subgrades,
+        quantity, condition, grading_company, grade, cert_number, centering, grading_report, purchase_price,
         notes, image_path, reference_image_url, accent_color, location, external_ids, identification, manual_ungraded, manual_graded,
         grading_status, created_at, updated_at)
        VALUES (@game, @sport, @name, @nameKey, @setName, @setCode, @cardNumber, @year, @rarity, @variant,
-        @language, @manufacturer, @quantity, @condition, @gradingCompany, @grade, @certNumber, @centering, @gradingReport, @purchasePrice,
+        @language, @manufacturer, @team, @rookie, @parallel, @serialNumber, @autograph, @relic, @subgrades,
+        @quantity, @condition, @gradingCompany, @grade, @certNumber, @centering, @gradingReport, @purchasePrice,
         @notes, @imagePath, @referenceImageUrl, @accentColor, @location, @externalIds, @identification, @manualUngraded, @manualGraded,
         @gradingStatus, @now, @now)`,
     )
     .run({
       ...c,
       nameKey: nameKey(c.name),
+      rookie: c.rookie ? 1 : 0,
+      autograph: c.autograph ? 1 : 0,
+      relic: c.relic ? 1 : 0,
+      subgrades: c.subgrades ? JSON.stringify(c.subgrades) : null,
       centering: c.centering ? JSON.stringify(c.centering) : null,
       gradingReport: c.gradingReport ? JSON.stringify(c.gradingReport) : null,
       externalIds: JSON.stringify(c.externalIds),
@@ -383,7 +415,9 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
       .prepare(
         `UPDATE cards SET game=@game, sport=@sport, name=@name, name_key=@nameKey, set_name=@setName, set_code=@setCode,
           card_number=@cardNumber, year=@year, rarity=@rarity, variant=@variant, language=@language,
-          manufacturer=@manufacturer, quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
+          manufacturer=@manufacturer, team=@team, rookie=@rookie, parallel=@parallel, serial_number=@serialNumber,
+          autograph=@autograph, relic=@relic, subgrades=@subgrades,
+          quantity=@quantity, condition=@condition, grading_company=@gradingCompany,
           grade=@grade, cert_number=@certNumber, centering=@centering, grading_report=@gradingReport, purchase_price=@purchasePrice, notes=@notes, image_path=@imagePath,
           reference_image_url=@referenceImageUrl, accent_color=@accentColor, location=@location, external_ids=@externalIds, identification=@identification,
           manual_ungraded=@manualUngraded, manual_graded=@manualGraded, grading_status=@gradingStatus, updated_at=@now
@@ -393,6 +427,10 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
         ...merged,
         id,
         nameKey: nameKey(merged.name),
+        rookie: merged.rookie ? 1 : 0,
+        autograph: merged.autograph ? 1 : 0,
+        relic: merged.relic ? 1 : 0,
+        subgrades: merged.subgrades ? JSON.stringify(merged.subgrades) : null,
         centering: merged.centering ? JSON.stringify(merged.centering) : null,
         gradingReport: merged.gradingReport ? JSON.stringify(merged.gradingReport) : null,
         externalIds: JSON.stringify(merged.externalIds),
@@ -445,8 +483,12 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
   return card;
 }
 
-/** The fields that say which product a card is, as the price sources are asked about it. */
-const IDENTITY_FIELDS = ["game", "name", "sport", "setName", "setCode", "cardNumber", "year", "variant", "manufacturer", "language"] as const;
+/**
+ * The fields that say which product a card is, as the price sources are asked
+ * about it. A parallel, an autograph and a relic are each their own listing at
+ * a price guide, and cardToQuery puts all three into the search.
+ */
+const IDENTITY_FIELDS = ["game", "name", "sport", "setName", "setCode", "cardNumber", "year", "variant", "manufacturer", "language", "parallel", "autograph", "relic"] as const;
 
 /** The fields that change what the owner's copy is worth without a new lookup. */
 const REVALUING_FIELDS = ["grade", "gradingCompany", "condition", "manualUngraded", "manualGraded"] as const;
@@ -484,6 +526,26 @@ export function interchangeable(
 ): boolean {
   const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
   return (["grade", "gradingCompany", "certNumber", "variant", "language", "condition"] as const).every((f) => norm(a[f]) === norm(b[f]));
+}
+
+/** A parallel's name as it is compared: case, spacing and the ends do not make a different one. */
+export function parallelKey(v: unknown): string {
+  return String(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Whether a copy may share a row with a card already held, on what a sports
+ * card adds to `interchangeable`: a serial-numbered card is one specific object
+ * ("12/99" names it), so it is never folded into another card and nothing is
+ * folded into it, and a parallel is its own card, valued on its own, so a
+ * base card and its Refractor are two rows. Base copies — no number, no
+ * parallel — stack as they always did.
+ */
+export function mayShareRow(
+  existing: Pick<CardRecord, "serialNumber" | "parallel">,
+  incoming: { serialNumber?: unknown; parallel?: unknown },
+): boolean {
+  return !serial(existing.serialNumber) && !serial(incoming.serialNumber) && parallelKey(existing.parallel) === parallelKey(incoming.parallel);
 }
 
 /**
@@ -682,7 +744,9 @@ export type IntakeOutcome =
  *
  * A match only counts when the copies are interchangeable: both ungraded, or
  * graded by the same company to the same grade. A raw scan must never be
- * folded into a slab, since it would then be valued as a graded copy.
+ * folded into a slab, since it would then be valued as a graded copy. A
+ * serial-numbered card is never merged and never merged into, and a parallel
+ * only stacks with the same parallel (mayShareRow).
  */
 export function intakeCard(input: CardInput): IntakeOutcome {
   try {
@@ -705,12 +769,17 @@ export function intakeCard(input: CardInput): IntakeOutcome {
 export function intakeCardWithin(input: CardInput): IntakeOutcome {
   const clean = normalizeInput(input);
   const run = getDb().transaction((): IntakeOutcome => {
+    // A numbered card is one specific object: it is its own card, whatever else
+    // is held that looks like it.
+    if (clean.serialNumber) return { result: "created", card: createCard(input) };
+    // Numbered cards and other parallels are not candidates at all, so they
+    // neither merge with this copy nor make the match ambiguous.
     const candidates = findSimilar({
       game: clean.game,
       name: clean.name,
       cardNumber: clean.cardNumber,
       setName: clean.setName,
-    });
+    }).filter((c) => mayShareRow(c, clean));
     const alike = candidates.filter((c) => interchangeable(c, clean));
     if (candidates.length > 0 && alike.length !== 1) {
       return { result: "ambiguous", candidates };

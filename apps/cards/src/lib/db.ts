@@ -152,6 +152,15 @@ const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   // stored rather than computed so the lookup is an index probe, and so the key
   // is folded by one function in one language.
   { table: "cards", column: "name_key", ddl: "ALTER TABLE cards ADD COLUMN name_key TEXT" },
+  // Sports cards: the team, the rookie flag, the parallel, the serial numbering,
+  // the autograph and relic flags, and the four grades a BGS label prints (JSON).
+  { table: "cards", column: "team", ddl: "ALTER TABLE cards ADD COLUMN team TEXT" },
+  { table: "cards", column: "rookie", ddl: "ALTER TABLE cards ADD COLUMN rookie INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "parallel", ddl: "ALTER TABLE cards ADD COLUMN parallel TEXT" },
+  { table: "cards", column: "serial_number", ddl: "ALTER TABLE cards ADD COLUMN serial_number TEXT" },
+  { table: "cards", column: "autograph", ddl: "ALTER TABLE cards ADD COLUMN autograph INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "relic", ddl: "ALTER TABLE cards ADD COLUMN relic INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "subgrades", ddl: "ALTER TABLE cards ADD COLUMN subgrades TEXT" },
 ];
 
 /**

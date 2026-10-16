@@ -1,8 +1,8 @@
 import { reconcileToQuantity, recomputePurchasePrice } from "../acquisitions";
 import { MAX_REQUEST_BYTES } from "@collectcollect/core/limits";
-import { createCard, discardDeferredMirror, findSimilar, getCard, updateCard } from "../cards";
+import { createCard, discardDeferredMirror, findSimilar, getCard, parallelKey, updateCard } from "../cards";
 import { getDb } from "../db";
-import type { CardInput, CardRecord } from "../types";
+import { serial, type CardInput, type CardRecord } from "../types";
 import { isSafeEntryName, readZip } from "@collectcollect/core/zip";
 import { parseCardMarkdown, type ParsedCard } from "./card";
 import { mirrorCard, readCardFiles } from "./mirror";
@@ -266,7 +266,9 @@ function norm(value: string | null | undefined): string {
  * different money, with different histories, and so are two slabs with two
  * cert numbers. Scanning already refuses to fold one into the other; a
  * recovery tool, where being wrong costs the history rather than a quantity,
- * has no business being more permissive.
+ * has no business being more permissive. The same goes for a sports card's
+ * parallel and its serial number: a Refractor is not the base card, and "12/99"
+ * is not "13/99".
  */
 function isSameCard(existing: CardRecord, input: CardInput): boolean {
   if (norm(existing.name) !== norm(input.name)) return false;
@@ -276,7 +278,9 @@ function isSameCard(existing: CardRecord, input: CardInput): boolean {
   return (
     norm(existing.grade) === norm(input.grade ?? null) &&
     norm(existing.gradingCompany) === norm(input.gradingCompany ?? null) &&
-    norm(existing.certNumber) === norm(input.certNumber ?? null)
+    norm(existing.certNumber) === norm(input.certNumber ?? null) &&
+    parallelKey(existing.parallel) === parallelKey(input.parallel) &&
+    (existing.serialNumber ?? "") === (serial(input.serialNumber) ?? "")
   );
 }
 
