@@ -28,6 +28,25 @@ describe("the generic routes", () => {
     expect(engine.repo.listItems()).toHaveLength(0);
   });
 
+  it("finds no item, purchase, sale or alert when the handler is given no route context", async () => {
+    engine.repo.createItem({ name: "Gizmo" });
+    const bare = new Request("http://x");
+    const answers = await Promise.all([
+      routes.item.GET(bare),
+      routes.item.PATCH(json("http://x", "PATCH", { location: "Shelf" })),
+      routes.item.DELETE(bare),
+      routes.itemPrices.GET(bare),
+      routes.itemSales.GET(bare),
+      routes.itemAcquisitions.GET(bare),
+      routes.lot.GET(bare),
+      routes.lot.DELETE(bare),
+      routes.sale.DELETE(bare),
+      routes.alert.DELETE(bare),
+    ]);
+    expect(answers.map((res) => res.status)).toEqual(answers.map(() => 404));
+    expect(engine.repo.listItems()).toHaveLength(1);
+  });
+
   it("filters the list from the query string", async () => {
     engine.repo.createItem({ name: "A", kind: "gizmo", location: "Shelf" });
     engine.repo.createItem({ name: "B", kind: "gadget" });

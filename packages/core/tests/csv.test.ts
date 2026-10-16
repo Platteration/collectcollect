@@ -16,6 +16,20 @@ describe("importing a spreadsheet", () => {
     expect(preview.rows[0]?.input).toMatchObject({ name: "Gizmo", maker: "Acme", kind: "gizmo", quantity: 2, purchasePrice: 12.5 });
   });
 
+  it("reads nothing from an empty file or one with only blank lines, and counts lines from the top", () => {
+    expect(engine.csv.previewImport("")).toEqual({ mapping: {}, unmapped: [], rows: [], total: 0, usable: 0 });
+    expect(engine.csv.previewImport(csv("", ",,"))).toMatchObject({ rows: [], total: 0, usable: 0 });
+    const preview = engine.csv.previewImport(csv("", "name,kind", "Gizmo,gizmo"));
+    expect(preview.mapping).toStrictEqual({ name: "name", kind: "kind" });
+    expect(preview.rows.map((r) => r.line)).toEqual([3]);
+  });
+
+  it("gives a header to the first column that claims it and leaves the rest unmapped", () => {
+    const preview = engine.csv.previewImport(csv("Name,Title,Item", "Gizmo,x,y"));
+    expect(preview.mapping).toStrictEqual({ name: "Name" });
+    expect(preview.unmapped).toEqual(["Title", "Item"]);
+  });
+
   it("reports rows it cannot use by line, and warns about what it assumed", () => {
     const preview = engine.csv.previewImport(csv("name,kind,year", "Gizmo,gadget,1999", ",gizmo,2000", "Odd,ufo,1990", "Old,gizmo,12"));
     expect(preview.rows.map((r) => r.line)).toEqual([2, 3, 4, 5]);

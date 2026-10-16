@@ -64,6 +64,15 @@ describe("the ledger under every item", () => {
     expect(engine.ledger.listLots(w.id).map((l) => l.unitCost)).toEqual([1, 5]);
   });
 
+  it("takes an edited purchase price for the one lot there is, and ignores it once there are several", () => {
+    const w = engine.repo.createItem({ name: "x", quantity: 2, purchasePrice: 1 });
+    expect(engine.repo.updateItem(w.id, { purchasePrice: 3 })?.purchasePrice).toBe(3);
+    expect(engine.ledger.listLots(w.id).map((l) => l.unitCost)).toEqual([3]);
+    engine.repo.addAcquisition(w.id, { quantity: 2, unitCost: 5 });
+    expect(engine.repo.updateItem(w.id, { purchasePrice: 100 })?.purchasePrice).toBeCloseTo(4, 10);
+    expect(engine.ledger.listLots(w.id).map((l) => l.unitCost)).toEqual([3, 5]);
+  });
+
   it("refuses a second copy of a unique object", () => {
     const w = engine.repo.createItem({ name: "x", serial: "S1" });
     expect(() => engine.repo.addAcquisition(w.id, { quantity: 1 })).toThrow(/separate widget/);

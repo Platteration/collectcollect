@@ -31,6 +31,24 @@ describe("value over time", () => {
     expect(change(sliceRange(points, "1W", now))).toMatchObject({ amount: 10, percent: 50 });
     expect(change(points.slice(0, 1))).toMatchObject({ amount: 0, percent: null });
   });
+
+  it("measures no change over no points, and no percentage from a start of nothing", () => {
+    expect(change([])).toEqual({ amount: 0, percent: null, from: null });
+    expect(change([{ t: "2026-01-01T00:00:00.000Z", value: 0 }, { t: "2026-02-01T00:00:00.000Z", value: 5 }])).toEqual({ amount: 5, percent: null, from: "2026-01-01T00:00:00.000Z" });
+  });
+
+  it("folds snapshots taken in the same second into one point", () => {
+    const a = engine.repo.createItem({ name: "A" });
+    const b = engine.repo.createItem({ name: "B" });
+    engine.repo.addSnapshot(a.id, priced("2026-01-01T00:00:00.000Z", 40));
+    engine.repo.addSnapshot(b.id, priced("2026-01-01T00:00:00.000Z", 5));
+    engine.repo.addSnapshot(a.id, priced("2026-02-01T00:00:00.000Z", 50));
+    const points = portfolioSeries(engine.repo.listItems(), engine.repo.allSnapshots());
+    expect(points.map((p) => [p.t, p.value, p.priced])).toEqual([
+      ["2026-01-01T00:00:00.000Z", 45, 2],
+      ["2026-02-01T00:00:00.000Z", 55, 2],
+    ]);
+  });
 });
 
 describe("returns and allocation", () => {

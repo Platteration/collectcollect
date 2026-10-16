@@ -82,6 +82,19 @@ describe("an item as a document", () => {
 });
 
 describe("reading a file somebody edited", () => {
+  it("says which day the latest value was found only when there is one", () => {
+    const priced = engine.repo.createItem({ name: "Gizmo", quantity: 2, purchasePrice: 1 });
+    engine.repo.addSnapshot(priced.id, { currency: "USD", fetchedAt: "2026-05-01T00:00:00.000Z", yourCopyValue: 4, yourCopyBasis: "Old", quotes: [], errors: [], market: 4, marketSource: "Fake" });
+    engine.repo.addSnapshot(priced.id, { currency: "USD", fetchedAt: "2026-06-01T00:00:00.000Z", yourCopyValue: 9, yourCopyBasis: "Fake", quotes: [], errors: [], market: 9, marketSource: "Fake" });
+    const unpriced = engine.repo.createItem({ name: "Gadget", purchasePrice: 3 });
+    const withValue = fileFor(priced.id);
+    expect(withValue).toContain("Last valued at **$9.00** per copy ($18.00 in total). Fake. Priced 2026-06-01. Paid $1.00 per copy.");
+    const without = fileFor(unpriced.id);
+    expect(without).not.toContain("Last valued");
+    expect(without).not.toContain("Priced ");
+    expect(without).toContain("Paid $3.00.");
+  });
+
   it("skips a sale whose date is not one, the way it already skips a purchase", () => {
     const w = engine.repo.createItem({ name: "Gizmo", maker: "Acme", quantity: 2, purchasePrice: 10 });
     engine.sales.recordSale(w.id, { quantity: 1, unitPrice: 25, fees: 1, venue: "eBay" });
@@ -181,6 +194,17 @@ describe("rebuilding from nothing but the files", () => {
     engine.db.setDb(engine.db.openDatabase(":memory:"));
     engine.restore.importItemFiles(files);
     expect(engine.repo.listItems().map((i) => i.serial).sort()).toEqual(["S1", "S2"]);
+  });
+
+  it("matches a file whose number is not held to the one lookalike there is, and to none when there are several", () => {
+    const file = { name: "0099-gizmo.md", text: ["---", "id: 99", 'name: "Gizmo"', 'maker: "Acme"', 'kind: "gizmo"', "quantity: 1", "---", "", "# Gizmo", ""].join("\n") };
+    engine.repo.createItem({ name: "Gizmo", maker: "Acme", kind: "gizmo" });
+    expect(engine.restore.importItemFiles([file])).toMatchObject({ created: 0, replaced: 1 });
+    expect(engine.repo.listItems()).toHaveLength(1);
+
+    engine.repo.createItem({ name: "Gizmo", maker: "Acme", kind: "gizmo" });
+    expect(engine.restore.importItemFiles([file])).toMatchObject({ created: 1, replaced: 0 });
+    expect(engine.repo.listItems()).toHaveLength(3);
   });
 
   it("reports a file that the normaliser refuses instead of failing the import", () => {
