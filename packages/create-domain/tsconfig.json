@@ -1,0 +1,10 @@
+{
+  // The template is the source of every app scaffolded from it, so it is
+  // type-checked here, under its own options. It is not an app until it is
+  // copied, so `next typegen` has no app to read routes from: template-routes.d.ts,
+  // beside this file and so never copied, declares the page and layout props
+  // an app's own typegen writes for these routes.
+  "extends": "./template/tsconfig.json",
+  "include": ["template-routes.d.ts", "template/**/*.ts", "template/**/*.tsx", "template/**/*.mts"],
+  "exclude": ["template/node_modules", "template/.next"]
+}
