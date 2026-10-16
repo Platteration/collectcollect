@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { expect, test, type Page } from "./fixtures";
 
 test.describe("adding a bottle by hand", () => {
   test("saves what was typed and opens it", async ({ page }) => {
@@ -38,5 +38,39 @@ test.describe("adding a bottle by hand", () => {
     await page.getByLabel("Distillery / brand").fill("Nameless");
     await page.getByRole("button", { name: "Save bottle" }).click();
     await expect(page.getByText(/Expression is required/)).toBeVisible();
+  });
+});
+
+test.describe("adding photos to a bottle", () => {
+  /** A photo made in the browser, so the test needs no binary fixture. */
+  const photo = async (page: Page, name: string, shade: number) => {
+    const dataUrl = await page.evaluate((v) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 120;
+      canvas.height = 160;
+      const ctx = canvas.getContext("2d")!;
+      ctx.fillStyle = `rgb(${v},${v},${v})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.8);
+    }, shade);
+    return { name, mimeType: "image/jpeg", buffer: Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64") };
+  };
+
+  test("keeps the picture Take photo brings back, and as many as Choose photos is given", async ({ page }) => {
+    await page.goto("/add");
+    const saved = page.locator("img[src^='/api/uploads/']");
+    await expect(saved).toHaveCount(0);
+
+    await page.locator("input[type=file][capture]").setInputFiles(await photo(page, "shot.jpg", 60));
+    await expect(saved).toHaveCount(1);
+
+    // The gallery's input takes several at once; a fourth picture is the last the page keeps.
+    await page.locator("input[type=file]:not([capture])").setInputFiles([await photo(page, "a.jpg", 110), await photo(page, "b.jpg", 160)]);
+    await expect(saved).toHaveCount(3);
+    await expect(page.getByRole("button", { name: "Take photo" })).toBeEnabled();
+    await page.locator("input[type=file]:not([capture])").setInputFiles([await photo(page, "c.jpg", 200), await photo(page, "d.jpg", 230)]);
+    await expect(saved).toHaveCount(4);
+    await expect(page.getByRole("button", { name: "Take photo" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Choose photos" })).toBeDisabled();
   });
 });

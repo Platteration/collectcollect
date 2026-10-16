@@ -116,7 +116,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
             </div>
             )}
 
-            <div className="ml-auto flex items-center gap-2 md:ml-0">
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2 max-[23.75rem]:gap-1 md:ml-0">
               <ThemeToggle />
               {member && authEnabled() && <SignOut />}
               {member && (

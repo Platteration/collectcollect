@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api, runQueue, withRetryAfter } from "@/lib/api-client";
+import { newDraftId } from "@/lib/draft-id";
 import type { ScanDraft } from "@/lib/scan-types";
 import type { CardRecord } from "@/lib/types";
 import { CardForm, formFromCard, formToInput } from "./CardForm";
@@ -81,10 +82,17 @@ export function ScanFlow({ claudeConfigured, initialDrafts }: { claudeConfigured
     } catch (e) { setPending((all) => all.map((p) => p.id === item.id ? { ...p, error: (e as Error).message } : p)); }
   };
   const enqueue = (incoming: File[]) => {
-    const fresh = incoming.filter((f) => f.type.startsWith("image/")).map((file) => ({ id: crypto.randomUUID(), file, error: null }));
+    const fresh = incoming.filter((f) => f.type.startsWith("image/")).map((file) => ({ id: newDraftId(), file, error: null }));
     setPending((all) => [...all, ...fresh]); void runQueue(fresh.map((item) => () => upload(item)));
   };
-  const startCamera = async () => { try { stream.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 } } }); setCamera(true); } catch (e) { setError(`Camera unavailable. Choose photos instead. ${(e as Error).message}`); } };
+  const startCamera = async () => {
+    // Browsers offer the camera API on https and localhost only. A phone that reaches the app by its home-network address (http://192.168.x.x) has no navigator.mediaDevices at all.
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      setError(`${window.isSecureContext ? "This browser does not offer the live camera to web pages." : "The live camera needs https, and this page is on plain http."} Choose photos still works.`);
+      return;
+    }
+    try { stream.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 } } }); setCamera(true); } catch (e) { setError(`Camera unavailable. Choose photos instead. ${(e as Error).message}`); }
+  };
   const capture = () => {
     const live = video.current; if (!live?.videoWidth) return;
     const canvas = document.createElement("canvas"); canvas.width = live.videoWidth; canvas.height = live.videoHeight; canvas.getContext("2d")?.drawImage(live, 0, 0);
