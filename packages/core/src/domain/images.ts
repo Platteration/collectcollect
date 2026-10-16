@@ -34,7 +34,7 @@ export function createImages(db: DomainDb) {
       if (!width || !height) return null;
       const inset = { left: Math.round(width * 0.2), top: Math.round(height * 0.2), width: Math.round(width * 0.6), height: Math.round(height * 0.6) };
       const { data } = await img.extract(inset).resize(1, 1, { fit: "fill" }).raw().toBuffer({ resolveWithObject: true });
-      const [r, g, b] = [data[0], data[1], data[2]];
+      const [r, g, b] = [data.readUInt8(0), data.readUInt8(1), data.readUInt8(2)];
       const max = Math.max(r, g, b) || 1;
       const scale = Math.min(255 / max, 1.9);
       const hex = (n: number) => Math.min(255, Math.round(n * scale)).toString(16).padStart(2, "0");

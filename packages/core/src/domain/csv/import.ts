@@ -107,17 +107,19 @@ export function createCsvImport<F extends object, X extends object>(ctx: { spec:
     const numbered = parseCsv(text)
       .map((cells, i) => ({ cells, line: i + 1 }))
       .filter((r) => r.cells.some((cell) => cell.trim() !== ""));
-    if (numbered.length === 0) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0 };
+    const [headerRow] = numbered;
+    if (!headerRow) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0 };
 
-    const headers = numbered[0].cells.map((h) => h.trim());
+    const headers = headerRow.cells.map((h) => h.trim());
     const keys = headers.map(headerKey);
     const mapping: Record<string, string> = {};
     const index: Record<string, number> = {};
     const claim = (target: string, aliases: string[]) => {
       if (index[target] !== undefined) return;
       const at = keys.findIndex((k, i) => aliases.includes(k) && !Object.values(index).includes(i));
-      if (at !== -1) {
-        mapping[target] = headers[at];
+      const header = headers[at];
+      if (header !== undefined) {
+        mapping[target] = header;
         index[target] = at;
       }
     };

@@ -171,7 +171,8 @@ export function createRestore<F extends object, S extends object, X extends obje
 
   function elsewhere(clean: ReturnType<Repository<F, X>["normalize"]>): ItemRecord<F> | null {
     const candidates = repo.findSimilar(clean).filter((c) => repo.isSameItem(c, clean));
-    return candidates.length === 1 ? candidates[0] : null;
+    const [only, ...others] = candidates;
+    return only && others.length === 0 ? only : null;
   }
 
   function adoptId(item: ItemRecord<F>, wanted: number): ItemRecord<F> | null {

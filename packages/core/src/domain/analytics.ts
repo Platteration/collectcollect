@@ -50,7 +50,8 @@ export function portfolioSeries(items: Countable[], snapshots: Snapshotish[]): P
     }
     const point = { t: s.fetchedAt, value: round2(value), priced };
     // Snapshots taken in the same second (a "refresh all") collapse into one point.
-    if (points.length && points[points.length - 1].t === point.t) points[points.length - 1] = point;
+    const previous = points[points.length - 1];
+    if (previous && previous.t === point.t) points[points.length - 1] = point;
     else points.push(point);
   }
   return points;
@@ -82,9 +83,10 @@ export interface Change {
 }
 
 export function change(points: Array<{ t: string; value: number }>): Change {
-  if (points.length < 2) return { amount: 0, percent: null, from: null };
-  const first = points[0];
-  const last = points[points.length - 1];
+  // Fewer than two points is no change, and says nothing about where it started.
+  const [first, ...later] = points;
+  const last = later.at(-1);
+  if (!first || !last) return { amount: 0, percent: null, from: null };
   const amount = round2(last.value - first.value);
   return { amount, percent: first.value > 0 ? round2((amount / first.value) * 100) : null, from: first.t };
 }

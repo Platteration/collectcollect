@@ -126,7 +126,8 @@ export function itemMarkdown<F extends object, X extends object>(
   opts: DocumentOptions<X> = {},
 ): string {
   const { item, sales, snapshots, acquisitions, saleLots } = bundle;
-  const latest = snapshots.length ? snapshots[0].summary : null;
+  const newest = snapshots[0];
+  const latest = newest?.summary ?? null;
   const photoHref = opts.photoHref ?? ((name: string) => `../uploads/${name}`);
   const values = item as unknown as Record<string, unknown>;
 
@@ -171,10 +172,10 @@ export function itemMarkdown<F extends object, X extends object>(
   const value = latest?.yourCopyValue ?? null;
   if (value !== null || item.purchasePrice !== null) {
     const bits: string[] = [];
-    if (value !== null) {
+    if (newest && value !== null) {
       bits.push(`Last valued at **${money(value)}**${item.quantity > 1 ? ` per copy (${money(value * item.quantity)} in total)` : ""}.`);
       if (latest?.yourCopyBasis) bits.push(/[.!?]$/.test(latest.yourCopyBasis) ? latest.yourCopyBasis : `${latest.yourCopyBasis}.`);
-      bits.push(`Priced ${snapshots[0].fetchedAt.slice(0, 10)}.`);
+      bits.push(`Priced ${newest.fetchedAt.slice(0, 10)}.`);
     }
     if (item.purchasePrice !== null) bits.push(`Paid ${money(item.purchasePrice)}${item.quantity > 1 ? " per copy" : ""}.`);
     blocks.push(bits.join(" "));
@@ -324,7 +325,7 @@ export function parseItemMarkdown<F extends object>(spec: Pick<DomainSpec<F, obj
   const sales: ParsedItem<F>["sales"] = [];
   for (const row of readTable(body, "Sales")) {
     const [soldAt, copies, each, fees, cost, venue, notes] = row;
-    const unitPrice = readMoney(each);
+    const unitPrice = readMoney(each ?? "");
     const quantitySold = num(copies);
     if (!soldAt || Number.isNaN(Date.parse(soldAt)) || unitPrice === null || quantitySold === null || quantitySold < 1) {
       warnings.push(`Skipped an unreadable sale row: ${row.join(" | ")}`);
@@ -333,8 +334,8 @@ export function parseItemMarkdown<F extends object>(spec: Pick<DomainSpec<F, obj
     sales.push({
       quantity: Math.round(quantitySold),
       unitPrice,
-      fees: readMoney(fees) ?? 0,
-      unitCost: readMoney(cost),
+      fees: readMoney(fees ?? "") ?? 0,
+      unitCost: readMoney(cost ?? ""),
       soldAt,
       venue: venue || null,
       notes: notes || null,

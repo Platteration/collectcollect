@@ -29,7 +29,7 @@ describe("value over time", () => {
     const now = Date.parse("2026-07-01T00:00:00.000Z");
     expect(sliceRange(points, "1W", now).map((p) => p.value)).toEqual([20, 30]);
     expect(change(sliceRange(points, "1W", now))).toMatchObject({ amount: 10, percent: 50 });
-    expect(change([points[0]])).toMatchObject({ amount: 0, percent: null });
+    expect(change(points.slice(0, 1))).toMatchObject({ amount: 0, percent: null });
   });
 });
 

@@ -160,7 +160,7 @@ export function gradingVerdict(series: OutlookPoint[]): Verdict {
   }
   const peak = Math.max(...series.map((p) => p.upside));
   const ratio = peak > 0 ? last.upside / peak : 0;
-  const trend = last.upside - series[Math.max(0, series.length - 4)].upside;
+  const trend = last.upside - (series[Math.max(0, series.length - 4)] ?? last).upside;
   if (ratio >= 0.9) {
     return {
       kind: "prime",

@@ -74,10 +74,10 @@ describe("an item as a document", () => {
     engine.repo.addSnapshot(w.id, { currency: "USD", fetchedAt: "2026-06-01T00:00:00.000Z", yourCopyValue: 9, yourCopyBasis: "Fake", quotes: [], errors: [], market: 9, marketSource: "Fake" });
     engine.sales.recordSale(w.id, { quantity: 1, unitPrice: 10, venue: "eBay" });
     const text = fileFor(w.id);
-    expect(readTable(text, "Value history")[0].slice(0, 3)).toEqual(["2026-06-01T00:00:00.000Z", "$9.00", "Fake"]);
-    expect(readTable(text, "Value history")[0][3]).toBe("Fake: 9");
-    expect(readTable(text, "Sales")[0][5]).toBe("eBay");
-    expect(readTable(text, "Sales")[0][7]).toContain("1 @ $1.00");
+    expect(readTable(text, "Value history")[0]?.slice(0, 3)).toEqual(["2026-06-01T00:00:00.000Z", "$9.00", "Fake"]);
+    expect(readTable(text, "Value history")[0]?.[3]).toBe("Fake: 9");
+    expect(readTable(text, "Sales")[0]?.[5]).toBe("eBay");
+    expect(readTable(text, "Sales")[0]?.[7]).toContain("1 @ $1.00");
   });
 });
 
@@ -90,7 +90,7 @@ describe("reading a file somebody edited", () => {
     expect(parseItemMarkdown<Widget>(spec, text)!.sales).toHaveLength(1);
 
     // The same file with the sale's date replaced by something that is not one.
-    const [head, sales] = text.split("## Sales");
+    const [head = "", sales = ""] = text.split("## Sales");
     const broken = `${head}## Sales${sales.replace(/\| \d{4}-\d{2}-\d{2}[^|]*\|/, "| whenever |")}`;
     const parsed = parseItemMarkdown<Widget>(spec, broken)!;
     expect(parsed.sales).toEqual([]);
@@ -158,7 +158,8 @@ describe("rebuilding from nothing but the files", () => {
       [1, 2, 0],
       [4, 3, 2],
     ]);
-    const sale = engine.sales.listSalesForItem(restored.id)[0];
+    const [sale] = engine.sales.listSalesForItem(restored.id);
+    if (!sale) throw new Error("the rebuilt item has lost its sale");
     expect(engine.ledger.listSaleLots(sale.id).map((l) => [l.quantity, l.unitCost])).toEqual([
       [2, 1],
       [1, 4],
@@ -186,6 +187,6 @@ describe("rebuilding from nothing but the files", () => {
     const bad = ["---", "id: 5", 'name: "Odd"', 'kind: "spaceship"', "quantity: 1", "---", "", "# Odd", ""].join("\n");
     const result = engine.restore.importItemFiles([{ name: "0005-odd.md", text: bad }]);
     expect(result.created).toBe(0);
-    expect(result.skipped[0].reason).toMatch(/Unknown kind/);
+    expect(result.skipped[0]?.reason).toMatch(/Unknown kind/);
   });
 });

@@ -154,7 +154,8 @@ export function createRepository<F extends object, S extends object, X extends o
       // directly. With several it is an average of them, so the edit is
       // ignored and the recompute below puts the average back.
       const lots = ledger.listLots(id);
-      if (lots.length === 1) getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, lots[0].id);
+      const only = lots.length === 1 ? lots[0] : undefined;
+      if (only) getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, only.id);
     }
     ledger.recomputePurchasePrice(id);
     const item = getItem(id);
@@ -305,8 +306,8 @@ export function createRepository<F extends object, S extends object, X extends o
       if (spec.isUnique(clean)) return { result: "created", item: createItem(input) };
       const candidates = findSimilar(clean).filter((c) => !spec.isUnique(c));
       if (candidates.length > 1) return { result: "ambiguous", candidates };
-      if (candidates.length === 1) {
-        const stack = candidates[0];
+      const stack = candidates[0];
+      if (stack) {
         const copies = clean.quantity || 1;
         // The copies being merged in are their own purchase at their own price;
         // folding them into the existing row's price would lose what they cost.

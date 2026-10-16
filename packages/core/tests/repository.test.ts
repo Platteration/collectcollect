@@ -83,7 +83,8 @@ describe("intake: unique versus fungible", () => {
     const outcome = engine.repo.intakeItem({ name: "gadget", maker: "ACME", kind: "gadget", quantity: 3, purchasePrice: 2 });
     expect(outcome.result).toBe("merged");
     expect(engine.repo.listItems()).toHaveLength(1);
-    const item = engine.repo.listItems()[0];
+    const [item] = engine.repo.listItems();
+    if (!item) throw new Error("the merged stack is not listed");
     expect(item.quantity).toBe(5);
     expect(engine.ledger.listLots(item.id).map((l) => l.unitCost)).toEqual([1, 2]);
   });

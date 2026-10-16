@@ -462,7 +462,8 @@ export function conditionHolds(condition: FieldCondition | undefined, values: Re
 /** Label for an enum value, or the raw value when it is not an option. */
 export function optionLabel(field: FieldSpec | undefined, value: unknown): string {
   if (value === null || value === undefined || value === "") return "";
-  if (field?.type === "enum" && field.options && Object.hasOwn(field.options, String(value))) return field.options[String(value)];
+  const enumLabel = field?.type === "enum" && field.options && Object.hasOwn(field.options, String(value)) ? field.options[String(value)] : undefined;
+  if (enumLabel !== undefined) return enumLabel;
   if (field?.type === "boolean") return value ? "Yes" : "No";
   if (Array.isArray(value)) return value.map((v) => (field?.options && Object.hasOwn(field.options, String(v)) ? field.options[String(v)] : String(v))).join(", ");
   return String(value);

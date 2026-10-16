@@ -165,7 +165,6 @@ export function scoreProduct(q: ProductMatch, p: PcProduct): number {
 
 /** The best candidate, or null when nothing plausibly matches. */
 export function bestProduct<T extends PcProduct>(products: T[], score: (p: T) => number, floor = 1.5): T | null {
-  if (products.length === 0) return null;
-  const ranked = products.map((p) => ({ p, s: score(p) })).sort((a, b) => b.s - a.s);
-  return ranked[0].s < floor ? null : ranked[0].p;
+  const [best] = products.map((p) => ({ p, s: score(p) })).sort((a, b) => b.s - a.s);
+  return !best || best.s < floor ? null : best.p;
 }

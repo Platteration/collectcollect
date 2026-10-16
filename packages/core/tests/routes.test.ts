@@ -71,7 +71,7 @@ describe("the generic routes", () => {
     const zip = await routes.collection.GET();
     expect(zip.status).toBe(200);
     const bytes = new Uint8Array(await zip.arrayBuffer());
-    expect(String.fromCharCode(bytes[0], bytes[1])).toBe("PK");
+    expect(String.fromCharCode(...bytes.subarray(0, 2))).toBe("PK");
   });
 
   it("serves an upload only under a name it wrote, and identifies nothing without photos", async () => {
