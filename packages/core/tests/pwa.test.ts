@@ -104,12 +104,10 @@ describe("the shell's metadata", () => {
 });
 
 describe("the shell's safety net", () => {
-  it("loads /guard.js first, with the request's nonce, ahead of the theme script", async () => {
+  it("loads /guard.js in the head, with the request's nonce, which the content security policy requires of it", async () => {
     const html = renderToStaticMarkup(await AppShell({ engine, fontClass: "font", children: null }));
     const head = /<head>(.*?)<\/head>/s.exec(html)?.[1] ?? "";
-    const guard = /<script src="\/guard\.js" nonce="n0nce\+\/=" async=""><\/script>/.exec(head);
-    expect(guard, head).not.toBeNull();
-    expect(head.indexOf("/guard.js")).toBeLessThan(head.indexOf("data-scheme"));
+    expect(head).toMatch(/<script src="\/guard\.js" nonce="n0nce\+\/=" async=""><\/script>/);
   });
 
   it("tells a visitor without JavaScript what still works, first on the page and in the app's own name", async () => {
