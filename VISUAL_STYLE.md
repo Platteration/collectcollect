@@ -36,16 +36,20 @@ panel surface. Do not use an aesthetic accent to communicate profit or loss.
 
 ## Integration and checks
 
-The current default branch contains Cards and Skins. The four additional hobby
-apps use the older `claude/scaffold-five-apps-y6pgsp` branch and its shared AppShell.
-Keep that integration separate; do not replace newer storage/security code with
-an older scaffold just to share appearance. The older layouts apply the selected
-palette when the client mounts; before-paint palette restoration remains an
-integration follow-up there.
+Cards and Skins draw their own layouts. Retro Games, Comics, Watches and Whisky
+share `packages/core/src/pages/AppShell.tsx`, which came from the older
+`claude/scaffold-five-apps-y6pgsp` branch; do not replace newer storage/security
+code with older scaffold code just to share appearance. Every layout's inline
+script applies the stored theme and palette before the first paint, under the
+request's nonce, and each app's Settings offers the same palettes as its header.
 
 The added `family-theme.test.ts` files guard palette definitions and text/focus
 contrast. The `family-theme.spec.ts` browser tests cover navigation, cross-tab
-updates, blocked storage, print restoration and phone menu bounds. Before merging,
+updates, blocked storage, print restoration and phone menu bounds.
+`packages/core/tests/app-shell.test.ts` holds the shared shell's script to the
+nonce and to what it applies, and the `appearance.spec.ts` browser tests of Retro
+Games, Comics and Whisky choose every theme and palette on a phone-sized screen,
+from the header and from Settings. Before merging,
 run the repository lint, typecheck, unit, build and browser suites and inspect all
 apps in both modes. Check selected, hover, keyboard focus, disabled, error, empty,
 print and reduced-motion states. An isolated CSS/control fixture is not a substitute
