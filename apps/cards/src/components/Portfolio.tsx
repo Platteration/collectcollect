@@ -242,7 +242,7 @@ export function Portfolio({ points: historyPoints, pricePoints, historyStartedAt
                   onClick={() => setCostLine((on) => !on)}
                   aria-pressed={costLine}
                   title={costLine ? "Hide the cost-basis line" : "Show what the copies held cost"}
-                  className={`flex items-center gap-1.5 rounded px-2 py-1 hover:bg-black/5 dark:hover:bg-white/10 ${costLine ? "" : "opacity-60"}`}
+                  className={`-mx-2 flex items-center gap-1.5 rounded px-2 py-1 hover:bg-black/5 dark:hover:bg-white/10 ${costLine ? "" : "opacity-60"}`}
                 >
                   <svg width="16" height="4" aria-hidden="true">
                     <line x1="0" y1="2" x2="16" y2="2" stroke="var(--chart-series-1)" strokeWidth="1.5" strokeDasharray="5 4" />

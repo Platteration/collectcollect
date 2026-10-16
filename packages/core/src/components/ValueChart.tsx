@@ -261,11 +261,15 @@ export function ValueChart<P extends ValuePoint>({
           <div style={{ color: "var(--muted)" }}>{shortDate(active.t, true)}</div>
           {basis && activeBasis !== null && (
             <div style={{ color: "var(--muted)" }}>
-              {basis.label} {money(activeBasis)}
+              {/* Each half stays whole, so a tooltip with little room wraps between them, not through a figure. */}
+              <span style={{ whiteSpace: "nowrap" }}>
+                {basis.label} {money(activeBasis)}
+                {activeGain !== null ? " ·" : ""}
+              </span>
               {activeGain !== null && (
                 <>
-                  {" · "}
-                  <span style={{ color: activeGain >= 0 ? "var(--chart-good-text)" : "var(--chart-bad-text)" }}>
+                  {" "}
+                  <span style={{ whiteSpace: "nowrap", color: activeGain >= 0 ? "var(--chart-good-text)" : "var(--chart-bad-text)" }}>
                     {activeGain >= 0 ? "▲" : "▼"} {gainText(activeGain)}
                   </span>
                 </>
