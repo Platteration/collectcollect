@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
-import { CONDITIONS, GAMES, GAME_IDS, GRADING_COMPANIES, type CardInput, type Centering, type CenteringInput, type Game, type Ratio } from "@/lib/types";
+import { CONDITIONS, GAMES, GAME_IDS, GRADING_COMPANIES, SUBGRADE_KEYS, type CardInput, type Centering, type CenteringInput, type Game, type Ratio, type Subgrades } from "@/lib/types";
 import { ratioText } from "@/lib/grading/centering";
 import { CenteringInputs, type CenteringForm } from "./CenteringInputs";
 
@@ -19,11 +19,26 @@ export interface CardFormState extends CenteringForm {
   variant: string;
   language: string;
   manufacturer: string;
+  team: string;
+  /** "true" or "", like a checkbox. */
+  rookie: string;
+  parallel: string;
+  serialNumber: string;
+  autograph: string;
+  relic: string;
   quantity: string;
   condition: string;
   gradingCompany: string;
   grade: string;
   certNumber: string;
+  /**
+   * The four grades a BGS label prints, as typed. Prefixed `sub` because the
+   * form already has a centering of its own: the measured border ratios.
+   */
+  subCentering: string;
+  subCorners: string;
+  subEdges: string;
+  subSurface: string;
   purchasePrice: string;
   location: string;
   notes: string;
@@ -41,11 +56,21 @@ export const emptyForm = (game: Game = "pokemon"): CardFormState => ({
   variant: "",
   language: "",
   manufacturer: "",
+  team: "",
+  rookie: "",
+  parallel: "",
+  serialNumber: "",
+  autograph: "",
+  relic: "",
   quantity: "1",
   condition: "NM",
   gradingCompany: "",
   grade: "",
   certNumber: "",
+  subCentering: "",
+  subCorners: "",
+  subEdges: "",
+  subSurface: "",
   purchasePrice: "",
   location: "",
   notes: "",
@@ -86,11 +111,21 @@ export function formFromCard(card: Partial<CardInput> & { game: Game; name: stri
     variant: s(card.variant),
     language: s(card.language),
     manufacturer: s(card.manufacturer),
+    team: s(card.team),
+    rookie: card.rookie ? "true" : "",
+    parallel: s(card.parallel),
+    serialNumber: s(card.serialNumber),
+    autograph: card.autograph ? "true" : "",
+    relic: card.relic ? "true" : "",
     quantity: s(card.quantity ?? 1),
     condition: s(card.condition ?? "NM"),
     gradingCompany: s(card.gradingCompany),
     grade: s(card.grade),
     certNumber: s(card.certNumber),
+    subCentering: s(card.subgrades?.centering),
+    subCorners: s(card.subgrades?.corners),
+    subEdges: s(card.subgrades?.edges),
+    subSurface: s(card.subgrades?.surface),
     purchasePrice: s(card.purchasePrice),
     location: s(card.location),
     notes: s(card.notes),
@@ -113,11 +148,19 @@ export function formToInput(f: CardFormState): CardInput {
     variant: t(f.variant),
     language: t(f.language),
     manufacturer: t(f.manufacturer),
+    team: t(f.team),
+    rookie: f.rookie === "true",
+    parallel: t(f.parallel),
+    serialNumber: t(f.serialNumber),
+    autograph: f.autograph === "true",
+    relic: f.relic === "true",
     quantity: n(f.quantity) ?? 1,
     condition: (f.condition || "NM") as CardInput["condition"],
     gradingCompany: t(f.gradingCompany),
     grade: t(f.grade),
     certNumber: t(f.certNumber),
+    // Sent as typed, like centering below; the server keeps a number from 1 to 10 and drops the rest.
+    subgrades: subgradesFromForm(f),
     // Sent as the text typed; the server reads "55/45" and refuses what is not a ratio.
     centering: { front: { lr: t(f.centeringFrontLr), tb: t(f.centeringFrontTb) }, back: { lr: t(f.centeringBackLr), tb: t(f.centeringBackTb) } },
     purchasePrice: n(f.purchasePrice),
@@ -125,6 +168,22 @@ export function formToInput(f: CardFormState): CardInput {
     notes: t(f.notes),
   };
 }
+
+/** What the four subgrade fields hold, or null when none of them holds anything. */
+function subgradesFromForm(f: CardFormState): Subgrades | null {
+  const n = (v: string) => (v.trim() === "" ? null : Number(v));
+  const out: Subgrades = { centering: n(f.subCentering), corners: n(f.subCorners), edges: n(f.subEdges), surface: n(f.subSurface) };
+  return SUBGRADE_KEYS.some((k) => out[k] !== null) ? out : null;
+}
+
+/** The subgrade fields, with the label each is shown under. */
+const SUBGRADE_FIELDS = [
+  ["subCentering", "Centering subgrade"],
+  ["subCorners", "Corners subgrade"],
+  ["subEdges", "Edges subgrade"],
+  ["subSurface", "Surface subgrade"],
+] as const;
+const SUBGRADE_FORM_KEYS = SUBGRADE_FIELDS.map(([key]) => key);
 
 interface Props {
   value: CardFormState;
@@ -151,8 +210,11 @@ export function CardForm({ value, onChange, disabled, purchasePriceReadOnly }: P
 
   const set = (key: keyof CardFormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     onChange({ ...value, [key]: e.target.value });
+  const toggle = (key: "rookie" | "autograph" | "relic") => () => onChange({ ...value, [key]: value[key] === "true" ? "" : "true" });
   const isSports = value.game === "sports";
   const isGraded = value.gradingCompany !== "" || value.grade !== "";
+  // A BGS label prints four subgrades. They also show for a card that already holds some, so a stored one is never out of reach.
+  const showSubgrades = value.gradingCompany.toUpperCase() === "BGS" || SUBGRADE_FORM_KEYS.some((k) => value[k] !== "");
 
   return (
     <fieldset disabled={disabled} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -181,6 +243,40 @@ export function CardForm({ value, onChange, disabled, purchasePriceReadOnly }: P
           <span className="label">Manufacturer / brand</span>
           <input className="input" value={value.manufacturer} onChange={set("manufacturer")} placeholder="Topps" />
         </label>
+      )}
+      {isSports && (
+        <label className="block">
+          <span className="label">Team</span>
+          <input className="input" value={value.team} onChange={set("team")} placeholder="Los Angeles Angels" />
+        </label>
+      )}
+      {isSports && (
+        <label className="block">
+          <span className="label">Parallel / refractor</span>
+          <input className="input" value={value.parallel} onChange={set("parallel")} placeholder="Gold Refractor, Silver Prizm" />
+        </label>
+      )}
+      {isSports && (
+        <label className="block">
+          <span className="label">Serial number</span>
+          <input className="input" value={value.serialNumber} onChange={set("serialNumber")} placeholder="12/99" />
+        </label>
+      )}
+      {isSports && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 self-end pb-2 text-sm">
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={value.rookie === "true"} onChange={toggle("rookie")} />
+            Rookie card
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={value.autograph === "true"} onChange={toggle("autograph")} />
+            Autograph
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={value.relic === "true"} onChange={toggle("relic")} />
+            Relic / patch
+          </label>
+        </div>
       )}
       <label className="block">
         <span className="label">Set / product</span>
@@ -239,6 +335,16 @@ export function CardForm({ value, onChange, disabled, purchasePriceReadOnly }: P
             <span className="label">Cert number</span>
             <input className="input" value={value.certNumber} onChange={set("certNumber")} />
           </label>
+          {showSubgrades && (
+            <div className="grid grid-cols-2 items-end gap-2 sm:col-span-2 sm:grid-cols-4">
+              {SUBGRADE_FIELDS.map(([key, label]) => (
+                <label key={key} className="block">
+                  <span className="label">{label}</span>
+                  <input className="input" value={value[key]} onChange={set(key)} inputMode="decimal" placeholder="9.5" />
+                </label>
+              ))}
+            </div>
+          )}
         </>
       ) : (
         <label className="block">

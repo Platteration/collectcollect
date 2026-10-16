@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { httpUrl, imageSrc, localDateInput, money, when, caveatSentence } from "@/lib/format";
-import { GAMES, GRADING_STATUSES, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Sale, type Settings } from "@/lib/types";
+import { GAMES, GRADING_STATUSES, subgradesLabel, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Sale, type Settings } from "@/lib/types";
 import { gradingVerdict, isReadyToGrade, outlookSeries } from "@/lib/analytics";
 import { OutlookChart } from "./charts/OutlookChart";
 import { PortfolioChart } from "./charts/PortfolioChart";
@@ -442,6 +442,13 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             <Field label="Kept in" value={card.location ?? "—"} />
             <Field label="Language" value={card.language ?? "—"} />
             <Field label="Manufacturer" value={card.manufacturer ?? "—"} />
+            {card.team && <Field label="Team" value={card.team} />}
+            {card.parallel && <Field label="Parallel" value={card.parallel} />}
+            {card.serialNumber && <Field label="Numbered" value={card.serialNumber} />}
+            {(card.rookie || card.autograph || card.relic) && (
+              <Field label="Card type" value={[card.rookie ? "Rookie" : null, card.autograph ? "Autograph" : null, card.relic ? "Relic" : null].filter(Boolean).join(" · ")} />
+            )}
+            {card.subgrades && <Field label="Subgrades" value={subgradesLabel(card.subgrades)} wide />}
             <Field label="Added" value={when(card.createdAt)} />
             {card.notes && (
               <div className="col-span-2 sm:col-span-3">
@@ -810,9 +817,10 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+/** `wide` takes the whole row, for a value too long for one of two columns on a phone. */
+function Field({ label, value, wide }: { label: string; value: string; wide?: boolean }) {
   return (
-    <div>
+    <div className={wide ? "col-span-2 sm:col-span-3" : undefined}>
       <dt className="text-xs uppercase tracking-wide text-neutral-500">{label}</dt>
       <dd>{value}</dd>
     </div>
