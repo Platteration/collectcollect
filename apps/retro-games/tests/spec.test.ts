@@ -44,7 +44,7 @@ describe("the game schema", () => {
   it("reads the words a spreadsheet uses for regions, completeness and conditions", () => {
     const preview = engine.csv.previewImport(["title,system,region,complete,box,cart,paid", "Super Mario 64,Nintendo 64,USA,Complete,VG,NM,45"].join("\n"));
     expect(preview.usable).toBe(1);
-    expect(preview.rows[0].input).toMatchObject({ title: "Super Mario 64", platform: "n64", region: "ntsc_u", completeness: "cib", boxCondition: "very_good", mediaCondition: "near_mint", purchasePrice: 45 });
+    expect(preview.rows[0]?.input).toMatchObject({ title: "Super Mario 64", platform: "n64", region: "ntsc_u", completeness: "cib", boxCondition: "very_good", mediaCondition: "near_mint", purchasePrice: 45 });
   });
 });
 
@@ -55,6 +55,7 @@ describe("one specific object, or a stack", () => {
     expect(a.result).toBe("created");
     expect(b.result).toBe("merged");
     const [item] = engine.repo.listItems();
+    if (!item) throw new Error("the merged stack is not listed");
     expect(engine.repo.listItems()).toHaveLength(1);
     expect(item.quantity).toBe(2);
     // Two purchases at two prices, kept apart in the ledger.
@@ -81,7 +82,9 @@ describe("one specific object, or a stack", () => {
     expect(engine.repo.intakeItem(slab).result).toBe("created");
     expect(engine.repo.listItems()).toHaveLength(2);
     expect(engine.repo.listItems().every((i) => i.quantity === 1)).toBe(true);
-    expect(() => engine.repo.addAcquisition(engine.repo.listItems()[0].id, { quantity: 1 })).toThrow(/one specific object/);
+    const [first] = engine.repo.listItems();
+    if (!first) throw new Error("the slabs are not listed");
+    expect(() => engine.repo.addAcquisition(first.id, { quantity: 1 })).toThrow(/one specific object/);
   });
 });
 
@@ -134,7 +137,9 @@ describe("the collection on disk", () => {
     expect(items.find((i) => i.title === "Sonic the Hedgehog 2")?.quantity).toBe(3);
     const points = portfolioSeries(items, engine.repo.allSnapshots());
     expect(points.length).toBeGreaterThan(3);
-    expect(points[points.length - 1].value).toBeGreaterThan(points[0].value);
+    const [first] = points;
+    if (!first) throw new Error("the sample collection has no value history");
+    expect(points.at(-1)?.value).toBeGreaterThan(first.value);
     expect(() => loadSeed(engine)).toThrow(/empty/);
   });
 });

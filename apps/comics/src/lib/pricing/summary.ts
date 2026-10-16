@@ -31,9 +31,10 @@ export function rawFactor(grade: string | null, settings: Pick<ComicSettings, "r
     .map(Number)
     .filter((b) => Number.isFinite(b) && b <= n)
     .sort((a, b) => b - a);
-  if (buckets.length === 0) return { factor: table[Object.keys(table).sort()[0]] ?? 1, bucket: null };
-  const bucket = String(buckets[0]);
-  return { factor: table[bucket] ?? table[buckets[0].toFixed(1)] ?? 1, bucket };
+  const [best] = buckets;
+  if (best === undefined) return { factor: table[Object.keys(table).sort()[0] ?? ""] ?? 1, bucket: null };
+  const bucket = String(best);
+  return { factor: table[bucket] ?? table[best.toFixed(1)] ?? 1, bucket };
 }
 
 export function summarizeComics(args: { item: ItemRecord<Comic>; quotes: PriceQuote[]; errors: PriceError[]; settings: Settings<ComicSettings>; fetchedAt: string }): ComicSummary {
@@ -91,9 +92,9 @@ export function gradeWindowAlert(args: { item: ItemRecord<Comic>; history: Array
   const before = outlookSeries(history, grading, item.grade, COMIC_GRADE_KEYS);
   const after = [...before, ...outlookSeries([{ id: Number.MAX_SAFE_INTEGER, fetchedAt: next.fetchedAt, summary: next }], grading, item.grade, COMIC_GRADE_KEYS)];
   const wasReady = before.length > 0 && isReadyToGrade(before, gradingVerdict(before), grading);
-  const ready = isReadyToGrade(after, gradingVerdict(after), grading);
-  if (!ready || wasReady) return [];
-  const last = after[after.length - 1];
+  // The latest point, when it clears the owner's thresholds.
+  const last = isReadyToGrade(after, gradingVerdict(after), grading) ? after[after.length - 1] : undefined;
+  if (!last || wasReady) return [];
   return [
     {
       kind: "grade_window",

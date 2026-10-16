@@ -52,7 +52,7 @@ describe("asking PriceCharting about a comic", () => {
       ["/api/products?", { status: "success", products: [asm301] }],
     ]);
     const quotes = await priceChartingProvider.lookup(query({ externalIds: { pricecharting: "1" } }), fetchImpl);
-    expect(quotes[0].externalId).toBe("1");
+    expect(quotes[0]?.externalId).toBe("1");
     expect(fetchImpl.calls).toHaveLength(1);
   });
 

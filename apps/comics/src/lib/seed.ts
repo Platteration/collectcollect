@@ -11,7 +11,11 @@ function ago(months: number): string {
 function history(then: number, now: number, ...between: number[]): Array<{ value: number; at: string; note?: string }> {
   const values = [then, ...between, now];
   const months = [18, 12, 9, 6, 3, 1, 0].slice(-values.length);
-  return values.map((value, i) => ({ value, at: ago(months[i]), note: i === values.length - 1 ? "PriceCharting (sample)" : "Sample value" }));
+  return values.map((value, i) => {
+    const monthsAgo = months[i];
+    if (monthsAgo === undefined) throw new Error("history() takes at most seven values");
+    return { value, at: ago(monthsAgo), note: i === values.length - 1 ? "PriceCharting (sample)" : "Sample value" };
+  });
 }
 
 const year = new Date().getFullYear();

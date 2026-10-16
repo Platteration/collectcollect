@@ -88,8 +88,10 @@ export async function readFormDataLimited(request: Request, max: number): Promis
  *
  * Only the digits of a positive integer: `Number()` would take "1e3", " 1",
  * "0x10" and "1.0" as ids, and an id that reaches the database in more than one
- * spelling is an id that can be reached in more than one way.
+ * spelling is an id that can be reached in more than one way. A parameter the
+ * route did not carry (a record read by key is `undefined` when the key is
+ * missing) is no id either.
  */
-export function parseId(raw: string): number | null {
-  return /^[1-9]\d{0,9}$/.test(raw) ? Number(raw) : null;
+export function parseId(raw: string | undefined): number | null {
+  return raw !== undefined && /^[1-9]\d{0,9}$/.test(raw) ? Number(raw) : null;
 }

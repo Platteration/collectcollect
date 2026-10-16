@@ -16,7 +16,7 @@ describe("refreshing", () => {
     answers.Gizmo = -1;
     const second = await engine.refresh.refreshItem(engine.repo.getItem(w.id)!);
     expect(second.stored).toBe(false);
-    expect(second.snapshot.summary.errors[0].message).toBe("source down");
+    expect(second.snapshot.summary.errors[0]?.message).toBe("source down");
     expect(engine.repo.listSnapshots(w.id)).toHaveLength(1);
   });
 
@@ -51,7 +51,7 @@ describe("refreshing", () => {
     const alerts = engine.alerts.listAlerts();
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toMatchObject({ kind: "price_move", itemId: a.id });
-    expect(alerts[0].title).toMatch(/up 100\.0%/);
+    expect(alerts[0]?.title).toMatch(/up 100\.0%/);
     expect(engine.alerts.unreadCount()).toBe(1);
     engine.alerts.markAllRead();
     expect(engine.alerts.unreadCount()).toBe(0);

@@ -38,7 +38,7 @@ function paint(storage: Record<string, string> | "blocked", prefersDark = false)
 describe("the shell every hobby's pages sit in", () => {
   it("hands its pre-paint script the request's nonce, which the content security policy requires of an inline script", async () => {
     const html = renderToStaticMarkup(await AppShell({ engine, fontClass: "font", children: null }));
-    const inline = [...html.matchAll(/<script([^>]*)>([^<]*)<\/script>/g)].filter(([, , body]) => body.length > 0);
+    const inline = [...html.matchAll(/<script([^>]*)>([^<]*)<\/script>/g)].filter(([, , body]) => (body ?? "").length > 0);
     expect(inline).toHaveLength(1);
     expect(inline[0]![1]).toContain('nonce="n0nce+/="');
     expect(inline[0]![2]).toContain("data-scheme");

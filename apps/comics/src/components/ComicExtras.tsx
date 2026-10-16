@@ -17,13 +17,13 @@ export function comicExtras(ctx: ItemPageContext<Comic, ComicSettings, ComicExtr
   const named = latest
     ? [
         ...(latest.ungraded ? [{ label: "Raw", value: latest.ungraded }] : []),
-        ...Object.keys(latest.graded)
-          .sort(byGrade)
-          .map((k) => ({ label: k, value: latest.graded[k] })),
-        ...Object.keys(latest.estimatedGraded)
-          .sort(byGrade)
+        ...Object.entries(latest.graded)
+          .sort(([a], [b]) => byGrade(a, b))
+          .map(([label, value]) => ({ label, value })),
+        ...Object.entries(latest.estimatedGraded)
+          .sort(([a], [b]) => byGrade(a, b))
           .slice(0, 3)
-          .map((k) => ({ label: `${k} (estimate)`, value: latest.estimatedGraded[k], estimated: true })),
+          .map(([label, value]) => ({ label: `${label} (estimate)`, value, estimated: true })),
       ]
     : [];
 
@@ -55,8 +55,9 @@ export function comicExtras(ctx: ItemPageContext<Comic, ComicSettings, ComicExtr
   if (!item.slabbed) {
     const series = outlookFor(item, snapshots, settings);
     const verdict = gradingVerdict(series);
-    const ready = isReadyToGrade(series, verdict, gradingSettingsOf(settings));
     const last = series[series.length - 1];
+    // The latest point, when it clears the owner's thresholds.
+    const ready = isReadyToGrade(series, verdict, gradingSettingsOf(settings)) ? last : undefined;
     afterPrice = (
       <section className="card-surface space-y-3 p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -71,7 +72,7 @@ export function comicExtras(ctx: ItemPageContext<Comic, ComicSettings, ComicExtr
         </p>
         {ready && (
           <p className="text-sm" style={{ color: "var(--chart-good-text)" }}>
-            Clears your thresholds: {money(last.upside)} of upside after the {money(last.fee)} fee.
+            Clears your thresholds: {money(ready.upside)} of upside after the {money(ready.fee)} fee.
           </p>
         )}
       </section>

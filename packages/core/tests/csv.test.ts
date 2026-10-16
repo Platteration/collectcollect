@@ -13,15 +13,29 @@ describe("importing a spreadsheet", () => {
     const preview = engine.csv.previewImport(csv("Name,Brand,Kind,Qty,Price Paid,Mystery", "Gizmo,Acme,thingy,2,$12.50,x"));
     expect(preview.mapping).toMatchObject({ name: "Name", maker: "Brand", kind: "Kind", quantity: "Qty", purchasePrice: "Price Paid" });
     expect(preview.unmapped).toEqual(["Mystery"]);
-    expect(preview.rows[0].input).toMatchObject({ name: "Gizmo", maker: "Acme", kind: "gizmo", quantity: 2, purchasePrice: 12.5 });
+    expect(preview.rows[0]?.input).toMatchObject({ name: "Gizmo", maker: "Acme", kind: "gizmo", quantity: 2, purchasePrice: 12.5 });
+  });
+
+  it("reads nothing from an empty file or one with only blank lines, and counts lines from the top", () => {
+    expect(engine.csv.previewImport("")).toEqual({ mapping: {}, unmapped: [], rows: [], total: 0, usable: 0 });
+    expect(engine.csv.previewImport(csv("", ",,"))).toMatchObject({ rows: [], total: 0, usable: 0 });
+    const preview = engine.csv.previewImport(csv("", "name,kind", "Gizmo,gizmo"));
+    expect(preview.mapping).toStrictEqual({ name: "name", kind: "kind" });
+    expect(preview.rows.map((r) => r.line)).toEqual([3]);
+  });
+
+  it("gives a header to the first column that claims it and leaves the rest unmapped", () => {
+    const preview = engine.csv.previewImport(csv("Name,Title,Item", "Gizmo,x,y"));
+    expect(preview.mapping).toStrictEqual({ name: "Name" });
+    expect(preview.unmapped).toEqual(["Title", "Item"]);
   });
 
   it("reports rows it cannot use by line, and warns about what it assumed", () => {
     const preview = engine.csv.previewImport(csv("name,kind,year", "Gizmo,gadget,1999", ",gizmo,2000", "Odd,ufo,1990", "Old,gizmo,12"));
     expect(preview.rows.map((r) => r.line)).toEqual([2, 3, 4, 5]);
-    expect(preview.rows[1].problem).toMatch(/No widget name/);
-    expect(preview.rows[2].warning).toMatch(/not recognised/);
-    expect(preview.rows[3].problem).toMatch(/at least 1800/);
+    expect(preview.rows[1]?.problem).toMatch(/No widget name/);
+    expect(preview.rows[2]?.warning).toMatch(/not recognised/);
+    expect(preview.rows[3]?.problem).toMatch(/at least 1800/);
     expect(preview.usable).toBe(2);
   });
 
@@ -30,8 +44,8 @@ describe("importing a spreadsheet", () => {
     // lookup answers with Object itself and carries it on as a real value.
     const preview = engine.csv.previewImport(csv("name,kind", "Gizmo,constructor", "Gadget,toString"));
     expect(preview.rows.map((r) => r.problem)).toEqual([null, null]);
-    expect(preview.rows[0].warning).toMatch(/Kind "constructor" was not recognised/);
-    expect(preview.rows[1].warning).toMatch(/not recognised/);
+    expect(preview.rows[0]?.warning).toMatch(/Kind "constructor" was not recognised/);
+    expect(preview.rows[1]?.warning).toMatch(/not recognised/);
     expect(preview.rows.map((r) => r.input?.kind)).toEqual([undefined, undefined]);
     expect(preview.usable).toBe(2);
   });
@@ -51,11 +65,11 @@ describe("exporting", () => {
     engine.repo.createItem({ name: "Gizmo", kind: "gizmo", signed: true, tags: ["a", "b"], quantity: 2, purchasePrice: 3, location: "Shelf" });
     const text = engine.exportCsv();
     const [header, row] = text.trim().split("\r\n");
-    expect(header.split(",")).toEqual(["id", "name", "maker", "kind", "year", "weight", "signed", "bought_on", "tags", "history", "quantity", "cost", "location", "value_each", "value_total", "basis", "price_date", "notes"]);
+    expect(header?.split(",")).toEqual(["id", "name", "maker", "kind", "year", "weight", "signed", "bought_on", "tags", "history", "quantity", "cost", "location", "value_each", "value_total", "basis", "price_date", "notes"]);
     expect(row).toContain("Gizmo,,Gizmo,,,yes,,a; b,,2,3,Shelf");
     // and it reads straight back in
     const preview = engine.csv.previewImport(text);
-    expect(preview.rows[0].input).toMatchObject({ name: "Gizmo", kind: "gizmo", signed: true, tags: ["a", "b"], quantity: 2, purchasePrice: 3 });
+    expect(preview.rows[0]?.input).toMatchObject({ name: "Gizmo", kind: "gizmo", signed: true, tags: ["a", "b"], quantity: 2, purchasePrice: 3 });
   });
 
   it("neutralises a cell that would run as a formula", () => {

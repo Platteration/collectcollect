@@ -20,21 +20,24 @@ export async function fetchQuotes<Q>(
   timeoutMs = 20_000,
 ): Promise<{ quotes: PriceQuote[]; errors: PriceError[] }> {
   const active = providers.filter((p) => p.isConfigured());
-  const results = await Promise.allSettled(
-    active.map(async (p) => {
+  // Each provider settles into its own answer, so a failure knows whose it is
+  // without being matched back to `active` by position.
+  const answers = await Promise.all(
+    active.map(async (p): Promise<{ quotes: PriceQuote[]; error: PriceError | null }> => {
       const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new ProviderError(p.id, `${p.label} timed out`)), timeoutMs));
-      return Promise.race([p.lookup(query, fetchImpl), timeout]);
+      try {
+        return { quotes: await Promise.race([p.lookup(query, fetchImpl), timeout]), error: null };
+      } catch (err) {
+        return { quotes: [], error: { source: err instanceof ProviderError ? err.source : p.id, message: err instanceof Error ? err.message : String(err) } };
+      }
     }),
   );
   const quotes: PriceQuote[] = [];
   const errors: PriceError[] = [];
-  results.forEach((r, i) => {
-    if (r.status === "fulfilled") quotes.push(...r.value);
-    else {
-      const err = r.reason;
-      errors.push({ source: err instanceof ProviderError ? err.source : active[i].id, message: err instanceof Error ? err.message : String(err) });
-    }
-  });
+  for (const answer of answers) {
+    quotes.push(...answer.quotes);
+    if (answer.error) errors.push(answer.error);
+  }
   return { quotes, errors };
 }
 
@@ -205,12 +208,12 @@ export function summarizeGraded(args: {
   if (owner.gradeKeys.length) {
     const hit = owner.gradeKeys.find((k) => k in graded);
     if (hit) {
-      yourCopyValue = graded[hit];
+      yourCopyValue = graded[hit] ?? null;
       yourCopyBasis = `${hit} price from ${gradedSource}.`;
     } else {
       const est = owner.gradeKeys.find((k) => k in estimatedGraded);
       if (est) {
-        yourCopyValue = estimatedGraded[est];
+        yourCopyValue = estimatedGraded[est] ?? null;
         yourCopyBasis = `Estimated: ungraded price × ${gradeMultipliers[est]} (${est} multiplier from Settings).`;
       } else if (ungraded) {
         yourCopyValue = ungraded;

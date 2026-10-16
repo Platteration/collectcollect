@@ -43,6 +43,8 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
   const [ambiguous, setAmbiguous] = useState<Candidate[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const busy = status === "uploading" || status === "identifying" || status === "saving";
+  // The first field names the item, in the saved line, the merge prompt and the save button.
+  const titleKey = fields[0]?.key ?? "";
 
   const upload = async (files: File[]) => {
     const images = files.filter((f) => f.type.startsWith("image/")).slice(0, 4 - photos.length);
@@ -90,7 +92,7 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
       if (force) {
         const { item } = await api<{ item: { id: number } }>("/api/items", { method: "POST", body: JSON.stringify(input) });
         void api(`/api/items/${item.id}/price`, { method: "POST" }).catch(() => undefined);
-        setSaved({ id: item.id, merged: false, title: String(form.fields[fields[0]?.key] ?? "") });
+        setSaved({ id: item.id, merged: false, title: String(form.fields[titleKey] ?? "") });
         setStatus("saved");
         return;
       }
@@ -102,7 +104,7 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
         setAmbiguous(
           outcome.candidates.map((c) => ({
             id: c.id,
-            title: String(c[fields[0]?.key] ?? `#${c.id}`),
+            title: String(c[titleKey] ?? `#${c.id}`),
             detail: fields
               .slice(1, 4)
               .map((f) => c[f.key])
@@ -115,7 +117,7 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
         return;
       }
       void api(`/api/items/${outcome.item.id}/price`, { method: "POST" }).catch(() => undefined);
-      setSaved({ id: outcome.item.id, merged: outcome.result === "merged", title: String(form.fields[fields[0]?.key] ?? "") });
+      setSaved({ id: outcome.item.id, merged: outcome.result === "merged", title: String(form.fields[titleKey] ?? "") });
       setStatus("saved");
     } catch (e) {
       setError((e as Error).message);
@@ -257,7 +259,7 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
           </div>
         )}
         <div className="flex justify-end">
-          <button type="button" className="btn-primary" onClick={() => save(false)} disabled={busy || !(form.fields[fields[0]?.key] ?? "").trim()}>
+          <button type="button" className="btn-primary" onClick={() => save(false)} disabled={busy || !(form.fields[titleKey] ?? "").trim()}>
             {status === "saving" ? "Saving…" : `Save ${noun.singular}`}
           </button>
         </div>
