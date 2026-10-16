@@ -1,6 +1,14 @@
 import { expect, test } from "./fixtures";
 import { E2E_PASSWORD } from "./data-dir";
 
+/**
+ * Whether the page's scripts have run and React has taken it over. Its buttons
+ * are drawn on the server and visible before then, and a click in that gap
+ * sends nothing: a sign-out test that clicked as soon as Sign out appeared
+ * failed once in twenty under load, with no request ever made.
+ */
+const started = () => (window as unknown as { __collectcollectStarted?: boolean }).__collectcollectStarted === true;
+
 test.describe("password gate", () => {
   test("every page redirects to the login form until the password is given", async ({ page }) => {
     for (const path of ["/", "/collection", "/add", "/report", "/settings"]) {
@@ -10,6 +18,17 @@ test.describe("password gate", () => {
     await page.getByLabel("Password").fill(E2E_PASSWORD);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page.getByRole("heading", { name: /Settings/ })).toBeVisible();
+  });
+
+  test("the login page shows none of the app's own chrome, only the theme switch", async ({ page }) => {
+    // Its links would bounce straight back, and its alert count and Sign out are for someone signed in.
+    await page.goto("/login");
+    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Theme" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Sections" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "+ Add" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Collection" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);
   });
 
   test("an API call without a session is refused", async ({ request }) => {
@@ -54,11 +73,55 @@ test.describe("password gate", () => {
     await page.getByRole("button", { name: "Sign in" }).click();
 
     // The sign-out button is only rendered behind a session, so its arrival is
-    // the signal that the password was taken.
+    // the signal that the password was taken; it is clicked once the page has started.
     const signOut = page.getByRole("button", { name: "Sign out" });
     await expect(signOut).toBeVisible();
+    await page.waitForFunction(started);
     await signOut.click();
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    // And it was a sign-out, not a visit to the login page: the collection asks for the password again.
+    await page.goto("/collection");
+    await expect(page).toHaveURL(/\/login/);
+  });
+
+  test("signing out while the sign-in's answer is slow still ends signed out", async ({ page }) => {
+    // The sign-in answering two seconds late, as on a loaded machine. The shell
+    // once drew Sign out on the login page itself, so the test above clicked it
+    // there, before the sign-in had landed, and the sign-in then signed the
+    // page back in: it failed once in a while, and passed without signing out
+    // the rest of the time.
+    await page.route("**/api/auth", async (route) => {
+      if (route.request().method() === "POST") await new Promise((resolve) => setTimeout(resolve, 2000));
+      await route.continue();
+    });
+    await page.goto("/login");
+    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);
+    await page.getByLabel("Password").fill(E2E_PASSWORD);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL("/");
+    await page.waitForFunction(started);
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    // Nothing still on its way signs the page back in.
+    await page.waitForTimeout(3000);
+    await expect(page).toHaveURL(/\/login/);
+    expect((await page.request.get("/api/items")).status()).toBe(401);
+  });
+
+  test("a sign-out the server does not confirm is said, and the page stays signed in", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByLabel("Password").fill(E2E_PASSWORD);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL("/");
+    await page.waitForFunction(started);
+    await page.route("**/api/auth", (route) =>
+      route.request().method() === "DELETE" ? route.fulfill({ status: 500, json: { error: "The session could not be ended just now." } }) : route.continue(),
+    );
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "The session could not be ended just now." })).toBeVisible();
+    await expect(page).toHaveURL("/");
+    expect((await page.request.get("/api/items")).status()).toBe(200);
   });
 });
 
@@ -89,6 +152,7 @@ test.describe("on a phone", () => {
     }));
     expect(Math.max(...centres) - Math.min(...centres)).toBeLessThan(8);
 
+    await page.waitForFunction(started);
     await signOut.click();
     await expect(page).toHaveURL(/\/login/);
     await context.close();

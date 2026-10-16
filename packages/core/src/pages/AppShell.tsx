@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import Link from "next/link";
+import { signedIn, type Auth } from "../auth";
 import { appTitle, type DomainSpec, type NavItem } from "../domain/spec";
 import { NoScriptNote } from "../components/NoScriptNote";
 import { ServiceWorker } from "../components/ServiceWorker";
@@ -41,7 +42,7 @@ type Spec = Pick<DomainSpec, "id" | "name" | "description" | "nav" | "tabs" | "t
 export interface ShellEngine {
   spec: Spec;
   alerts: { unreadCount(): number };
-  auth: { authEnabled(): boolean };
+  auth: Pick<Auth, "authEnabled" | "SESSION_COOKIE" | "verifyToken">;
 }
 
 /** The nav in order: the standard pages with the app's own slotted in after the collection. */
@@ -95,7 +96,13 @@ export function appViewport(spec: Spec): Viewport {
 
 export async function AppShell({ engine, fontClass, footer, children }: { engine: ShellEngine; fontClass: string; footer?: string; children: React.ReactNode }) {
   const { spec } = engine;
-  const unread = engine.alerts.unreadCount();
+  // The app's own chrome is for someone signed in, as in cards and skins. On
+  // the login page, or the offline notice a phone keeps from before anyone
+  // signed in, it would offer links that bounce straight back, a Sign out
+  // button and the count of unread alerts to whoever asks, and would open the
+  // database on the requests that are meant to work without a session.
+  const member = await signedIn(engine.auth, (await cookies()).get(engine.auth.SESSION_COOKIE)?.value);
+  const unread = member ? engine.alerts.unreadCount() : 0;
   const nav = navFor(spec);
   const tabOrder = spec.tabs ?? STANDARD_TABS;
   const tabs = nav
@@ -135,6 +142,7 @@ export async function AppShell({ engine, fontClass, footer, children }: { engine
             </Link>
 
             {/* The full row is for wide screens; phones get the tab bar below. */}
+            {member && (
             <div className="ml-auto hidden items-center gap-0.5 text-sm md:flex">
               {nav.map((item) => (
                 <Link key={item.href} href={item.href} className="rounded-md px-2 py-1.5 hover:bg-[var(--surface-raised)] lg:px-3">
@@ -147,20 +155,23 @@ export async function AppShell({ engine, fontClass, footer, children }: { engine
                 </Link>
               ))}
             </div>
+            )}
 
             <div className="ml-auto flex flex-wrap items-center justify-end gap-2 max-[23.75rem]:gap-1 md:ml-0">
               <ThemeToggle themeColor={spec.theme} />
-              {engine.auth.authEnabled() && <SignOut />}
-              <Link href="/add" className="btn-primary whitespace-nowrap">
-                + Add
-              </Link>
+              {member && engine.auth.authEnabled() && <SignOut />}
+              {member && (
+                <Link href="/add" className="btn-primary whitespace-nowrap">
+                  + Add
+                </Link>
+              )}
             </div>
           </nav>
         </header>
 
         <main className="safe-x mx-auto w-full max-w-6xl flex-1 py-6 pb-24 md:pb-6">{children}</main>
 
-        <TabBar items={tabs} />
+        {member && <TabBar items={tabs} />}
 
         <footer className="safe-x hidden py-6 text-center text-xs md:block" style={{ color: "var(--muted)" }}>
           {footer ?? "Values are estimates from the sources you have configured, and change. Nothing here leaves this machine unless you send it."}

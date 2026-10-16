@@ -10,7 +10,7 @@ import { appTitle } from "../src/domain/spec";
 import { guardSource } from "../src/guard";
 
 // The nonce the proxy mints for a request, as the layout reads it back.
-vi.mock("next/headers", () => ({ headers: async () => new Headers({ "x-nonce": "n0nce+/=" }) }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ "x-nonce": "n0nce+/=" }), cookies: async () => ({ get: () => undefined }) }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 
 const { AppShell, appMetadata, navFor } = await import("../src/pages/AppShell");
