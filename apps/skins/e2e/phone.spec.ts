@@ -34,6 +34,9 @@ test.describe("on a phone", () => {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await context.newPage();
     await page.goto("/");
+    // Measured against the 390 px the context was given, not window.innerWidth: under
+    // isMobile Chromium widens the layout viewport to fit a page that overflows, so
+    // innerWidth follows the overflow and a check against it could never fail.
 
     const tabs = page.getByRole("navigation", { name: "Sections" });
     await expect(tabs).toBeVisible();
@@ -49,7 +52,7 @@ test.describe("on a phone", () => {
     expect(box.y + box.height).toBeGreaterThan(844 - 4);
     expect(box.width).toBeCloseTo(390, 0);
 
-    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 
     await tabs.getByRole("link", { name: "Inventory" }).click();
     await expect(page).toHaveURL(/\/inventory/);
@@ -59,7 +62,7 @@ test.describe("on a phone", () => {
     // hash names, and floats printed to ten decimals.
     for (const path of ["/inventory", "/items/1", "/items/2"]) {
       await page.goto(path);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     }
     await context.close();
   });
