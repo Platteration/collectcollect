@@ -17,6 +17,8 @@ process.env.DATA_DIR = path.join(root, "run-0");
 delete process.env.PRICECHARTING_TOKEN;
 delete process.env.POKEMONTCG_API_KEY;
 delete process.env.PSA_API_TOKEN;
+delete process.env.EBAY_CLIENT_ID;
+delete process.env.EBAY_CLIENT_SECRET;
 // Likewise sign-in with Google, which turns the gate on: neither app's from the shell.
 for (const prefix of ["", "SKINS_"]) {
   for (const name of ["APP_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_ALLOWED_SUBS", "GOOGLE_ALLOWED_EMAILS"]) delete process.env[`${prefix}${name}`];

@@ -3,6 +3,11 @@ import { isPsaConfigured } from "./grading/psa";
 import { PROVIDERS } from "./pricing";
 import type { ProviderStatus } from "./types";
 
+/** The sources a Test connection button is offered for, and so the only ids /api/providers/test answers. */
+export function testableProviderIds(): string[] {
+  return providerStatuses().filter((p) => p.testable).map((p) => p.id);
+}
+
 export function providerStatuses(): ProviderStatus[] {
   return [
     {
