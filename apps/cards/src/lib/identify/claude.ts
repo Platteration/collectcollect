@@ -25,7 +25,7 @@ export class IdentifyError extends Error {
   }
 }
 
-const SYSTEM_PROMPT = `You identify collectible trading cards from photographs for a personal collection catalog.
+export const SYSTEM_PROMPT = `You identify collectible trading cards from photographs for a personal collection catalog.
 
 You will receive one or more photos of a single card (front, and sometimes the back or a grading slab label). Determine exactly which card it is: the game or category, the printed name, the set it belongs to, the collector number, the year, rarity and any printing variant that affects value (holo, reverse holo, 1st edition, shadowless, foil, refractor, parallel, autograph, short print, and so on).
 
@@ -128,7 +128,7 @@ export async function identifyCard(images: ImageInput[], hint?: string, timeoutM
   return normalize(parsed);
 }
 
-function normalize(id: Identification): Identification {
+export function normalize(id: Identification): Identification {
   const trim = (s: string | null) => (s && s.trim() ? s.trim() : null);
   return {
     ...id,
