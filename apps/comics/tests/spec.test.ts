@@ -21,6 +21,15 @@ describe("the comic schema", () => {
     expect(normalizeCoverDate("5/1988")).toBe("1988-05");
     expect(normalizeCoverDate("1988")).toBe("1988");
     expect(normalizeCoverDate("1988-05-01")).toBe("1988-05");
+    expect(normalizeCoverDate("1988-5")).toBe("1988-05");
+    expect(normalizeCoverDate("1988/12")).toBe("1988-12");
+    expect(normalizeCoverDate("12-1988")).toBe("1988-12");
+    expect(normalizeCoverDate("Sept. 1988")).toBe("1988-09");
+    expect(normalizeCoverDate("1988 December")).toBe("1988-12");
+    expect(normalizeCoverDate("Smarch 1988")).toBeNull();
+    expect(normalizeCoverDate("1988 Smarch")).toBeNull();
+    expect(normalizeCoverDate("  ")).toBeNull();
+    expect(normalizeCoverDate(null)).toBeNull();
     expect(normalizeCoverDate("sometime")).toBeNull();
     expect(engine.repo.normalize({ title: "Saga", issueNumber: "1", coverDate: "Mar 2012" }).coverDate).toBe("2012-03");
     expect(() => engine.repo.normalize({ title: "Saga", issueNumber: "1", coverDate: "the nineties" })).toThrow(/Cover date/);
