@@ -24,7 +24,20 @@ export interface ImportPreview<F extends object> {
   rows: ImportRow<F>[];
   total: number;
   usable: number;
+  /** Rows past MAX_IMPORT_ROWS, which were not read at all. */
+  skippedForSize: number;
 }
+
+/**
+ * How many rows one import may carry, as in the card and skins apps.
+ *
+ * Every row is a normalisation, a duplicate lookup and an insert, run
+ * synchronously inside the request on a database the import is itself
+ * growing, so while an import runs the server answers nothing else. The
+ * route's 8 MB file is on the order of 10^5 rows, minutes of a frozen process
+ * from one request; a file bigger than this is split rather than run.
+ */
+export const MAX_IMPORT_ROWS = 5000;
 
 export interface ImportResult {
   created: number;
@@ -107,8 +120,8 @@ export function createCsvImport<F extends object, X extends object>(ctx: { spec:
     const numbered = parseCsv(text)
       .map((cells, i) => ({ cells, line: i + 1 }))
       .filter((r) => r.cells.some((cell) => cell.trim() !== ""));
-    const [headerRow] = numbered;
-    if (!headerRow) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0 };
+    const [headerRow, ...body] = numbered;
+    if (!headerRow) return { mapping: {}, unmapped: [], rows: [], total: 0, usable: 0, skippedForSize: 0 };
 
     const headers = headerRow.cells.map((h) => h.trim());
     const keys = headers.map(headerKey);
@@ -134,7 +147,10 @@ export function createCsvImport<F extends object, X extends object>(ctx: { spec:
     const unmapped = headers.filter((h, i) => !mapped.has(i) && h !== "");
     const value = (row: string[], target: string): string => (index[target] === undefined ? "" : (row[index[target]] ?? "").trim());
 
-    const rows: ImportRow<F>[] = numbered.slice(1).map(({ cells: row, line }) => {
+    // Bounded here, where the rows are read, rather than where they are written:
+    // a preview of a pathological file is not built either.
+    const skippedForSize = Math.max(0, body.length - MAX_IMPORT_ROWS);
+    const rows: ImportRow<F>[] = body.slice(0, MAX_IMPORT_ROWS).map(({ cells: row, line }) => {
       const title = value(row, spec.titleField);
       if (!title) return { line, input: null, problem: `No ${spec.noun.singular} name in this row`, warning: null };
       const warnings: string[] = [];
@@ -165,7 +181,7 @@ export function createCsvImport<F extends object, X extends object>(ctx: { spec:
       return { line, input, problem: null, warning: warnings.length ? warnings.join("; ") : null };
     });
 
-    return { mapping, unmapped, rows, total: rows.length, usable: rows.filter((r) => r.input).length };
+    return { mapping, unmapped, rows, total: rows.length, usable: rows.filter((r) => r.input).length, skippedForSize };
   }
 
   function applyImport(preview: ImportPreview<F>): ImportResult {

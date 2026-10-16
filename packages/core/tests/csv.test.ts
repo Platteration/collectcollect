@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { MAX_IMPORT_ROWS } from "../src/domain/csv/import";
 import { widgetEngine } from "./widgets";
 
 let engine: ReturnType<typeof widgetEngine>;
@@ -9,6 +10,17 @@ beforeEach(() => {
 const csv = (...lines: string[]) => lines.join("\n");
 
 describe("importing a spreadsheet", () => {
+  it("reads at most MAX_IMPORT_ROWS rows of one file, and says how many it left unread", () => {
+    expect(MAX_IMPORT_ROWS).toBe(5000);
+    const lines = Array.from({ length: MAX_IMPORT_ROWS + 3 }, (_, i) => `Gizmo ${i + 1},gizmo`);
+    const preview = engine.csv.previewImport(csv("name,kind", ...lines));
+    expect(preview.rows).toHaveLength(MAX_IMPORT_ROWS);
+    expect(preview).toMatchObject({ total: MAX_IMPORT_ROWS, usable: MAX_IMPORT_ROWS, skippedForSize: 3 });
+    // The rows read are the first ones, numbered from the top of the file.
+    expect(preview.rows.at(-1)).toMatchObject({ line: MAX_IMPORT_ROWS + 1, input: { name: `Gizmo ${MAX_IMPORT_ROWS}` } });
+    expect(engine.csv.previewImport(csv("name,kind", ...lines.slice(0, MAX_IMPORT_ROWS))).skippedForSize).toBe(0);
+  });
+
   it("maps columns by key, label, alias and base names, and says what it ignored", () => {
     const preview = engine.csv.previewImport(csv("Name,Brand,Kind,Qty,Price Paid,Mystery", "Gizmo,Acme,thingy,2,$12.50,x"));
     expect(preview.mapping).toMatchObject({ name: "Name", maker: "Brand", kind: "Kind", quantity: "Qty", purchasePrice: "Price Paid" });
@@ -17,7 +29,7 @@ describe("importing a spreadsheet", () => {
   });
 
   it("reads nothing from an empty file or one with only blank lines, and counts lines from the top", () => {
-    expect(engine.csv.previewImport("")).toEqual({ mapping: {}, unmapped: [], rows: [], total: 0, usable: 0 });
+    expect(engine.csv.previewImport("")).toEqual({ mapping: {}, unmapped: [], rows: [], total: 0, usable: 0, skippedForSize: 0 });
     expect(engine.csv.previewImport(csv("", ",,"))).toMatchObject({ rows: [], total: 0, usable: 0 });
     const preview = engine.csv.previewImport(csv("", "name,kind", "Gizmo,gizmo"));
     expect(preview.mapping).toStrictEqual({ name: "name", kind: "kind" });
