@@ -1,6 +1,7 @@
 import { round2 } from "../../pricing/match";
 import type { ItemRecord, PriceError, PriceProvider, PriceQuote, PriceSummary, PriceSummaryBase, ProviderStatus, Valuation } from "../spec";
 import { ProviderError } from "../spec";
+import type { SummaryFields } from "../stored";
 
 /**
  * Asking every source about one item, and folding the answers together.
@@ -103,6 +104,9 @@ export interface SimpleExtras {
   marketSource: string | null;
 }
 
+/** How a stored summarizeSimple summary is read back (DomainSpec.pricing.storedFields). */
+export const SIMPLE_SUMMARY_FIELDS: SummaryFields<SimpleExtras> = { market: "number", marketSource: "text" };
+
 /** Manual value first, then the first source in priority order with a USD price. */
 export function summarizeSimple(args: {
   item: Pick<ItemRecord, "manualValue" | "manualPrices">;
@@ -152,6 +156,15 @@ export interface GradedExtras {
 }
 
 export type GradedPriceSummary = PriceSummary<GradedExtras>;
+
+/** How a stored graded summary is read back (DomainSpec.pricing.storedFields). */
+export const GRADED_SUMMARY_FIELDS: SummaryFields<GradedExtras> = {
+  ungraded: "number",
+  ungradedSource: "text",
+  graded: "prices",
+  gradedSource: "text",
+  estimatedGraded: "prices",
+};
 
 /** Normalize grade labels: "psa 10", "PSA10" -> "PSA 10"; "9.5" alone -> "Grade 9.5". */
 export function gradeKey(company: string | null | undefined, grade: string | null | undefined): string | null {

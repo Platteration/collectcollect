@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { identificationBase } from "@collectcollect/core/domain/identify";
-import { manualProvider, summarizeSimple, type SimpleExtras } from "@collectcollect/core/domain/pricing/index";
+import { manualProvider, SIMPLE_SUMMARY_FIELDS, summarizeSimple, type SimpleExtras } from "@collectcollect/core/domain/pricing/index";
 import type { DomainSpec, Identification } from "@collectcollect/core/domain/spec";
 
 /**
@@ -48,6 +48,7 @@ export const spec: DomainSpec<__TYPE__, __TYPE__Settings, SimpleExtras, Query> =
     providers: [manualProvider("No price source is wired up yet. Type a value on each __SINGULAR__, or enter past values to draw the chart.")],
     query: (item) => ({ name: item.name, maker: item.maker }),
     summarize: ({ item, quotes, errors, fetchedAt }) => summarizeSimple({ item, quotes, errors, fetchedAt, priority: [] }),
+    storedFields: SIMPLE_SUMMARY_FIELDS,
   },
   settings: { defaults: {}, fields: [] },
   identify: {

@@ -1,4 +1,5 @@
 import type { ZodType } from "zod";
+import type { SummaryFields } from "./stored";
 
 /**
  * What an app has to say about its collectible for the engine to run it.
@@ -383,6 +384,12 @@ export interface DomainSpec<
     providers: PriceProvider<Q>[];
     query(item: ItemRecord<F>): Q;
     summarize(args: SummarizeArgs<F, S>): PriceSummary<X>;
+    /**
+     * The kind of each field `summarize` adds to the base ones, so a stored
+     * summary (one a restore installed included) is read back field by field
+     * into that shape rather than trusted (domain/stored.ts).
+     */
+    storedFields: SummaryFields<X>;
     /** How the recorded prices read in the Markdown value table and the history table. */
     describe?(summary: PriceSummary<X>): string;
     /** Keys the owner may type a price under (grades, completeness); empty for a single value. */

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createEngine } from "../src/domain/engine";
 import { identificationBase } from "../src/domain/identify";
-import { manualProvider, summarizeSimple, type SimpleExtras } from "../src/domain/pricing/index";
+import { manualProvider, SIMPLE_SUMMARY_FIELDS, summarizeSimple, type SimpleExtras } from "../src/domain/pricing/index";
 import type { DomainSpec, PriceProvider, PriceQuote } from "../src/domain/spec";
 
 /**
@@ -76,6 +76,7 @@ export function widgetSpec(providers: PriceProvider<{ name: string }>[] = []): D
       providers: [manualProvider("Type a price on the widget."), ...providers],
       query: (w) => ({ name: w.name }),
       summarize: ({ item, quotes, errors, fetchedAt }) => summarizeSimple({ item, quotes, errors, fetchedAt, priority: providers.map((p) => p.id) }),
+      storedFields: SIMPLE_SUMMARY_FIELDS,
       describe: (s) => (s.market === null ? "" : `${s.marketSource}: ${s.market}`),
     },
     settings: {

@@ -1,5 +1,5 @@
 import type { DomainSpec, ItemRecord } from "@collectcollect/core/domain/spec";
-import { manualProvider } from "@collectcollect/core/domain/pricing/index";
+import { GRADED_SUMMARY_FIELDS, manualProvider } from "@collectcollect/core/domain/pricing/index";
 import { certVerifier } from "./cert";
 import { ComicIdentification, PROMPT, SYSTEM_PROMPT, toInput } from "./identify";
 import { priceChartingProvider } from "./pricing/pricecharting";
@@ -76,6 +76,7 @@ export const spec: DomainSpec<Comic, ComicSettings, ComicExtras, ComicQuery> = {
     providers: [priceChartingProvider, manualProvider("A price typed on a comic overrides every source; one typed under a grade key (Grade 9.8) overrides PriceCharting for that grade. Past values can be entered by hand to draw the chart.")],
     query: (c) => ({ title: c.title, publisher: c.publisher, issueNumber: c.issueNumber, volume: c.volume, coverYear: coverYear(c.coverDate), variant: c.variant, externalIds: c.externalIds }),
     summarize: summarizeComics,
+    storedFields: GRADED_SUMMARY_FIELDS,
     describe: describeComics,
     manualKeys: ["Ungraded", "Grade 9.8", "Grade 9.6", "Grade 9.4", "Grade 9.2", "Grade 9.0", "Grade 8.0", "Grade 6.0", "Grade 4.0"],
     concurrency: 2,
