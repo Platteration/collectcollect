@@ -6,9 +6,9 @@ import { createProxy } from "@collectcollect/core/proxy";
  * id and prefix as the engine, but without importing it: the proxy bundle
  * must not carry the database along.
  *
- * The public paths are the login and what the installed app's shell needs
- * before anyone has signed in: the manifest, icons, favicon, service worker
- * and offline notice (DOMAIN_PUBLIC_PATHS).
+ * The public paths are the login, the health check, and what the installed
+ * app's shell needs before anyone has signed in: the manifest, icons,
+ * favicon, service worker and offline notice (DOMAIN_PUBLIC_PATHS).
  */
 export const proxy = createProxy(domainAuth("__ID__", "__PREFIX__"), { publicPaths: [...DOMAIN_PUBLIC_PATHS] });
 
