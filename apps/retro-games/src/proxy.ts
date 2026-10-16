@@ -6,7 +6,7 @@ import { createProxy } from "@collectcollect/core/proxy";
  * id and prefix as the engine, but without importing it: the proxy bundle
  * must not carry the database along.
  */
-export const proxy = createProxy(domainAuth("retro-games", "RETRO_GAMES"), ["/login", "/api/auth"]);
+export const proxy = createProxy(domainAuth("retro-games", "RETRO_GAMES"), ["/login", "/api/auth", "/api/health"]);
 
 export const config = {
   // Everything except Next's own assets and the favicon. Next parses this at

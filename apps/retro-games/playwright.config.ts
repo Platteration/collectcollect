@@ -1,4 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { E2E_PASSWORD, LOCKED_DATA_DIR, READ_DATA_DIR, WRITE_DATA_DIR } from "./e2e/data-dir";
 
 /**
@@ -14,6 +16,13 @@ const READ_PORT = 3240;
 const WRITE_PORT = 3241;
 const LOCKED_PORT = 3242;
 
+// Every server reaches no host but its own (scripts/e2e-offline.mjs), so a
+// price lookup made on the server fails at once rather than calling a real
+// market, whether or not the machine has a PRICECHARTING_TOKEN or a network.
+// (Playwright loads this file as CommonJS, since the package is not "type":
+// "module" as cards and skins are, hence __dirname and not import.meta.dirname.)
+const offline = [process.env.NODE_OPTIONS, `--import=${pathToFileURL(path.join(__dirname, "../../scripts/e2e-offline.mjs")).href}`].filter(Boolean).join(" ");
+
 /** Specs that write. Everything else reads the seeded collection. */
 const WRITES = /(add|import)\.spec\.ts/;
 const AUTH = /auth\.spec\.ts/;
@@ -26,7 +35,10 @@ export default defineConfig({
   workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [["github"], ["list"]] : "list",
+  // The html report is what the CI job uploads on failure; without a reporter
+  // that writes one, the upload step finds nothing. The last reporter removes
+  // the run's data directories.
+  reporter: process.env.CI ? [["github"], ["list"], ["html", { open: "never" }], ["./e2e/teardown.ts"]] : [["list"], ["./e2e/teardown.ts"]],
   use: { ...devices["Desktop Chrome"], trace: "retain-on-failure", screenshot: "only-on-failure" },
   projects: [
     { name: "read", testIgnore: [WRITES, AUTH], use: { baseURL: `http://127.0.0.1:${READ_PORT}` } },
@@ -39,21 +51,21 @@ export default defineConfig({
       port: READ_PORT,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { RETRO_GAMES_DATA_DIR: READ_DATA_DIR },
+      env: { RETRO_GAMES_DATA_DIR: READ_DATA_DIR, RETRO_GAMES_AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: offline },
     },
     {
       command: `npm start -- --port ${WRITE_PORT}`,
       port: WRITE_PORT,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { RETRO_GAMES_DATA_DIR: WRITE_DATA_DIR },
+      env: { RETRO_GAMES_DATA_DIR: WRITE_DATA_DIR, RETRO_GAMES_AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: offline },
     },
     {
       command: `npm start -- --port ${LOCKED_PORT}`,
       port: LOCKED_PORT,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { RETRO_GAMES_DATA_DIR: LOCKED_DATA_DIR, RETRO_GAMES_APP_PASSWORD: E2E_PASSWORD },
+      env: { RETRO_GAMES_DATA_DIR: LOCKED_DATA_DIR, RETRO_GAMES_APP_PASSWORD: E2E_PASSWORD, RETRO_GAMES_AUTO_REFRESH_HOURS: "0", NODE_OPTIONS: offline },
     },
   ],
 });

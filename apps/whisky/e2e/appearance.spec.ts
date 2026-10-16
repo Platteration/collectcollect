@@ -1,4 +1,5 @@
-import { devices, expect, test } from "@playwright/test";
+import { devices } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 /**
  * Every theme and palette is a tap away on a phone, from the header and from
