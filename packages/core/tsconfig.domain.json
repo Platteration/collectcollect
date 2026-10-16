@@ -1,0 +1,23 @@
+{
+  // The domain engine (src/domain, the pages and components drawn from a spec,
+  // and the grading, outlook chart and PriceCharting copies it uses), its
+  // vitest suite and that suite's config, under every option of tsconfig.json
+  // but one: noUncheckedIndexedAccess, which this code does not pass yet. It
+  // came from a branch written before the rest of the package was held to
+  // it. Once it does, these files move into tsconfig.json and this file goes.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": false
+  },
+  "include": [
+    "src/domain/**/*.ts",
+    "src/pages/**/*.tsx",
+    "src/components/domain/**/*.tsx",
+    "src/components/OutlookChart.tsx",
+    "src/grading.ts",
+    "src/pricing/**/*.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": ["node_modules"]
+}

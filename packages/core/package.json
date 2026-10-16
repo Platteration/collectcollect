@@ -21,7 +21,7 @@
   },
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.kit.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.kit.json && tsc --noEmit -p tsconfig.domain.json",
     "test": "node --test src/kit/selftest.mjs && vitest run"
   },
   "devDependencies": {
