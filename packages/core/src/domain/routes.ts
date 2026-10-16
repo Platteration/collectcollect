@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAuthRoutes } from "../auth-route";
-import { errorMessage, jsonError, parseId } from "../http";
+import { BodyLimitError, errorMessage, jsonError, parseId, readFormDataLimited, tooLarge } from "../http";
+import { MAX_REQUEST_BYTES } from "../limits";
 import { assertZippable, fileChunks, zipStream, type ZipEntry } from "../zip";
 import type { Engine } from "./engine";
 import { IdentifyError } from "./identify";
@@ -23,6 +24,26 @@ type Params = Record<string, string>;
 
 const MAX_UPLOADS = 20;
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+/**
+ * Twenty photos at the per-photo ceiling would be 500 MB, past the body buffer
+ * every request goes through (../limits.ts), where it would arrive cut short
+ * rather than refused; the app's own client sends one or a few at a time.
+ */
+const MAX_UPLOAD_BODY = Math.min(MAX_UPLOADS * MAX_UPLOAD_BYTES + 64 * 1024, MAX_REQUEST_BYTES);
+const RESTORE_TOO_LARGE = `That archive is larger than ${RESTORE_MAX_BYTES / 1024 / 1024} MB. Unpack it into the data directory by hand instead.`;
+const IMPORT_TOO_LARGE = `That is larger than ${IMPORT_MAX_BYTES / 1024 / 1024} MB. Copy the folder into the data directory instead.`;
+
+/** A multipart body, refused up front when it says it is larger than `max`, and never read past it. */
+async function formWithin(request: Request, max: number, tooLargeMessage: string, malformed: string): Promise<FormData | Response> {
+  const refused = tooLarge(request, max, tooLargeMessage);
+  if (refused) return refused;
+  try {
+    return await readFormDataLimited(request, max);
+  } catch (e) {
+    if (e instanceof BodyLimitError) return jsonError(tooLargeMessage, 413);
+    return jsonError(malformed);
+  }
+}
 const MAX_CSV_BYTES = 8 * 1024 * 1024;
 
 async function json<T>(request: Request): Promise<T | null> {
@@ -360,17 +381,13 @@ export function createRoutes<F extends object, S extends object, X extends objec
 
   const collectionImport = {
     async POST(request: Request) {
-      let form: FormData;
-      try {
-        form = await request.formData();
-      } catch {
-        return jsonError("Expected multipart/form-data with an archive or Markdown files");
-      }
+      const form = await formWithin(request, IMPORT_MAX_BYTES, IMPORT_TOO_LARGE, "Expected multipart/form-data with an archive or Markdown files");
+      if (form instanceof Response) return form;
       const archive = form.get("archive");
       const loose = form.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
       const total = (archive instanceof File ? archive.size : 0) + loose.reduce((n, f) => n + f.size, 0);
       if (total === 0) return jsonError("No files received");
-      if (total > IMPORT_MAX_BYTES) return jsonError(`That is larger than ${IMPORT_MAX_BYTES / 1024 / 1024} MB. Copy the folder into the data directory instead.`, 413);
+      if (total > IMPORT_MAX_BYTES) return jsonError(IMPORT_TOO_LARGE, 413);
       try {
         const files: Array<{ name: string; text: string }> = [];
         if (archive instanceof File && archive.size > 0) files.push(...(await restore.itemFilesFromZip(new Uint8Array(await archive.arrayBuffer()))));
@@ -407,12 +424,13 @@ export function createRoutes<F extends object, S extends object, X extends objec
 
   const uploads = {
     async POST(request: Request) {
-      let form: FormData;
-      try {
-        form = await request.formData();
-      } catch {
-        return jsonError("Expected multipart/form-data");
-      }
+      const form = await formWithin(
+        request,
+        MAX_UPLOAD_BODY,
+        `A request may carry at most ${MAX_UPLOADS} files of ${MAX_UPLOAD_BYTES / 1024 / 1024} MB each, and ${MAX_UPLOAD_BODY / 1024 / 1024} MB in all`,
+        "Expected multipart/form-data",
+      );
+      if (form instanceof Response) return form;
       const files = form.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
       if (files.length === 0) return jsonError("No files received");
       if (files.length > MAX_UPLOADS) return jsonError(`At most ${MAX_UPLOADS} files per request`);
@@ -477,15 +495,11 @@ export function createRoutes<F extends object, S extends object, X extends objec
 
   const backupRestore = {
     async POST(request: Request) {
-      let form: FormData;
-      try {
-        form = await request.formData();
-      } catch {
-        return jsonError("Expected multipart/form-data with an archive");
-      }
+      const form = await formWithin(request, RESTORE_MAX_BYTES, RESTORE_TOO_LARGE, "Expected multipart/form-data with an archive");
+      if (form instanceof Response) return form;
       const file = form.get("archive");
       if (!(file instanceof File) || file.size === 0) return jsonError("No archive received");
-      if (file.size > RESTORE_MAX_BYTES) return jsonError(`That archive is larger than ${RESTORE_MAX_BYTES / 1024 / 1024} MB. Unpack it into the data directory by hand instead.`, 413);
+      if (file.size > RESTORE_MAX_BYTES) return jsonError(RESTORE_TOO_LARGE, 413);
       try {
         return NextResponse.json({ result: await backup.restoreBackup(new Uint8Array(await file.arrayBuffer())) });
       } catch (e) {

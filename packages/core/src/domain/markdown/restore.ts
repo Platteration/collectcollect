@@ -3,6 +3,7 @@ import type { DomainDb } from "../db";
 import type { Mirror } from "./mirror";
 import type { Repository } from "../repository";
 import type { DomainSpec, ItemRecord, PriceSummary } from "../spec";
+import { MAX_REQUEST_BYTES } from "../../limits";
 import { isSafeEntryName, readZip } from "../../zip";
 import { parseItemMarkdown } from "./document";
 
@@ -25,7 +26,14 @@ export interface CollectionImport {
   warnings: Array<{ file: string; message: string }>;
 }
 
-export const IMPORT_MAX_BYTES = 128 * 1024 * 1024;
+/**
+ * Ceiling for an uploaded folder, at the body buffer every request goes
+ * through (../../limits.ts): past it Next cuts the body short instead of
+ * refusing it. A collection larger than this is restored by hand.
+ */
+export const IMPORT_MAX_BYTES = MAX_REQUEST_BYTES;
+/** What a zip of the folder may inflate to; Markdown compresses several times over. */
+const IMPORT_INFLATE_MAX_BYTES = 128 * 1024 * 1024;
 
 export function createRestore<F extends object, S extends object, X extends object>(ctx: {
   spec: DomainSpec<F, S, X, unknown>;
@@ -195,7 +203,7 @@ export function createRestore<F extends object, S extends object, X extends obje
   }
 
   async function itemFilesFromZip(archive: Uint8Array): Promise<Array<{ name: string; text: string }>> {
-    const entries = await readZip(archive, { maxTotalBytes: IMPORT_MAX_BYTES, maxEntries: 100_000 });
+    const entries = await readZip(archive, { maxTotalBytes: IMPORT_INFLATE_MAX_BYTES, maxEntries: 100_000 });
     const files: Array<{ name: string; text: string }> = [];
     for (const entry of entries) {
       if (!isSafeEntryName(entry.name)) throw new Error(`The archive contains an unsafe path: ${entry.name}`);

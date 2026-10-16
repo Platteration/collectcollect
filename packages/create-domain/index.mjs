@@ -57,6 +57,12 @@ const fill = (text) =>
     .replaceAll("__BG_DARK__", dark)
     .replaceAll("__TYPE__", typeName);
 
+// The template's next.config.ts imports the shared request-size limit by a
+// relative path (Next loads that file before it transpiles the shared
+// package), written as it reaches packages/core from the template; from
+// apps/<id> the same file is two levels further from it.
+const relocate = (text) => text.replaceAll('from "../../core/src/limits"', 'from "../../packages/core/src/limits"');
+
 let files = 0;
 const walk = (from, to) => {
   fs.mkdirSync(to, { recursive: true });
@@ -65,7 +71,7 @@ const walk = (from, to) => {
     const dst = path.join(to, fill(entry.name));
     if (entry.isDirectory()) walk(src, dst);
     else {
-      fs.writeFileSync(dst, fill(fs.readFileSync(src, "utf8")));
+      fs.writeFileSync(dst, relocate(fill(fs.readFileSync(src, "utf8"))));
       files++;
     }
   }

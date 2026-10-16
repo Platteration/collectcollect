@@ -2,14 +2,21 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { MAX_REQUEST_BYTES } from "../limits";
 import type { DomainDb } from "./db";
 import type { Images } from "./images";
 import type { Mirror } from "./markdown/mirror";
 import { assertZippable, fileChunks, isSafeEntryName, readZip, zipStream, type ZipEntry } from "../zip";
 import { isValidUploadName } from "./normalize";
 
-export const RESTORE_MAX_BYTES = 512 * 1024 * 1024;
-const RESTORE_LIMITS = { maxTotalBytes: RESTORE_MAX_BYTES, maxEntries: 100_000 };
+/**
+ * The largest backup the restore route takes, at the body buffer every request
+ * goes through (../limits.ts). It was 512 MB, which nothing could reach: Next
+ * cut every body at 10 MB, so a larger backup failed as if it were not one.
+ */
+export const RESTORE_MAX_BYTES = MAX_REQUEST_BYTES;
+/** What the archive may inflate to: the database and photos barely compress, the Markdown copy does. */
+const RESTORE_LIMITS = { maxTotalBytes: 4 * MAX_REQUEST_BYTES, maxEntries: 100_000 };
 
 export interface RestoreResult {
   photos: number;
