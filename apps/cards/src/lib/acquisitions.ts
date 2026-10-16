@@ -49,6 +49,14 @@ export interface CostBasis {
   copiesWithoutCost: number;
 }
 
+/** What a card's copies cost, for the value history rather than the figures of today. */
+export interface CostRate {
+  /** Average paid per copy, over the copies whose cost is recorded. */
+  unitCost: number;
+  /** How many copies that average covers: every copy bought with a recorded cost, sold since or not. */
+  copies: number;
+}
+
 interface LotRow {
   id: number;
   card_id: number;
@@ -289,6 +297,31 @@ export function costBasisByCard(): Map<number, CostBasis> {
   }
   const out = new Map<number, CostBasis>();
   for (const [cardId, lots] of byCard) out.set(cardId, basisFromLots(lots));
+  return out;
+}
+
+/**
+ * What each card's copies cost, for the value history to lay over the copies
+ * held at each step. The average is the one `recomputePurchasePrice` keeps on
+ * the card: over the copies still held with a recorded cost, or over every copy
+ * ever bought with one when none is held, so a card sold down to nothing keeps
+ * a rate to draw its past with. Cards with no recorded cost have none.
+ */
+export function costRatesByCard(): Map<number, CostRate> {
+  const rows = getDb()
+    .prepare(
+      `SELECT card_id,
+              SUM(quantity) AS bought, SUM(quantity * unit_cost) AS bought_cost,
+              SUM(remaining) AS held, SUM(remaining * unit_cost) AS held_cost
+       FROM acquisitions WHERE unit_cost IS NOT NULL GROUP BY card_id`,
+    )
+    .all() as Array<{ card_id: number; bought: number; bought_cost: number; held: number; held_cost: number }>;
+  const out = new Map<number, CostRate>();
+  for (const r of rows) {
+    if (!(r.bought > 0)) continue;
+    const unitCost = r.held > 0 ? r.held_cost / r.held : r.bought_cost / r.bought;
+    if (Number.isFinite(unitCost)) out.set(r.card_id, { unitCost, copies: r.bought });
+  }
   return out;
 }
 

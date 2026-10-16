@@ -1,5 +1,6 @@
+import type { HoldingsEvent } from "@collectcollect/core/holdings-history";
 import { extent, thinPoints } from "@collectcollect/core/series";
-import type { CostBasis } from "./acquisitions";
+import type { CostBasis, CostRate } from "./acquisitions";
 import type { CardRecord, Centering, Game, PriceSnapshot, PriceSummary, Settings } from "./types";
 import { round2 } from "./pricing/match";
 import { highestGradeAllowed, type CenteringCap } from "./grading/centering";
@@ -17,6 +18,27 @@ export interface PortfolioPoint {
   ungraded: number;
   /** Cards that had a price at this point. */
   priced: number;
+  /**
+   * The rest are known to the recorded holdings history (`valueTimeline`) and
+   * not to the price history of today's holdings, which has no record of what
+   * was held when. A chart draws what it is given.
+   */
+  /** Copies held at this point. */
+  copies?: number;
+  /** What the copies counted in `costedValue` cost. */
+  cost?: number;
+  /**
+   * What the copies whose cost is recorded were worth, among the cards with a
+   * price. The gap between this and `cost` is the unrealized gain, counted over
+   * the same copies on both sides, as `totalReturn` does.
+   */
+  costedValue?: number;
+  /**
+   * Running total of value that joined (or left) the collection without a price
+   * moving: a card first priced, copies bought or sold. What is not flow is
+   * the market moving.
+   */
+  flows?: number;
 }
 
 /**
@@ -93,18 +115,199 @@ export function sliceRange<T extends { t: string }>(points: T[], range: Range, n
   return points.slice(Math.max(0, idx - 1));
 }
 
+/** How finely a range is plotted: one reading per hour, day or week. */
+export type Bucket = "hour" | "day" | "week";
+
+const BUCKET_MS: Record<Bucket, number> = { hour: 36e5, day: 864e5, week: 7 * 864e5 };
+
+/**
+ * Keep one reading per bucket, the last one in it, like a daily close.
+ * Refreshing a whole collection writes a snapshot per card seconds apart, and
+ * plotting each of them draws a staircase climbing through the refresh rather
+ * than the day's move; a close per bucket is the shape a stock chart has.
+ * Buckets are cut at UTC hours, days and weeks.
+ */
+export function bucketSeries<T extends { t: string }>(points: readonly T[], bucket: Bucket): T[] {
+  const out: T[] = [];
+  let current: number | null = null;
+  for (const p of points) {
+    const key = Math.floor(new Date(p.t).getTime() / BUCKET_MS[bucket]);
+    if (key === current && out.length) out[out.length - 1] = p;
+    else {
+      out.push(p);
+      current = key;
+    }
+  }
+  return out;
+}
+
+/** The bucket a range is read at; ALL follows how much history there is. */
+export function bucketFor(range: Range, points: ReadonlyArray<{ t: string }> = []): Bucket {
+  if (range === "1W") return "hour";
+  if (range === "1M" || range === "3M") return "day";
+  if (range === "1Y") return "week";
+  const first = points[0];
+  const last = points.at(-1);
+  const span = first && last ? new Date(last.t).getTime() - new Date(first.t).getTime() : 0;
+  if (span <= 14 * 864e5) return "hour";
+  if (span <= 183 * 864e5) return "day";
+  return "week";
+}
+
+/**
+ * The points a range button shows: the window, read at that range's bucket.
+ *
+ * A collection that is new has no days to close: everything in it was recorded
+ * in an afternoon, and one close for the day would leave a single dot with
+ * nothing to be measured from. When the range's bucket leaves fewer than two
+ * points the window is read at the next finer one, down to the points as
+ * recorded, so the chart shows the history there is.
+ */
+export function rangeSeries<T extends { t: string }>(points: T[], range: Range, now = Date.now()): T[] {
+  const window = sliceRange(points, range, now);
+  const buckets: Bucket[] = ["week", "day", "hour"];
+  for (const bucket of buckets.slice(buckets.indexOf(bucketFor(range, window)))) {
+    const closes = bucketSeries(window, bucket);
+    if (closes.length >= 2 || window.length < 2) return closes;
+  }
+  return window;
+}
+
 export interface Change {
   amount: number;
   percent: number | null;
   from: string | null;
 }
 
-export function change(points: Array<{ t: string; value: number }>): Change {
-  const first = points[0];
-  const last = points.at(-1);
-  if (points.length < 2 || first === undefined || last === undefined) return { amount: 0, percent: null, from: null };
+export interface Performance extends Change {
+  /** Value of copies that joined (+) or left (−) the collection over the window, at the prices they were carried at. */
+  flows: number;
+  /** amount − flows: what the collection made or lost because prices moved. */
+  move: number;
+  /** Return on the move alone, or null when there is nothing to divide by. */
+  movePercent: number | null;
+}
+
+/** The fields a window is measured over: two points on the value line. A point with no `flows` has none. */
+type Measurable = { t: string; value: number; flows?: number };
+
+/**
+ * A window's change, split the way a brokerage splits an account: cards coming
+ * in and going out on one side, the market on the other. Buying a card lifts the
+ * line without the collection having earned anything, so the percentage of the
+ * move is taken over the value held through the window plus half the flows (the
+ * simple Dietz return, which is what a fund reports when money moves in and out
+ * mid-period). `percent` stays the plain change over the opening value.
+ */
+export function performance(first: Measurable | undefined, last: Measurable | undefined): Performance {
+  if (!first || !last) return { amount: 0, percent: null, from: null, flows: 0, move: 0, movePercent: null };
   const amount = round2(last.value - first.value);
-  return { amount, percent: first.value > 0 ? round2((amount / first.value) * 100) : null, from: first.t };
+  const flows = round2((last.flows ?? 0) - (first.flows ?? 0));
+  const move = round2(amount - flows);
+  const base = first.value + flows / 2;
+  return {
+    amount,
+    percent: first.value > 0 ? round2((amount / first.value) * 100) : null,
+    from: first.t,
+    flows,
+    move,
+    movePercent: base > 0 ? round2((move / base) * 100) : null,
+  };
+}
+
+export function change(points: Array<{ t: string; value: number }>): Change {
+  // One point has no earlier one to be measured from.
+  const { amount, percent, from } = performance(points[0], points.length > 1 ? points.at(-1) : undefined);
+  return { amount, percent, from };
+}
+
+// ---------------------------------------------------------------------------
+// The recorded value of the collection: holdings, cost and flows
+// ---------------------------------------------------------------------------
+
+/** A point on the recorded history: its totals, plus what the copies cost and what moved in. */
+export interface TimelinePoint extends PortfolioPoint {
+  unpriced: number;
+  copies: number;
+  cost: number;
+  costedValue: number;
+  flows: number;
+}
+
+/** Kill the floating-point dust left by adding and subtracting card values. */
+const clean = (n: number): number => (Math.abs(n) < 0.005 ? 0 : round2(n));
+
+/**
+ * The recorded holdings history with what a brokerage chart adds to it: the
+ * copies held, what they cost, and a running total of the value that arrived
+ * without any price moving.
+ *
+ * The totals are the ones `holdingsHistory` keeps, from the same record, so the
+ * two never disagree about what the collection was worth. Each step of the
+ * record changes one card, and its change in value is split in two. Copies
+ * bought or sold at the price they were carried at, and a card priced for the
+ * first time, are flow: the collection is bigger and nothing it held got dearer.
+ * The copies already held being re-priced is the market.
+ *
+ * Cost is the card's average recorded cost per copy times the copies held then,
+ * counting no more copies than ever had a cost recorded, and only while the card
+ * has a price, so that cost and value are compared over the same copies. It is
+ * today's recorded cost applied to the copies held back then: a lot edited
+ * since reads back as if it had always been so.
+ */
+export function valueTimeline(
+  ledger: { startedAt: string; events: readonly HoldingsEvent[] },
+  rateOf: (cardId: number) => CostRate | undefined,
+): TimelinePoint[] {
+  interface Held { qty: number; unit: number | null; raw: number; cost: number; costed: number }
+  const none: Held = { qty: 0, unit: null, raw: 0, cost: 0, costed: 0 };
+  const held = new Map<number, Held>();
+  const total = { value: 0, ungraded: 0, priced: 0, unpriced: 0, copies: 0, cost: 0, costedValue: 0, flows: 0 };
+  const totals = (): TimelinePoint => ({
+    t: "",
+    value: clean(total.value),
+    ungraded: clean(total.ungraded),
+    priced: total.priced,
+    unpriced: total.unpriced,
+    copies: total.copies,
+    cost: clean(total.cost),
+    costedValue: clean(total.costedValue),
+    flows: clean(total.flows),
+  });
+  const points: TimelinePoint[] = [{ ...totals(), t: ledger.startedAt }];
+  for (const e of ledger.events) {
+    const before = held.get(e.entityId) ?? none;
+    const rate = rateOf(e.entityId);
+    // Copies counted in the cost: none while the card has no price, so a card
+    // awaiting its first price does not read as a loss.
+    const counted = rate && e.unitValue !== null ? Math.min(e.quantity, rate.copies) : 0;
+    const after: Held = {
+      qty: e.quantity,
+      unit: e.unitValue,
+      raw: e.rawUnitValue ?? 0,
+      cost: rate ? counted * rate.unitCost : 0,
+      costed: e.unitValue !== null ? counted * e.unitValue : 0,
+    };
+    const u0 = before.unit ?? 0;
+    const u1 = after.unit ?? 0;
+    // A card with a price that is carried on is repriced (market) on the copies
+    // it already had, and the change in copies is flow; a card with no price
+    // before it has no market to move, so everything that arrives is flow.
+    total.flows += u0 > 0 ? (after.qty - before.qty) * u1 : after.qty * u1 - before.qty * u0;
+    total.value += after.qty * u1 - before.qty * u0;
+    total.ungraded += after.qty * after.raw - before.qty * before.raw;
+    total.copies += after.qty - before.qty;
+    total.cost += after.cost - before.cost;
+    total.costedValue += after.costed - before.costed;
+    total.priced += (after.qty > 0 && after.unit !== null ? 1 : 0) - (before.qty > 0 && before.unit !== null ? 1 : 0);
+    total.unpriced += (after.qty > 0 && after.unit === null ? 1 : 0) - (before.qty > 0 && before.unit === null ? 1 : 0);
+    held.set(e.entityId, after);
+    const point = { ...totals(), t: e.recordedAt };
+    // Steps recorded in the same instant (an import, a refresh of every card) are one point.
+    if (points.at(-1)?.t === point.t) points[points.length - 1] = point;
+    else points.push(point);
+  }
+  return points;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { OUTLOOK_POINTS, OUTLOOK_SHOWN, allocationByGame, capOutlook, outlookForChart, change, gradingOutlook, gradingVerdict, isReadyToGrade, outlookSeries, portfolioSeries, realizedReturn, sliceRange, totalReturn } from "@/lib/analytics";
+import { OUTLOOK_POINTS, OUTLOOK_SHOWN, allocationByGame, bucketFor, bucketSeries, capOutlook, outlookForChart, change, gradingOutlook, gradingVerdict, isReadyToGrade, outlookSeries, performance, portfolioSeries, rangeSeries, realizedReturn, sliceRange, totalReturn, valueTimeline } from "@/lib/analytics";
+import type { HoldingsEvent } from "@collectcollect/core/holdings-history";
+import { niceScale, tickLabels } from "@collectcollect/core/charts/chart-utils";
 import { DEFAULT_SETTINGS, type CardRecord, type PriceSnapshot, type PriceSummary } from "@/lib/types";
 import type { OutlookPoint } from "@/lib/analytics";
 
@@ -390,5 +392,204 @@ describe("how many outlook charts are drawn", () => {
     const few = [1, 2, 3];
     expect(capOutlook(few, false)).toEqual({ shown: few, hidden: 0 });
     expect(capOutlook(many, false, 3)).toEqual({ shown: [0, 1, 2], hidden: OUTLOOK_SHOWN + 2 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The recorded value of the collection (the value timeline)
+// ---------------------------------------------------------------------------
+
+/** One step of the holdings record: after it, the card has `quantity` copies, each worth `unit`. */
+const step = (entityId: number, d: number, quantity: number, unit: number | null, raw: number | null = unit): HoldingsEvent => ({
+  entityId,
+  recordedAt: day(d),
+  quantity,
+  unitValue: unit,
+  rawUnitValue: raw,
+});
+const ledger = (...events: HoldingsEvent[]) => ({ startedAt: day(0), events });
+const noCost = () => undefined;
+
+describe("valueTimeline: holdings and flows", () => {
+  it("counts a card only from the step that added it, and takes sold copies out at the step that sold them", () => {
+    const pts = valueTimeline(ledger(step(1, 0, 1, 100), step(2, 3, 1, null), step(2, 4, 1, 50), step(1, 6, 0, 100)), noCost);
+    expect(pts.map((p) => [p.t, p.value, p.copies, p.priced, p.unpriced])).toEqual([
+      [day(0), 100, 1, 1, 0],
+      [day(3), 100, 2, 1, 1], // card 2 joins the collection, still unpriced
+      [day(4), 150, 2, 2, 0],
+      [day(6), 50, 1, 1, 0], // card 1 sold: its past stays, its present goes
+    ]);
+  });
+
+  it("counts a card being added, first priced or sold as flow, not as a move", () => {
+    const pts = valueTimeline(ledger(step(1, 0, 2, null), step(1, 1, 2, 100), step(2, 2, 1, null), step(2, 3, 1, 40), step(1, 5, 2, 130), step(1, 6, 1, 130)), noCost);
+    expect(pts.map((p) => [p.value, p.flows])).toEqual([
+      [0, 0], // two copies catalogued, nothing priced
+      [200, 200], // priced for the first time: money in, not a gain
+      [200, 200], // card 2 catalogued, still unpriced
+      [240, 240], // card 2's first price
+      [300, 240], // card 1 up 30 a copy: the only real move so far
+      [170, 110], // one copy of card 1 sold at 130
+    ]);
+    // Over the pricing and after: 170 − 200 in value, but prices actually gained 60.
+    const over = performance(pts[1], pts[5]);
+    expect(over).toMatchObject({ amount: -30, flows: -90, move: 60 });
+    expect(over.movePercent).toBe(38.71); // 60 / (200 − 45)
+    // A window with nothing bought or sold is just the price move.
+    expect(performance(pts[3], pts[4])).toMatchObject({ amount: 60, flows: 0, move: 60, movePercent: 25 });
+  });
+
+  it("gives back what a sale took when the sale is undone", () => {
+    const pts = valueTimeline(ledger(step(1, 0, 1, 10), step(1, 1, 0, 10), step(1, 2, 1, 10)), noCost);
+    expect(pts.map((p) => [p.value, p.flows, p.copies])).toEqual([[10, 10, 1], [0, 0, 0], [10, 10, 1]]);
+  });
+
+  it("reads a price that goes away as the market, since the copies are still held", () => {
+    const pts = valueTimeline(ledger(step(1, 0, 1, 50), step(1, 1, 1, null)), noCost);
+    expect(pts.map((p) => [p.value, p.flows, p.priced, p.unpriced])).toEqual([[50, 50, 1, 0], [0, 50, 0, 1]]);
+  });
+
+  it("makes steps recorded in the same instant one point, and opens at zero when nothing is held", () => {
+    expect(valueTimeline(ledger(), noCost)).toEqual([{ t: day(0), value: 0, ungraded: 0, priced: 0, unpriced: 0, copies: 0, cost: 0, costedValue: 0, flows: 0 }]);
+    const pts = valueTimeline(ledger(step(1, 1, 1, 5), step(2, 1, 1, 7), step(1, 2, 1, 6)), noCost);
+    expect(pts.map((p) => [p.t, p.value, p.flows])).toEqual([[day(0), 0, 0], [day(1), 12, 12], [day(2), 13, 12]]);
+  });
+
+  it("carries the raw value of the copies held beside the value they are carried at", () => {
+    const pts = valueTimeline(ledger(step(1, 0, 3, 100, 80), step(1, 1, 2, 100, 90)), noCost);
+    expect(pts.map((p) => [p.value, p.ungraded])).toEqual([[300, 240], [200, 180]]);
+  });
+});
+
+describe("valueTimeline: the cost of what was held", () => {
+  const rates = new Map([[1, { unitCost: 40, copies: 2 }], [3, { unitCost: 10, copies: 1 }]]);
+  const rateOf = (id: number) => rates.get(id);
+
+  it("tracks the cost of the copies held, and of nothing that has gone", () => {
+    const pts = valueTimeline(ledger(step(1, 0, 2, null), step(1, 1, 2, 100), step(1, 3, 1, 100)), rateOf);
+    expect(pts.map((p) => [p.cost, p.costedValue])).toEqual([
+      [0, 0], // not priced yet: a card awaiting its first price is not a loss
+      [80, 200],
+      [40, 100], // one copy sold, and its cost with it
+    ]);
+  });
+
+  it("leaves out cards with no recorded cost, and copies beyond the ones that ever had one", () => {
+    // Card 2 has no rate; card 3 holds three copies of which one ever had a cost.
+    const pts = valueTimeline(ledger(step(2, 0, 1, 500), step(3, 1, 3, 20)), rateOf);
+    expect(pts.map((p) => [p.value, p.cost, p.costedValue])).toEqual([
+      [500, 0, 0],
+      [560, 10, 20],
+    ]);
+  });
+
+  it("measures the gain over the same copies on both sides, as the unrealized return does", () => {
+    const pts = valueTimeline(ledger(step(1, 0, 2, 100), step(2, 0, 1, 500)), rateOf);
+    const last = pts.at(-1);
+    // 700 of value, but the gain is over card 1 alone: 200 against the 80 paid.
+    expect(last).toMatchObject({ value: 700, cost: 80, costedValue: 200 });
+    const returns = totalReturn([card(1, 2)], () => 100, () => ({ invested: 80, copiesWithCost: 2, copiesWithoutCost: 0 }));
+    expect((last?.costedValue ?? 0) - (last?.cost ?? 0)).toBe(returns.amount);
+  });
+});
+
+describe("bucketSeries and rangeSeries", () => {
+  const hour = (n: number) => new Date(Date.UTC(2026, 0, 1, n)).toISOString();
+
+  it("reads one close per bucket, so a refresh-all does not draw a staircase", () => {
+    // Three cards re-priced seconds apart: one point for the day, at the end of it.
+    const at = (s: number) => new Date(Date.UTC(2026, 0, 2, 12, 0, s)).toISOString();
+    const pts = [day(0), at(0), at(1), at(2)].map((t, i) => ({ t, value: 100 + i }));
+    expect(bucketSeries(pts, "day")).toEqual([
+      { t: day(0), value: 100 },
+      { t: at(2), value: 103 },
+    ]);
+    expect(bucketSeries(pts, "hour").map((p) => p.value)).toEqual([100, 103]);
+    expect(bucketSeries([], "day")).toEqual([]);
+  });
+
+  it("keeps the last point of a bucket, with the running totals it carries", () => {
+    const sixAm = { ...step(1, 0, 1, 11), recordedAt: hour(6) };
+    const pts = valueTimeline(ledger(step(1, 0, 1, 10), sixAm, step(2, 1, 1, 5)), noCost);
+    // The two steps inside day 0 are one close; the flows are cumulative, so the close carries all of them.
+    expect(bucketSeries(pts, "day").map((p) => [p.t, p.value, p.flows])).toEqual([[hour(6), 11, 10], [day(1), 16, 15]]);
+  });
+
+  it("plots a week by the hour, a quarter by the day and a year by the week", () => {
+    const pts = [hour(0), hour(1), hour(2)].map((t, i) => ({ t, value: i }));
+    expect(rangeSeries(pts, "1W", new Date(hour(3)).getTime())).toHaveLength(3);
+    const at = (d: number, h: number, value: number) => ({ t: new Date(Date.UTC(2026, 0, 1 + d, h)).toISOString(), value });
+    expect(rangeSeries([...pts, at(1, 6, 10), at(1, 18, 11), at(2, 12, 20)], "3M", new Date(day(3)).getTime()).map((p) => p.value)).toEqual([2, 11, 20]);
+    expect(rangeSeries([...pts, { t: day(20), value: 9 }], "1Y", new Date(day(21)).getTime()).map((p) => p.value)).toEqual([2, 9]);
+  });
+
+  it("falls back to a finer bucket for a collection too new to have closed a day, rather than drawing one dot", () => {
+    const now = new Date(hour(8)).getTime();
+    // Everything recorded in one morning: a week of hours is two or three points, a month of days would be one.
+    const morning = [hour(1), hour(2), hour(2), hour(3)].map((t, i) => ({ t: new Date(new Date(t).getTime() + i * 1000).toISOString(), value: i }));
+    expect(rangeSeries(morning, "1M", now).map((p) => p.value)).toEqual([0, 2, 3]);
+    expect(rangeSeries(morning, "1Y", now).map((p) => p.value)).toEqual([0, 2, 3]);
+    // Within a single hour there is nothing finer than the points as they were recorded.
+    const minutes = [0, 1, 2].map((m) => ({ t: new Date(Date.UTC(2026, 0, 1, 1, m)).toISOString(), value: m }));
+    expect(rangeSeries(minutes, "1W", now).map((p) => p.value)).toEqual([0, 1, 2]);
+    // One point stays one point.
+    expect(rangeSeries(minutes.slice(0, 1), "1M", now)).toHaveLength(1);
+    expect(rangeSeries([], "1M", now)).toEqual([]);
+  });
+
+  it("reads ALL at the bucket the history's length calls for", () => {
+    const span = (days: number) => [{ t: day(0) }, { t: day(days) }];
+    expect(bucketFor("ALL", span(10))).toBe("hour");
+    expect(bucketFor("ALL", span(100))).toBe("day");
+    expect(bucketFor("ALL", span(400))).toBe("week");
+    expect(bucketFor("ALL", [])).toBe("hour");
+  });
+});
+
+describe("performance", () => {
+  it("is the plain change when nothing was added or sold, and says so when it was", () => {
+    const a = { t: day(0), value: 100, flows: 100 };
+    const b = { t: day(5), value: 130, flows: 100 };
+    expect(performance(a, b)).toEqual({ amount: 30, percent: 30, from: day(0), flows: 0, move: 30, movePercent: 30 });
+    // Cards worth 50 arrive in the window and prices gain 10: the plain 40 is not the market's.
+    const c = { t: day(5), value: 160, flows: 150 };
+    expect(performance(a, c)).toMatchObject({ amount: 60, percent: 60, flows: 50, move: 10 });
+    expect(performance(a, c).movePercent).toBe(8); // 10 / (100 + 25)
+  });
+
+  it("measures a point against itself as no change, and a window with no points as none at all", () => {
+    expect(performance({ t: day(0), value: 100 }, { t: day(0), value: 100 })).toMatchObject({ amount: 0, percent: 0, flows: 0, move: 0 });
+    expect(performance(undefined, undefined)).toEqual({ amount: 0, percent: null, from: null, flows: 0, move: 0, movePercent: null });
+    expect(change([{ t: day(0), value: 100 }])).toEqual({ amount: 0, percent: null, from: null });
+  });
+
+  it("has no percentage to give from nothing", () => {
+    const from = { t: day(0), value: 0, flows: 0 };
+    expect(performance(from, { t: day(1), value: 50, flows: 50 })).toMatchObject({ amount: 50, percent: null, flows: 50, move: 0 });
+    expect(performance(from, { t: day(1), value: 50, flows: 50 }).movePercent).toBe(0);
+    expect(performance(from, { t: day(1), value: 0, flows: 0 }).movePercent).toBeNull();
+  });
+});
+
+describe("niceScale and tickLabels", () => {
+  it("keeps the bounds it is given and puts the gridlines inside them", () => {
+    expect(niceScale(14900, 15300)).toEqual({ lo: 14900, hi: 15300, ticks: [15000, 15200] });
+    // An empty series hands in Infinity; that has to end up as a drawable frame.
+    expect(niceScale(Math.min(), Math.max())).toEqual({ lo: 0, hi: 1, ticks: [] });
+    expect(niceScale(5, 5).ticks.length).toBeLessThanOrEqual(6);
+  });
+
+  it("stops at a few gridlines when the bounds are too large for a step to move them", () => {
+    // Beside 2^59 the gap between floats is 128 and the step is 50: adding it changes nothing, for ever.
+    const huge = 2 ** 59;
+    expect(huge + 128).toBeGreaterThan(huge);
+    expect(niceScale(huge, huge + 128).ticks.length).toBeLessThanOrEqual(7);
+  });
+
+  it("labels gridlines in compact money, and in full when compact forms would repeat", () => {
+    expect(tickLabels([15000, 15200])).toEqual(["$15.0K", "$15.2K"]);
+    expect(tickLabels([15000, 15005, 15010])).toEqual(["$15,000", "$15,005", "$15,010"]);
+    expect(tickLabels([150, 150.2, 150.4])).toEqual(["$150.00", "$150.20", "$150.40"]);
+    expect(tickLabels([])).toEqual([]);
   });
 });
