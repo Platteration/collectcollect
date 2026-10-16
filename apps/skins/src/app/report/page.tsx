@@ -75,6 +75,9 @@ export default function ReportPage() {
 
       <section>
         <h2 className="font-display mb-2 text-lg font-semibold uppercase tracking-wide">Holdings</h2>
+        {/* Nine columns are wider than a phone. The table scrolls inside this box rather than widening the page,
+            which pushed the fixed tab bar off the screen; on paper it spills out of the box as it always did. */}
+        <div className="overflow-x-auto print:overflow-visible">
         <table className="w-full text-sm">
           <thead>
             <tr style={{ color: "var(--muted)" }}>
@@ -114,6 +117,7 @@ export default function ReportPage() {
             </tr>
           </tfoot>
         </table>
+        </div>
       </section>
 
       {byCategory.rows.length > 0 && (

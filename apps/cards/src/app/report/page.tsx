@@ -70,6 +70,9 @@ export default function ReportPage() {
         <Summary label="Unpriced" value={String(unpriced)} />
       </section>
 
+      {/* Seven columns are wider than a 360 px phone. The table scrolls inside this box rather than widening the page,
+          which pushed the fixed tab bar off the screen; on paper it spills out of the box as it always did. */}
+      <div className="overflow-x-auto print:overflow-visible">
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-black/15 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-white/15">
@@ -128,6 +131,7 @@ export default function ReportPage() {
           </tr>
         </tfoot>
       </table>
+      </div>
 
       <p className="text-xs leading-relaxed text-neutral-500">
         Values are market estimates gathered from the third-party price sources named in each row, at the date shown,
