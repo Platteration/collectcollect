@@ -31,7 +31,7 @@ let log: string;
  * else: no real docker, curl or network tool can be reached from PATH, so a
  * test cannot start a container or read the machine's own address by accident.
  */
-const NEEDED = ["bash", "awk", "cat", "chmod", "dirname", "grep", "head", "mktemp", "mv", "od", "openssl", "rm", "sed", "sleep", "tail", "tr", "wc", "cp", "ls", "date"];
+const NEEDED = ["bash", "awk", "cat", "chmod", "cut", "dirname", "grep", "head", "mktemp", "mv", "od", "openssl", "rm", "sed", "sleep", "tail", "tr", "wc", "cp", "ls", "date"];
 function findTool(name: string): string | null {
   for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
     const candidate = path.join(dir, name);
@@ -223,6 +223,16 @@ maybe("scripts/install.sh: a first install", () => {
     expect(run(["--lan"]).code).toBe(0);
     expect(fs.statSync(path.join(work, ".env")).mode & 0o777).toBe(0o600);
     expect(fs.statSync(path.join(work, "compose.override.yaml")).mode & 0o777).toBe(0o600);
+  });
+
+  it("says .env is private only when it is, since Git Bash on Windows keeps no permission bits", () => {
+    const real = run();
+    expect(real.out).toContain("Created .env (readable by you only)");
+    fs.rmSync(path.join(work, ".env"));
+    fake("ls", 'echo "-rw-r--r-- 1 owner group 0 Jan  1 00:00 .env"');
+    const open = run();
+    expect(open.out).not.toContain("readable by you only");
+    expect(open.out).toContain("keep the folder private");
   });
 
   it("reads a template that came out of Git for Windows with CRLF line endings", () => {
@@ -676,6 +686,7 @@ describe("scripts/install.ps1, by its text", () => {
     expect(ps1).not.toMatch(/Get-Content|Set-Content|Out-File/);
     expect(ps1).toContain("Move-Item -LiteralPath $tmp -Destination $EnvPath");
     expect(ps1).toContain("UTF8Encoding $false");
+    expect(ps1).toContain("$script:LastTempIsPrivate");
   });
 
   it("holds the health ask to a few seconds", () => {

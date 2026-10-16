@@ -202,8 +202,9 @@ function Test-AppGated {
 function Protect-File {
     # Leave a file readable by its owner alone (the counterpart of chmod 600).
     # Best effort: a drive that cannot hold permissions is said, not fatal.
+    # Returns whether it worked.
     param([Parameter(Mandatory)][string]$Path)
-    if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) { return }
+    if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) { return $false }
     try {
         $acl = Get-Acl -LiteralPath $Path
         # No inherited access (a repository under C:\ is readable by every user),
@@ -213,9 +214,11 @@ function Protect-File {
         $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($me, 'FullControl', 'Allow')
         $acl.AddAccessRule($rule)
         Set-Acl -LiteralPath $Path -AclObject $acl
+        return $true
     }
     catch {
         Write-Host "warning: could not limit who can read $Path ($($_.Exception.Message)). Keep this folder private."
+        return $false
     }
 }
 
@@ -225,7 +228,7 @@ function New-TempFile {
     param([Parameter(Mandatory)][string]$Stem)
     $path = Join-Path $RepoRoot ('.' + $Stem + '.tmp.' + [guid]::NewGuid().ToString('N').Substring(0, 8))
     [System.IO.File]::WriteAllBytes($path, [byte[]]@())
-    Protect-File -Path $path
+    $script:LastTempIsPrivate = Protect-File -Path $path
     return $path
 }
 
@@ -289,6 +292,7 @@ Write-Host "Installing: $($Selected -join ' ')"
 # --- 2. Create .env if needed ------------------------------------------------
 $Generated = [ordered]@{}
 $Missing = @()
+$script:LastTempIsPrivate = $false
 
 if (Test-Path -LiteralPath $EnvPath) {
     Write-Host ".env already exists - not changed. Checking the chosen apps for a password:"
@@ -364,7 +368,12 @@ else {
         if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
     }
 
-    Write-Host "Created .env (readable by you only), at $EnvPath. Your passwords:"
+    if ($script:LastTempIsPrivate) {
+        Write-Host "Created .env (readable by you only), at $EnvPath. Your passwords:"
+    }
+    else {
+        Write-Host "Created .env at $EnvPath. Its permissions could not be limited to you (see above), so keep the folder private. Your passwords:"
+    }
     foreach ($name in $Selected) {
         Write-Host "  ${name}: $($Generated[(Get-PasswordVar $name)])   ($(Get-PasswordVar $name) in .env)"
     }
@@ -487,7 +496,7 @@ Write-Host ""
 Write-Host "CollectCollect is running."
 foreach ($name in $Selected) { Write-Host "  ${name}: http://localhost:$($Ports[$name])" }
 if ($Generated.Count -gt 0) {
-    Write-Host "Passwords (also in .env, readable by you only; keep it private and back it up):"
+    Write-Host "Passwords (also in .env; keep that file private and back it up):"
     foreach ($name in $Selected) { Write-Host "  ${name}: $($Generated[(Get-PasswordVar $name)])" }
 }
 else {

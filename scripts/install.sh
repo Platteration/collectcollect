@@ -331,7 +331,14 @@ if [ -f .env ]; then
 else
   echo "Creating .env from .env.example with a generated password and secret for every app..."
   write_new_env
-  echo "Created .env (readable by you only), at $(pwd)/.env. Your passwords:"
+  # Said only when it is so: a file system that keeps no permission bits (Git Bash on
+  # Windows) takes the chmod and leaves the file as open as it was.
+  # shellcheck disable=SC2012  # one fixed name; only the mode column is read
+  if [ "$(ls -ld .env | cut -c1-10)" = "-rw-------" ]; then
+    echo "Created .env (readable by you only), at $(pwd)/.env. Your passwords:"
+  else
+    echo "Created .env at $(pwd)/.env. This file system did not take the permissions that would limit it to you, so keep the folder private. Your passwords:"
+  fi
   for app in $SELECTED; do
     echo "  $app: $(generated_value "$(password_var "$app")")   ($(password_var "$app") in .env)"
   done
@@ -482,7 +489,7 @@ for app in $SELECTED; do
   echo "  $app: http://localhost:$(app_port "$app")"
 done
 if [ -n "$GENERATED" ]; then
-  echo "Passwords (also in .env, readable by you only; keep it private and back it up):"
+  echo "Passwords (also in .env; keep that file private and back it up):"
   for app in $SELECTED; do
     echo "  $app: $(generated_value "$(password_var "$app")")"
   done
