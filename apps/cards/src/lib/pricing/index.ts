@@ -1,11 +1,13 @@
-import type { CardRecord, PriceQuote, PriceSource, PriceSummary, Settings } from "../types";
+import type { CardRecord, PriceQuote, PriceSummary, Settings } from "../types";
 import type { CardQuery, PriceProvider } from "./types";
 import { ProviderError } from "./types";
 import { priceChartingProvider } from "./providers/pricecharting";
+import { ebayProvider } from "./providers/ebay";
 import { pokemonTcgProvider } from "./providers/pokemontcg";
 import { ygoprodeckProvider } from "./providers/ygoprodeck";
 import { scryfallProvider } from "./providers/scryfall";
 import { round2 } from "./match";
+import { SOURCE_PRIORITY } from "./priority";
 
 /** Priority order: sources listed first win when several report an ungraded price. */
 export const PROVIDERS: PriceProvider[] = [
@@ -13,6 +15,7 @@ export const PROVIDERS: PriceProvider[] = [
   pokemonTcgProvider,
   scryfallProvider,
   ygoprodeckProvider,
+  ebayProvider,
 ];
 
 export function providersFor(game: CardQuery["game"]): PriceProvider[] {
@@ -70,7 +73,6 @@ export async function fetchQuotes(
   return { quotes, errors };
 }
 
-const SOURCE_PRIORITY: PriceSource[] = ["manual", "pricecharting", "pokemontcg", "scryfall", "ygoprodeck"];
 
 function manualQuote(manual: ManualPrices | undefined, fetchedAt: string): PriceQuote | null {
   const graded = Object.fromEntries(

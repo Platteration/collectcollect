@@ -2,6 +2,7 @@ import { extent, thinPoints } from "@collectcollect/core/series";
 import type { CostBasis } from "./acquisitions";
 import type { CardRecord, Centering, Game, PriceSnapshot, PriceSummary, Settings } from "./types";
 import { round2 } from "./pricing/match";
+import { SOURCE_PRIORITY } from "./pricing/priority";
 import { highestGradeAllowed, type CenteringCap } from "./grading/centering";
 
 // ---------------------------------------------------------------------------
@@ -208,9 +209,8 @@ export function gradingOutlook(summary: PriceSummary, settings: Settings, expect
   }
   const likely = atGrade(summary, likelyGrade);
   const provenanceOf = (label: string, value: number) => {
-    const priority = ["manual", "pricecharting", "pokemontcg", "scryfall", "ygoprodeck"];
     const quote = summary.quotes.filter(q => q.currency === "USD" && q.graded[label] === value)
-      .sort((a, b) => priority.indexOf(a.source) - priority.indexOf(b.source))[0];
+      .sort((a, b) => SOURCE_PRIORITY.indexOf(a.source) - SOURCE_PRIORITY.indexOf(b.source))[0];
     return { source: quote?.sourceLabel ?? summary.gradedSource, at: quote?.fetchedAt ?? summary.fetchedAt };
   };
   const minProvenance = provenanceOf(min.label, min.value), maxProvenance = provenanceOf(max.label, max.value);

@@ -237,6 +237,7 @@ export type PriceSource =
   | "pokemontcg"
   | "ygoprodeck"
   | "scryfall"
+  | "ebay"
   | "manual";
 
 export type Currency = "USD" | "EUR";

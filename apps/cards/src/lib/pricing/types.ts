@@ -29,6 +29,12 @@ export class ProviderError extends Error {
   constructor(
     public readonly source: string,
     message: string,
+    /**
+     * The HTTP status of a refusal the provider understood. A ProviderError
+     * that has one carries a message this app wrote (never the provider's own
+     * words), so a connection test shows it as it stands.
+     */
+    public readonly status?: number,
   ) {
     super(message);
     this.name = "ProviderError";

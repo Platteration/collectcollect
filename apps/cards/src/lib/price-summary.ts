@@ -52,7 +52,7 @@ export function readPriceSummary(raw: unknown, fetchedAt: string): PriceSummary 
   return summary;
 }
 
-const SOURCES: Record<PriceSource, true> = { pricecharting: true, pokemontcg: true, ygoprodeck: true, scryfall: true, manual: true };
+const SOURCES: Record<PriceSource, true> = { pricecharting: true, pokemontcg: true, ygoprodeck: true, scryfall: true, ebay: true, manual: true };
 const CURRENCIES: Record<Currency, true> = { USD: true, EUR: true };
 
 /** One stored quote, or nothing when it names no source this app has. */

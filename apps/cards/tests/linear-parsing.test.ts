@@ -5,6 +5,7 @@ import { looksLikeOneRatio, parseCentering, parseSide } from "@/lib/grading/cent
 import { readCentering } from "@/lib/grading/schema";
 import { caveatSentence } from "@/lib/format";
 import { readLotPart, splitSource } from "@collectcollect/core/markdown/format";
+import { readTitle } from "@/lib/pricing/providers/ebay";
 
 /**
  * Text the app did not write — a card file read back in, a request's
@@ -209,5 +210,36 @@ describe("the scans read exactly what the patterns they replaced read", () => {
     expect(disagreements(files, goalRecord, recordBefore)).toEqual([]);
     const caveats = drawn(["glare", ".", ";", ",", "!", ...spacing], 20_000, 17);
     expect(disagreements(caveats, caveatSentence, (caveat) => caveat.replace(/[.;,]?\s*$/, ""))).toEqual([]);
+  });
+});
+
+describe("reading a sold listing's title", () => {
+  // The seller wrote it, and eBay's limit is 80 characters, but the reader does
+  // not lean on that: it is handed the title whole.
+  it("reads a title of hundreds of thousands of characters in linear time, whatever it repeats", () => {
+    const hostile: Array<[string, string, unknown]> = [
+      ["spaces before a grade", `${spaces(300_000)}psa${spaces(300_000)}10`, { kind: "graded", grade: "PSA 10" }],
+      ["a grader on every word", "psa ".repeat(75_000), { kind: "skip", reason: "grade-unclear" }],
+      ["label words after a grader", `psa ${"gem mt ".repeat(40_000)}10`, { kind: "skip", reason: "grade-unclear" }],
+      ["the same reading again and again", "psa 10 ".repeat(50_000), { kind: "graded", grade: "PSA 10" }],
+      ["two words that are graders only with a grade", "tag ace ".repeat(40_000), { kind: "ungraded" }],
+      ["numbers with dots, none a grade", `${"1.".repeat(150_000)}9`, { kind: "ungraded" }],
+      ["digits without end", `psa ${"9".repeat(300_000)}`, { kind: "skip", reason: "grade-unclear" }],
+      ["letters without end", "a".repeat(300_000), { kind: "ungraded" }],
+      ["a multiple's x", "x1".repeat(150_000), { kind: "ungraded" }],
+      ["an x after every space", " x".repeat(150_000), { kind: "ungraded" }],
+      ["question marks", "?".repeat(300_000), { kind: "skip", reason: "hedged" }],
+      ["a lot at the end", `${"charizard ".repeat(30_000)}lot`, { kind: "skip", reason: "lot" }],
+    ];
+    for (const [what, title, expected] of hostile) {
+      const run = timed(() => readTitle(title));
+      expect(run.value, what).toEqual(expected);
+      expect(run.ms, what).toBeLessThan(BUDGET_MS);
+    }
+  });
+
+  it("reads a title the same with any spacing between its words", () => {
+    expect(readTitle(`Charizard${spaces(50_000)}BGS${spaces(50_000)}Black${spaces(10)}Label${spaces(50_000)}10`)).toEqual(readTitle("Charizard BGS Black Label 10"));
+    expect(readTitle("Charizard BGS Black Label 10")).toEqual({ kind: "graded", grade: "BGS 10 Black Label" });
   });
 });
