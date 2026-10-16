@@ -80,6 +80,7 @@ echo "docker $*" >> "$FAKE_LOG"
 case "$1 $2" in
   "compose version") echo "Docker Compose version v2.99.0"; exit 0 ;;
   "compose config")
+    if [ -n "\${FAKE_COMPOSE_BROKEN:-}" ]; then echo "validating compose.yaml: services.cards.ports is invalid" >&2; exit 1; fi
     if [ -n "\${FAKE_COMPOSE_REJECTS_OVERRIDE:-}" ] && grep -q '!override' compose.override.yaml 2>/dev/null; then
       echo "yaml: unknown tag !override" >&2; exit 15
     fi
@@ -216,6 +217,14 @@ maybe("scripts/install.sh: a first install", () => {
     expect(sha(".env")).toBe(before);
   });
 
+  it("keeps what it writes private even where mktemp makes files by the umask", () => {
+    // BSD, GNU and Git Bash make their temporary files 0600; this one does not, so the script's own umask is what is left to do it.
+    fake("mktemp", 'name="${1%XXXXXX}$(od -An -N3 -tx1 /dev/urandom | tr -d " \\n")"\n: > "$name"\necho "$name"');
+    expect(run(["--lan"]).code).toBe(0);
+    expect(fs.statSync(path.join(work, ".env")).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.join(work, "compose.override.yaml")).mode & 0o777).toBe(0o600);
+  });
+
   it("reads a template that came out of Git for Windows with CRLF line endings", () => {
     const template = fs.readFileSync(path.join(work, ".env.example"), "utf8").replace(/\n/g, "\r\n");
     fs.writeFileSync(path.join(work, ".env.example"), template);
@@ -302,6 +311,46 @@ maybe("scripts/install.sh: a first install", () => {
     const r = run();
     expect(r.code).toBe(1);
     expect(r.err).toContain("curl or wget is required");
+  });
+
+  it("stops, starting nothing, when Compose cannot read the files, and shows Compose's own words", () => {
+    const r = run([], { FAKE_COMPOSE_BROKEN: "1" });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("services.cards.ports is invalid");
+    expect(r.err).toContain("Nothing was started");
+    expect(upCalls()).toEqual([]);
+    const lan = run(["--lan"], { FAKE_COMPOSE_BROKEN: "1" });
+    expect(lan.code).toBe(1);
+    expect(exists("compose.override.yaml")).toBe(false);
+  });
+
+  it("stops when the template is missing, before anything is written", () => {
+    fs.rmSync(path.join(work, ".env.example"));
+    const r = run();
+    expect(r.code).toBe(1);
+    expect(r.err).toContain(".env.example not found");
+    expect(exists(".env")).toBe(false);
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("stops, writing nothing, when the random source gives something that is not hex", () => {
+    fake("openssl", 'echo "not-hex"');
+    const r = run();
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("failed to generate APP_PASSWORD");
+    expect(exists(".env")).toBe(false);
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("reads back what it wrote, and writes no .env when a value did not land", () => {
+    // A rewrite that quietly drops every line it should have filled in.
+    fake("awk", `if [ -n "\${CC_GENERATED:-}" ]; then cat > /dev/null; exit 0; fi\nPATH="${tools}" exec awk "$@"`);
+    const r = run();
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("could not write APP_PASSWORD to .env; nothing was changed");
+    expect(exists(".env")).toBe(false);
+    expect(leftovers()).toEqual([]);
+    expect(upCalls()).toEqual([]);
   });
 
   it("says so, and exits non-zero, when an app never answers", () => {
