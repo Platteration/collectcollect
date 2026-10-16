@@ -15,6 +15,7 @@ type TemplateParams = {
   "/import": Record<string, never>;
   "/items/[id]": { id: string };
   "/login": Record<string, never>;
+  "/offline": Record<string, never>;
   "/report": Record<string, never>;
   "/settings": Record<string, never>;
 };
