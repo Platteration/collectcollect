@@ -29,5 +29,8 @@
     "comics": "npm run dev -w @collectcollect/comics",
     "watches": "npm run dev -w @collectcollect/watches",
     "whisky": "npm run dev -w @collectcollect/whisky"
+  },
+  "dependencies": {
+    "next": "16.3.8"
   }
 }

@@ -21,6 +21,15 @@ describe("the comic schema", () => {
     expect(normalizeCoverDate("5/1988")).toBe("1988-05");
     expect(normalizeCoverDate("1988")).toBe("1988");
     expect(normalizeCoverDate("1988-05-01")).toBe("1988-05");
+    expect(normalizeCoverDate("1988-5")).toBe("1988-05");
+    expect(normalizeCoverDate("1988/12")).toBe("1988-12");
+    expect(normalizeCoverDate("12-1988")).toBe("1988-12");
+    expect(normalizeCoverDate("Sept. 1988")).toBe("1988-09");
+    expect(normalizeCoverDate("1988 December")).toBe("1988-12");
+    expect(normalizeCoverDate("Smarch 1988")).toBeNull();
+    expect(normalizeCoverDate("1988 Smarch")).toBeNull();
+    expect(normalizeCoverDate("  ")).toBeNull();
+    expect(normalizeCoverDate(null)).toBeNull();
     expect(normalizeCoverDate("sometime")).toBeNull();
     expect(engine.repo.normalize({ title: "Saga", issueNumber: "1", coverDate: "Mar 2012" }).coverDate).toBe("2012-03");
     expect(() => engine.repo.normalize({ title: "Saga", issueNumber: "1", coverDate: "the nineties" })).toThrow(/Cover date/);
@@ -42,10 +51,10 @@ describe("the comic schema", () => {
   it("reads the words a spreadsheet uses", () => {
     const preview = engine.csv.previewImport(["series,#,pub,date,key,of,graded,grader,cgc grade,cert,pq,ss,paid", "Amazing Spider-Man,300,Marvel,May 1988,1st app; classic cover,Venom,yes,CGC,9.4,2036123-004,OWW,no,900"].join("\n"));
     expect(preview.usable).toBe(1);
-    expect(preview.rows[0].input).toMatchObject({ title: "Amazing Spider-Man", issueNumber: "300", publisher: "Marvel", coverDate: "May 1988", keyFlags: ["first_appearance", "classic_cover"], keyOf: "Venom", slabbed: true, gradingCompany: "cgc", grade: "9.4", certNumber: "2036123-004", pageQuality: "off_white_to_white", signatureSeries: false, purchasePrice: 900 });
+    expect(preview.rows[0]?.input).toMatchObject({ title: "Amazing Spider-Man", issueNumber: "300", publisher: "Marvel", coverDate: "May 1988", keyFlags: ["first_appearance", "classic_cover"], keyOf: "Venom", slabbed: true, gradingCompany: "cgc", grade: "9.4", certNumber: "2036123-004", pageQuality: "off_white_to_white", signatureSeries: false, purchasePrice: 900 });
     const result = engine.csv.applyImport(preview);
     expect(result.created).toBe(1);
-    expect(engine.repo.listItems()[0].coverDate).toBe("1988-05");
+    expect(engine.repo.listItems()[0]?.coverDate).toBe("1988-05");
   });
 });
 
@@ -54,6 +63,7 @@ describe("one specific object, or a stack", () => {
     expect(engine.repo.intakeItem({ ...asm300, purchasePrice: 400 }).result).toBe("created");
     expect(engine.repo.intakeItem({ ...asm300, purchasePrice: 450 }).result).toBe("merged");
     const [item] = engine.repo.listItems();
+    if (!item) throw new Error("the merged stack is not listed");
     expect(item.quantity).toBe(2);
     expect(engine.ledger.listLots(item.id).map((l) => l.unitCost)).toEqual([400, 450]);
   });
@@ -71,7 +81,9 @@ describe("one specific object, or a stack", () => {
     expect(engine.repo.intakeItem(slab).result).toBe("created");
     expect(engine.repo.intakeItem(slab).result).toBe("created");
     expect(engine.repo.listItems()).toHaveLength(2);
-    expect(() => engine.repo.addAcquisition(engine.repo.listItems()[0].id, { quantity: 1 })).toThrow(/one specific object/);
+    const [first] = engine.repo.listItems();
+    if (!first) throw new Error("the slabs are not listed");
+    expect(() => engine.repo.addAcquisition(first.id, { quantity: 1 })).toThrow(/one specific object/);
   });
 });
 

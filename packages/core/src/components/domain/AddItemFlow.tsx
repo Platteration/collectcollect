@@ -42,7 +42,10 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
   const [saved, setSaved] = useState<{ id: number; merged: boolean; title: string } | null>(null);
   const [ambiguous, setAmbiguous] = useState<Candidate[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const busy = status === "uploading" || status === "identifying" || status === "saving";
+  // The first field names the item, in the saved line, the merge prompt and the save button.
+  const titleKey = fields[0]?.key ?? "";
 
   const upload = async (files: File[]) => {
     const images = files.filter((f) => f.type.startsWith("image/")).slice(0, 4 - photos.length);
@@ -61,6 +64,11 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
       setError((e as Error).message);
       setStatus("idle");
     }
+  };
+
+  const picked = (e: React.ChangeEvent<HTMLInputElement>) => {
+    void upload(Array.from(e.target.files ?? []));
+    e.target.value = "";
   };
 
   const identify = async (names: string[], withHint: string) => {
@@ -90,7 +98,7 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
       if (force) {
         const { item } = await api<{ item: { id: number } }>("/api/items", { method: "POST", body: JSON.stringify(input) });
         void api(`/api/items/${item.id}/price`, { method: "POST" }).catch(() => undefined);
-        setSaved({ id: item.id, merged: false, title: String(form.fields[fields[0]?.key] ?? "") });
+        setSaved({ id: item.id, merged: false, title: String(form.fields[titleKey] ?? "") });
         setStatus("saved");
         return;
       }
@@ -102,7 +110,7 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
         setAmbiguous(
           outcome.candidates.map((c) => ({
             id: c.id,
-            title: String(c[fields[0]?.key] ?? `#${c.id}`),
+            title: String(c[titleKey] ?? `#${c.id}`),
             detail: fields
               .slice(1, 4)
               .map((f) => c[f.key])
@@ -115,7 +123,7 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
         return;
       }
       void api(`/api/items/${outcome.item.id}/price`, { method: "POST" }).catch(() => undefined);
-      setSaved({ id: outcome.item.id, merged: outcome.result === "merged", title: String(form.fields[fields[0]?.key] ?? "") });
+      setSaved({ id: outcome.item.id, merged: outcome.result === "merged", title: String(form.fields[titleKey] ?? "") });
       setStatus("saved");
     } catch (e) {
       setError((e as Error).message);
@@ -169,20 +177,31 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
               {hasIdentify ? "Drop a photo here and it will be read for you." : "Drop a photo to keep with the record."}
             </p>
           )}
-          <button type="button" className="btn-secondary w-full" onClick={() => fileInput.current?.click()} disabled={busy || photos.length >= 4}>
-            {photos.length ? "+ Another photo" : "Choose photo"}
-          </button>
+          {/* Two inputs. One with `capture` opens a phone's camera directly, with no way to pick a photo already taken, so it
+              cannot also be the way to choose files: Take photo is that one, and Choose photos has no `capture` and takes several. */}
+          <div className="grid w-full grid-cols-2 gap-2 md:grid-cols-1">
+            <button type="button" className="btn-secondary" onClick={() => cameraInput.current?.click()} disabled={busy || photos.length >= 4}>
+              Take photo
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => fileInput.current?.click()} disabled={busy || photos.length >= 4}>
+              Choose photos
+            </button>
+          </div>
+          <input
+            ref={cameraInput}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={picked}
+          />
           <input
             ref={fileInput}
             type="file"
             accept="image/*"
             multiple
-            capture="environment"
             className="hidden"
-            onChange={(e) => {
-              void upload(Array.from(e.target.files ?? []));
-              e.target.value = "";
-            }}
+            onChange={picked}
           />
           {hasIdentify && !canIdentify && (
             <p className="text-xs" style={{ color: "var(--muted)" }}>
@@ -257,7 +276,7 @@ export function AddItemFlow({ fields, noun, canIdentify, hasIdentify, locations 
           </div>
         )}
         <div className="flex justify-end">
-          <button type="button" className="btn-primary" onClick={() => save(false)} disabled={busy || !(form.fields[fields[0]?.key] ?? "").trim()}>
+          <button type="button" className="btn-primary" onClick={() => save(false)} disabled={busy || !(form.fields[titleKey] ?? "").trim()}>
             {status === "saving" ? "Saving…" : `Save ${noun.singular}`}
           </button>
         </div>

@@ -35,7 +35,7 @@ export const IdentificationSchema = z.object({
   team: z.string().nullable().describe("For sports cards: the team printed on the card. Otherwise null."),
   rookie: z.boolean().describe("For sports cards: true when this is a rookie card (an RC logo, 'Rookie' printed on it, or a known first-year issue). Otherwise false."),
   parallel: z.string().nullable().describe("For sports cards: the parallel or refractor, with its colour and any ratio, e.g. 'Gold Refractor', 'Silver Prizm', 'Blue Wave 1:25'. Null for the base card."),
-  serial_number: z.string().nullable().describe("Serial numbering as printed, e.g. '12/99'. Null when the card is not numbered."),
+  serial_number: z.string().nullable().describe("Serial numbering as stamped, e.g. '12/99'. Null when the card is not numbered."),
   autograph: z.boolean().describe("True when the card carries an on-card or sticker autograph."),
   relic: z.boolean().describe("True when the card carries a jersey, patch, bat or other memorabilia piece."),
   grading: z.object({
@@ -50,7 +50,7 @@ export const IdentificationSchema = z.object({
         surface: z.number().nullable(),
       })
       .nullable()
-      .describe("The four subgrades on a BGS label (centering, corners, edges, surface), else null."),
+      .describe("The four subgrades printed on a BGS label (centering, corners, edges, surface), each on the 1 to 10 scale, else null."),
   }),
   condition_notes: z
     .string()

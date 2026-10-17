@@ -1,7 +1,7 @@
 import type { Auth } from "../auth";
 import { createProxy } from "../proxy";
 import { createAlerts } from "./alerts";
-import { domainAuth } from "./auth";
+import { DOMAIN_PUBLIC_PATHS, domainAuth } from "./auth";
 import { createLedger } from "./acquisitions";
 import { createBackup } from "./backup";
 import { createCsvImport } from "./csv/import";
@@ -82,7 +82,7 @@ export function createEngine<F extends object, S extends object, X extends objec
     identifier,
     backup,
     auth,
-    proxy: (publicPaths: string[] = ["/login", "/api/auth"]) => createProxy(auth, publicPaths),
+    proxy: (publicPaths: string[] = [...DOMAIN_PUBLIC_PATHS]) => createProxy(auth, publicPaths),
     scheduler,
     valuation,
     counts,

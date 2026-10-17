@@ -4,6 +4,7 @@ import { decodeColumn, normalizeInput, parseJson, toRow } from "./normalize";
 import { norm } from "../pricing/match";
 import type { DomainSpec, Identification, ItemInput, ItemRecord, NormalizedItem, PriceSnapshot, PriceSummary } from "./spec";
 import { columnOf } from "./spec";
+import { readPrices, readStoredSummary, readTexts } from "./stored";
 
 /**
  * The item repository: everything that reads or writes the `items` table,
@@ -39,6 +40,11 @@ interface SnapshotRow {
   summary: string;
 }
 
+/** A stored identification is an object of the model's answers, or there is none. */
+function identificationOf(value: unknown): Identification | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Identification) : null;
+}
+
 export type Repository<F extends object, X extends object> = ReturnType<typeof createRepository<F, object, X, unknown>>;
 
 export function createRepository<F extends object, S extends object, X extends object, Q>(ctx: {
@@ -65,10 +71,11 @@ export function createRepository<F extends object, S extends object, X extends o
       photos: Array.isArray(photos) ? photos.map(String) : [],
       referenceImageUrl: row.reference_image_url as string | null,
       accentColor: row.accent_color as string | null,
-      externalIds: parseJson(row.external_ids as string, {}),
-      identification: parseJson<Identification | null>(row.identification as string | null, null),
+      // The JSON columns are read field by field too: a restored row may hold `null` or another shape in any of them.
+      externalIds: readTexts(parseJson<unknown>(row.external_ids as string, {})),
+      identification: identificationOf(parseJson<unknown>(row.identification as string | null, null)),
       manualValue: row.manual_value as number | null,
-      manualPrices: parseJson(row.manual_prices as string, {}),
+      manualPrices: readPrices(parseJson<unknown>(row.manual_prices as string, {})),
       createdAt: row.created_at as string,
       updatedAt: row.updated_at as string,
       ...(domain as F),
@@ -154,7 +161,8 @@ export function createRepository<F extends object, S extends object, X extends o
       // directly. With several it is an average of them, so the edit is
       // ignored and the recompute below puts the average back.
       const lots = ledger.listLots(id);
-      if (lots.length === 1) getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, lots[0].id);
+      const only = lots.length === 1 ? lots[0] : undefined;
+      if (only) getDb().prepare("UPDATE acquisitions SET unit_cost = ? WHERE id = ?").run(merged.purchasePrice, only.id);
     }
     ledger.recomputePurchasePrice(id);
     const item = getItem(id);
@@ -305,8 +313,8 @@ export function createRepository<F extends object, S extends object, X extends o
       if (spec.isUnique(clean)) return { result: "created", item: createItem(input) };
       const candidates = findSimilar(clean).filter((c) => !spec.isUnique(c));
       if (candidates.length > 1) return { result: "ambiguous", candidates };
-      if (candidates.length === 1) {
-        const stack = candidates[0];
+      const stack = candidates[0];
+      if (stack) {
         const copies = clean.quantity || 1;
         // The copies being merged in are their own purchase at their own price;
         // folding them into the existing row's price would lose what they cost.
@@ -331,7 +339,8 @@ export function createRepository<F extends object, S extends object, X extends o
   }
 
   function rowToSnapshot(r: SnapshotRow): PriceSnapshot<X> {
-    return { id: r.id, itemId: r.item_id, fetchedAt: r.fetched_at, summary: JSON.parse(r.summary) as PriceSummary<X> };
+    // Read field by field: a restore installs rows this app never wrote (stored.ts).
+    return { id: r.id, itemId: r.item_id, fetchedAt: r.fetched_at, summary: readStoredSummary(r.summary, r.fetched_at, spec.pricing.storedFields) };
   }
 
   function addSnapshot(itemId: number, summary: PriceSummary<X>): PriceSnapshot<X> {

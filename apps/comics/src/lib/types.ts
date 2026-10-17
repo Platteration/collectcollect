@@ -126,20 +126,28 @@ export function normalizeCoverDate(raw: string | null | undefined): string | nul
   };
   const pad = (n: number | string) => String(n).padStart(2, "0");
   let m = text.match(/^(\d{4})(?:[-/.](\d{1,2}))?$/);
-  if (m) return m[2] ? `${m[1]}-${pad(m[2])}` : m[1];
+  if (m) {
+    const [, year = "", month = ""] = m;
+    return month ? `${year}-${pad(month)}` : year;
+  }
   m = text.match(/^(\d{4})-(\d{2})-\d{2}/);
   if (m) return `${m[1]}-${m[2]}`;
   m = text.match(/^(\d{1,2})[-/.](\d{4})$/);
-  if (m) return `${m[2]}-${pad(m[1])}`;
+  if (m) {
+    const [, month = "", year = ""] = m;
+    return `${year}-${pad(month)}`;
+  }
   m = text.match(/^([A-Za-z]{3,9})\.?,?\s+(\d{4})$/);
   if (m) {
-    const month = monthNumber(m[1]);
-    return month ? `${m[2]}-${pad(month)}` : null;
+    const [, name = "", year = ""] = m;
+    const month = monthNumber(name);
+    return month ? `${year}-${pad(month)}` : null;
   }
   m = text.match(/^(\d{4})\s+([A-Za-z]{3,9})$/);
   if (m) {
-    const month = monthNumber(m[2]);
-    return month ? `${m[1]}-${pad(month)}` : null;
+    const [, year = "", name = ""] = m;
+    const month = monthNumber(name);
+    return month ? `${year}-${pad(month)}` : null;
   }
   return null;
 }

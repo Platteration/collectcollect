@@ -15,7 +15,10 @@ export function gameExtras(ctx: ItemPageContext<Game, GameSettings, GameExtras>)
 
   const named = latest
     ? [
-        ...["Loose", "CIB", "New", "Graded"].filter((k) => latest.tiers[k]).map((k) => ({ label: k === "New" ? "New (sealed)" : k, value: latest.tiers[k] })),
+        ...["Loose", "CIB", "New", "Graded"].flatMap((k) => {
+          const value = latest.tiers[k];
+          return value ? [{ label: k === "New" ? "New (sealed)" : k, value }] : [];
+        }),
         ...(latest.estimatedGraded.Graded ? [{ label: "Graded (estimate)", value: latest.estimatedGraded.Graded, estimated: true }] : []),
       ]
     : [];
@@ -38,8 +41,9 @@ export function gameExtras(ctx: ItemPageContext<Game, GameSettings, GameExtras>)
   if (gradeable(item)) {
     const series = outlookFor(item, snapshots, settings);
     const verdict = gradingVerdict(series);
-    const ready = isReadyToGrade(series, verdict, gradingSettingsOf(settings));
     const last = series[series.length - 1];
+    // The latest point, when it clears the owner's thresholds.
+    const ready = isReadyToGrade(series, verdict, gradingSettingsOf(settings)) ? last : undefined;
     afterPrice = (
       <section className="card-surface space-y-3 p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -53,7 +57,7 @@ export function gameExtras(ctx: ItemPageContext<Game, GameSettings, GameExtras>)
         </p>
         {ready && (
           <p className="text-sm" style={{ color: "var(--chart-good-text)" }}>
-            Clears your thresholds: {money(last.upside)} of upside after the {money(last.fee)} fee.
+            Clears your thresholds: {money(ready.upside)} of upside after the {money(ready.fee)} fee.
           </p>
         )}
       </section>

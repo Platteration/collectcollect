@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test.describe("one game", () => {
   test("prices a stack per copy and in total, and keeps each purchase", async ({ page }) => {
@@ -7,7 +7,9 @@ test.describe("one game", () => {
 
     await expect(page.getByRole("heading", { name: "Super Mario 64" })).toBeVisible();
     await expect(page.getByText("Nintendo 64 · NTSC-U · 1996", { exact: true })).toBeVisible();
-    await expect(page.getByText("Complete in box")).toBeVisible();
+    // Said twice, on purpose: the condition badge under the title and the Completeness fact in the record.
+    await expect(page.locator(".badge").filter({ hasText: /^Complete in box$/ })).toBeVisible();
+    await expect(page.getByRole("definition").filter({ hasText: /^Complete in box$/ })).toBeVisible();
     await expect(page.getByText(/\$300\.00 for 3/)).toBeVisible();
     await expect(page.getByText(/paid \$45\.00 each/)).toBeVisible();
     // Two recorded values, so the history is a table and the chart has a line.
@@ -28,8 +30,12 @@ test.describe("one game", () => {
     await expect(page.getByRole("heading", { name: "The Legend of Zelda: Ocarina of Time" })).toBeVisible();
     // One object: there is no such thing as another copy of it.
     await expect(page.getByRole("button", { name: "Bought more" })).toHaveCount(0);
-    await expect(page.getByText("WATA 9.4 A+")).toBeVisible();
-    await expect(page.getByText(/0921347001/)).toBeVisible();
+    // The grade is said twice: the condition badge under the title and the slab label this app draws.
+    await expect(page.locator(".badge").filter({ hasText: /^WATA 9\.4 A\+$/ })).toBeVisible();
+    await expect(page.locator(".slab-label").filter({ hasText: /^WATA 9\.4 A\+$/ })).toBeVisible();
+    // The cert number is said twice: beside the slab label and as a fact in the record.
+    await expect(page.getByText("cert 0921347001", { exact: true })).toBeVisible();
+    await expect(page.getByRole("definition").filter({ hasText: /^0921347001$/ })).toBeVisible();
     await expect(page.getByText("Gold cartridge, first print.")).toBeVisible();
   });
 
@@ -37,7 +43,8 @@ test.describe("one game", () => {
     await page.goto("/collection?q=Chrono+Trigger");
     await page.getByRole("link", { name: /Chrono Trigger/ }).click();
     await expect(page.getByRole("heading", { name: "Chrono Trigger" })).toBeVisible();
-    await expect(page.getByText("Not priced")).toBeVisible();
+    // Exactly the figure: the line under it also says "Not priced yet".
+    await expect(page.getByText("Not priced", { exact: true })).toBeVisible();
   });
 
   test("has nothing at an id that is not there", async ({ page }) => {

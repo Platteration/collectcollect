@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ProviderError } from "@collectcollect/core/domain/spec";
+import { NO_LIMIT } from "@collectcollect/core/limiter";
+import { setPriceChartingLimit } from "@collectcollect/core/pricing/pricecharting";
 import { buildSearch, priceChartingProvider, productToQuote, scoreProduct } from "@/lib/pricing/pricecharting";
 import type { GameQuery } from "@/lib/types";
 import { fakeFetch } from "./helpers";
@@ -13,6 +15,8 @@ const other = { id: "4", "product-name": "Super Mario 64 DS", "console-name": "N
 
 beforeEach(() => {
   process.env.PRICECHARTING_TOKEN = "test-token";
+  // The client asks PriceCharting one call a second; a test does not wait for that.
+  setPriceChartingLimit(NO_LIMIT);
 });
 afterEach(() => {
   delete process.env.PRICECHARTING_TOKEN;
@@ -52,7 +56,7 @@ describe("asking PriceCharting about a game", () => {
     const fetchImpl = fakeFetch([["/api/products?", { status: "success", products: [other, pal, choice, us] }]]);
     const quotes = await priceChartingProvider.lookup(query(), fetchImpl);
     expect(quotes).toHaveLength(1);
-    expect(quotes[0].externalId).toBe("1");
+    expect(quotes[0]?.externalId).toBe("1");
     expect(fetchImpl.calls[0]).toContain("q=Super%20Mario%2064%20Nintendo%2064");
     expect(fetchImpl.calls[0]).toContain("t=test-token");
   });
@@ -63,7 +67,7 @@ describe("asking PriceCharting about a game", () => {
       ["/api/products?", { status: "success", products: [pal] }],
     ]);
     const quotes = await priceChartingProvider.lookup(query({ externalIds: { pricecharting: "1" } }), fetchImpl);
-    expect(quotes[0].externalId).toBe("1");
+    expect(quotes[0]?.externalId).toBe("1");
     expect(fetchImpl.calls).toHaveLength(1);
     expect(fetchImpl.calls[0]).toContain("/api/product?");
   });
@@ -74,7 +78,7 @@ describe("asking PriceCharting about a game", () => {
       ["/api/products?", { status: "success", products: [us] }],
     ]);
     const quotes = await priceChartingProvider.lookup(query({ externalIds: { pricecharting: "gone" } }), fetchImpl);
-    expect(quotes[0].externalId).toBe("1");
+    expect(quotes[0]?.externalId).toBe("1");
     expect(fetchImpl.calls).toHaveLength(2);
   });
 
@@ -88,6 +92,13 @@ describe("asking PriceCharting about a game", () => {
     await expect(priceChartingProvider.lookup(query(), fetchImpl)).rejects.toBeInstanceOf(ProviderError);
     const down = fakeFetch([["/api/products?", {}, 503]]);
     await expect(priceChartingProvider.lookup(query(), down)).rejects.toThrow(/503/);
+  });
+
+  it("says PriceCharting is rate limiting this app, whether it was asked by id or by search", async () => {
+    const limited = fakeFetch([["/api/", {}, 429]]);
+    await expect(priceChartingProvider.lookup(query(), limited)).rejects.toBeInstanceOf(ProviderError);
+    await expect(priceChartingProvider.lookup(query(), limited)).rejects.toThrow(/PriceCharting is rate limiting this app/);
+    await expect(priceChartingProvider.lookup(query({ externalIds: { pricecharting: "1" } }), limited)).rejects.toThrow(/PriceCharting is rate limiting this app/);
   });
 
   it("does nothing without a token", async () => {

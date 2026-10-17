@@ -10,7 +10,9 @@ import { fileURLToPath } from "node:url";
  *
  * Copies the template into apps/<id> with the placeholders filled in. The
  * result runs as-is with a starter spec; the domain's own fields, providers,
- * identification prompt and seed data go into src/lib/spec.ts.
+ * identification prompt and seed data go into src/lib/spec.ts. It is
+ * installable on a phone as it stands, with a placeholder mark in the accent
+ * colour (scripts/icon.svg, rendered into public/ by `npm run icons`).
  */
 
 const args = process.argv.slice(2);
@@ -55,6 +57,12 @@ const fill = (text) =>
     .replaceAll("__BG_DARK__", dark)
     .replaceAll("__TYPE__", typeName);
 
+// The template's next.config.ts imports the shared request-size limit by a
+// relative path (Next loads that file before it transpiles the shared
+// package), written as it reaches packages/core from the template; from
+// apps/<id> the same file is two levels further from it.
+const relocate = (text) => text.replaceAll('from "../../core/src/limits"', 'from "../../packages/core/src/limits"');
+
 let files = 0;
 const walk = (from, to) => {
   fs.mkdirSync(to, { recursive: true });
@@ -63,11 +71,22 @@ const walk = (from, to) => {
     const dst = path.join(to, fill(entry.name));
     if (entry.isDirectory()) walk(src, dst);
     else {
-      fs.writeFileSync(dst, fill(fs.readFileSync(src, "utf8")));
+      fs.writeFileSync(dst, relocate(fill(fs.readFileSync(src, "utf8"))));
       files++;
     }
   }
 };
 walk(template, target);
 console.log(`Created apps/${id} (${files} files).`);
-console.log(`Next: describe the domain in apps/${id}/src/lib/spec.ts, then\n  npm install\n  npm run dev -w @collectcollect/${id}`);
+
+// The icons are PNGs and an .ico, which a template of text cannot hold: they
+// are drawn from the app's own icon.svg in its colours, here and by `npm run
+// icons` afterwards. An app without them still runs, but cannot be installed
+// on a phone, so a failure is said rather than left to be found.
+try {
+  const { writeIcons } = await import("../../scripts/render-icons.mjs");
+  await writeIcons({ svgPath: path.join(target, "scripts", "icon.svg"), ground: dark, publicDir: path.join(target, "public") });
+} catch (error) {
+  console.warn(`Could not draw the app's icons (${error instanceof Error ? error.message : error}). Fix that, then run:\n  npm run icons -w @collectcollect/${id}`);
+}
+console.log(`Next: describe the domain in apps/${id}/src/lib/spec.ts, draw a mark of your own in apps/${id}/scripts/icon.svg (then npm run icons -w @collectcollect/${id}), then\n  npm install\n  npm run dev -w @collectcollect/${id}`);

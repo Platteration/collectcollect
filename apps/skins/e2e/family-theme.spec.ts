@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test("header palette follows the user onto every page without recoloring returns", async ({ page }) => {
   await page.goto("/");
@@ -18,7 +18,7 @@ test("header palette follows the user onto every page without recoloring returns
   expect(after.slice(1)).toEqual(before.slice(1));
   await page.keyboard.press("Escape");
   await expect(page.locator(".cc-palette-menu")).not.toHaveAttribute("open");
-  await page.goto("/collection");
+  await page.goto("/inventory");
   await expect(page.locator("html")).toHaveAttribute("data-scheme", "indigo");
   await page.getByRole("button", { name: "Dark", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-scheme", "indigo");
@@ -27,7 +27,7 @@ test("header palette follows the user onto every page without recoloring returns
 });
 
 test("a different tab can change the palette while Settings is closed", async ({ page, context }) => {
-  await page.goto("/collection");
+  await page.goto("/inventory");
   const other = await context.newPage();
   await other.goto("/");
   await other.getByLabel("Appearance palettes").click();

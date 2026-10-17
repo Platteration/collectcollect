@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { claudeModel, isClaudeConfigured } from "./identify/claude";
 import { PROVIDERS } from "./pricing";
-import type { CardQuery } from "./pricing/types";
+import { ProviderError, type CardQuery } from "./pricing/types";
 const sample: Record<string, CardQuery> = {
   pokemontcg: { game: "pokemon", name: "Charizard", setName: "Base", cardNumber: "4" },
   pricecharting: { game: "pokemon", name: "Charizard", setName: "Base", cardNumber: "4" },
@@ -27,6 +27,8 @@ export async function checkProvider(id: string, fetchImpl: typeof fetch = fetch)
       return { ok: true, message: quotes.length ? "Connection succeeded and a sample price was returned." : "Connection succeeded. No price matched the sample card." };
     } finally { clearTimeout(timer); }
   } catch (e) {
+    // A refusal a provider understood: its message is this app's own words (see ProviderError), so it is shown as written.
+    if (e instanceof ProviderError && e.status !== undefined) return { ok: false, message: e.message };
     const status = (e as { status?: number }).status;
     if (status === 401 || status === 403) return { ok: false, message: "Credentials were refused. Check the key and its permissions, then restart the app." };
     if (status === 404) return { ok: false, message: "The configured model or provider endpoint was not found. Check the model setting." };

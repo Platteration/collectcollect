@@ -4,5 +4,17 @@
   "private": true,
   "description": "Scaffold a new collection app on the shared domain engine.",
   "type": "module",
-  "bin": { "create-domain": "./index.mjs" }
+  "bin": { "create-domain": "./index.mjs" },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --root template"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.8",
+    "typescript": "^5",
+    "vitest": "^5.0.0"
+  }
 }

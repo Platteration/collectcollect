@@ -1,7 +1,12 @@
 import type { Metadata, Viewport } from "next";
+import { cookies, headers } from "next/headers";
 import Link from "next/link";
-import type { DomainSpec, NavItem } from "../domain/spec";
+import { signedIn, type Auth } from "../auth";
+import { appTitle, type DomainSpec, type NavItem } from "../domain/spec";
+import { NoScriptNote } from "../components/NoScriptNote";
+import { ServiceWorker } from "../components/ServiceWorker";
 import { SignOut } from "../components/SignOut";
+import { Started } from "../components/Started";
 import { TabBar } from "../components/TabBar";
 import { ThemeToggle } from "../components/ThemeToggle";
 
@@ -13,11 +18,12 @@ import { ThemeToggle } from "../components/ThemeToggle";
  */
 
 /**
- * Resolve the stored preference to a concrete theme before the first paint, so
- * the page never flashes the wrong one. Everything else in the app, CSS
- * variables and Tailwind's dark: utilities alike, keys off this one attribute.
+ * Resolve the stored theme and color scheme before the first paint, so the
+ * page never flashes the wrong one. Everything else in the app, CSS variables
+ * and Tailwind's dark: utilities alike, keys off these attributes. The same
+ * script as the cards and skins layouts', kept in step with appearance.ts.
  */
-const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("theme")||"system";var d=p==="dark"||(p!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.setAttribute("data-theme",d?"dark":"light")}catch(e){}})()`;
+export const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("theme")||"system";var d=p==="dark"||(p!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.setAttribute("data-theme",d?"dark":"light");var s=localStorage.getItem("colorScheme")||"teal";document.documentElement.setAttribute("data-scheme",s)}catch(e){}})()`;
 
 const STANDARD_NAV: NavItem[] = [
   { href: "/", label: "Portfolio", icon: "▲" },
@@ -36,7 +42,7 @@ type Spec = Pick<DomainSpec, "id" | "name" | "description" | "nav" | "tabs" | "t
 export interface ShellEngine {
   spec: Spec;
   alerts: { unreadCount(): number };
-  auth: { authEnabled(): boolean };
+  auth: Pick<Auth, "authEnabled" | "SESSION_COOKIE" | "verifyToken">;
 }
 
 /** The nav in order: the standard pages with the app's own slotted in after the collection. */
@@ -45,12 +51,34 @@ export function navFor(spec: Pick<Spec, "nav">): NavItem[] {
   return [...STANDARD_NAV.slice(0, 2), ...extra, ...STANDARD_NAV.slice(2)];
 }
 
+/**
+ * The destinations a phone's tab bar leaves out, in nav order: the standard
+ * Import page and any the app added to its nav. The header's row is hidden on a
+ * phone, so these are listed on Settings, the way cards and skins list theirs.
+ * Settings itself is a tab (or, if an app dropped it, this is its page).
+ */
+export function offTheTabBar(spec: Pick<Spec, "nav" | "tabs">): NavItem[] {
+  const onTabs = spec.tabs ?? STANDARD_TABS;
+  return navFor(spec).filter((item) => !onTabs.includes(item.href) && item.href !== "/settings");
+}
+
 export function appMetadata(spec: Spec): Metadata {
   return {
     title: `CollectCollect · ${spec.name}`,
     description: spec.description,
-    applicationName: `CollectCollect ${spec.name}`,
+    applicationName: appTitle(spec),
     appleWebApp: { capable: true, title: `CC ${spec.name}`, statusBarStyle: "default" },
+    // What makes it installable: the app's own manifest route and the icons in
+    // its public folder (see domain/pwa.ts). The favicon is the one file a
+    // browser also asks for by its fixed address.
+    manifest: "/manifest.webmanifest",
+    icons: {
+      icon: [
+        { url: "/favicon.ico", sizes: "any" },
+        { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      ],
+      apple: "/icons/apple-touch-icon.png",
+    },
   };
 }
 
@@ -66,23 +94,44 @@ export function appViewport(spec: Spec): Viewport {
   };
 }
 
-export function AppShell({ engine, fontClass, footer, children }: { engine: ShellEngine; fontClass: string; footer?: string; children: React.ReactNode }) {
+export async function AppShell({ engine, fontClass, footer, children }: { engine: ShellEngine; fontClass: string; footer?: string; children: React.ReactNode }) {
   const { spec } = engine;
-  const unread = engine.alerts.unreadCount();
+  // The app's own chrome is for someone signed in, as in cards and skins. On
+  // the login page, or the offline notice a phone keeps from before anyone
+  // signed in, it would offer links that bounce straight back, a Sign out
+  // button and the count of unread alerts to whoever asks, and would open the
+  // database on the requests that are meant to work without a session.
+  const member = await signedIn(engine.auth, (await cookies()).get(engine.auth.SESSION_COOKIE)?.value);
+  const unread = member ? engine.alerts.unreadCount() : 0;
   const nav = navFor(spec);
   const tabOrder = spec.tabs ?? STANDARD_TABS;
+  // When the tab bar leaves destinations out, Settings lists them (its "Go to"
+  // list), so its tab is labelled More, as in cards and skins.
+  const more = offTheTabBar(spec).length > 0;
   const tabs = nav
     .filter((i) => tabOrder.includes(i.href))
     .sort((a, b) => tabOrder.indexOf(a.href) - tabOrder.indexOf(b.href))
-    .map((i) => (i.href === "/alerts" ? { ...i, badge: unread } : i));
+    .map((i) => (i.href === "/alerts" ? { ...i, badge: unread } : i.href === "/settings" && more ? { ...i, label: "More", icon: "☰" } : i));
+
+  // The theme script and the safety net need the nonce the proxy minted for
+  // this request, or the content security policy refuses them: the page paints
+  // in the wrong theme and palette until the app starts, and a page that
+  // failed to start says nothing.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
 
   return (
-    <html lang="en" data-theme="light" className={`${fontClass} h-full antialiased`} suppressHydrationWarning>
+    <html lang="en" data-theme="light" data-scheme="teal" className={`${fontClass} h-full antialiased`} suppressHydrationWarning>
       {/* eslint-disable-next-line @next/next/no-head-element -- an App Router layout's head, not a pages/ one; the lint rule keys off this folder's name */}
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        {/* The safety net, in a file of its own (packages/core/src/guard.ts): a
+            page whose scripts fail to arrive or throw while starting says so. */}
+        <script src="/guard.js" nonce={nonce} async />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body className="flex min-h-full flex-col">
+        <NoScriptNote app={appTitle(spec)} />
+        <Started />
+        <ServiceWorker />
         <header
           className="safe-top sticky top-0 z-20 border-b backdrop-blur"
           style={{ borderColor: "var(--line)", background: "color-mix(in srgb, var(--background) 88%, transparent)" }}
@@ -96,6 +145,7 @@ export function AppShell({ engine, fontClass, footer, children }: { engine: Shel
             </Link>
 
             {/* The full row is for wide screens; phones get the tab bar below. */}
+            {member && (
             <div className="ml-auto hidden items-center gap-0.5 text-sm md:flex">
               {nav.map((item) => (
                 <Link key={item.href} href={item.href} className="rounded-md px-2 py-1.5 hover:bg-[var(--surface-raised)] lg:px-3">
@@ -108,20 +158,23 @@ export function AppShell({ engine, fontClass, footer, children }: { engine: Shel
                 </Link>
               ))}
             </div>
+            )}
 
-            <div className="ml-auto flex items-center gap-2 md:ml-0">
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2 max-[23.75rem]:gap-1 md:ml-0">
               <ThemeToggle themeColor={spec.theme} />
-              {engine.auth.authEnabled() && <SignOut />}
-              <Link href="/add" className="btn-primary whitespace-nowrap">
-                + Add
-              </Link>
+              {member && engine.auth.authEnabled() && <SignOut />}
+              {member && (
+                <Link href="/add" className="btn-primary whitespace-nowrap">
+                  + Add
+                </Link>
+              )}
             </div>
           </nav>
         </header>
 
         <main className="safe-x mx-auto w-full max-w-6xl flex-1 py-6 pb-24 md:pb-6">{children}</main>
 
-        <TabBar items={tabs} />
+        {member && <TabBar items={tabs} />}
 
         <footer className="safe-x hidden py-6 text-center text-xs md:block" style={{ color: "var(--muted)" }}>
           {footer ?? "Values are estimates from the sources you have configured, and change. Nothing here leaves this machine unless you send it."}

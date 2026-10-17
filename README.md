@@ -9,48 +9,8 @@ Snap a photo of a card and CollectCollect:
 1. **Identifies it** with Claude's vision model: game, name, set, collector number, year, rarity, printing variant (holo, 1st edition, refractor, autograph…) and, if it's in a slab, the grading company, grade and cert number; it also reads the centering as border ratios when the photo shows them.
 2. **Looks up the going rate** for an **ungraded (raw)** copy and for **graded** copies (PSA / BGS / CGC / SGC) from live price sources.
 3. **Keeps it in your collection** with quantity, condition or grade, purchase price, notes and a price history, and totals up what your collection is worth.
-4. **Shows your portfolio** the way a brokerage app would: one headline number for the whole collection (valued at the grade or condition you recorded for each copy), the change over 1W / 1M / 3M / 1Y / all time, a value-over-time chart you can scrub, the cost of what you hold drawn beside it, your total return against what you paid, the split by game, and your top holdings. Each card page has its own value chart, the price you paid, and its return.
+4. **Shows your portfolio** the way a brokerage app would: one headline number for the whole collection (valued at the grade or condition you recorded for each copy), the change over 1W / 1M / 3M / 1Y / all time, a value-over-time chart you can scrub, the cost of the copies you hold drawn beside it, your total return against what you paid, the split by game, and your top holdings. Each card page has its own value chart, the price you paid, and its return.
 5. **Tells you when to grade.** Every ungraded card gets a min/max outlook: the band between a mid-grade outcome and a gem-mint outcome, plotted against what the raw copy is worth. When the gap above the raw line is at its widest and clears your grading fee, the card is flagged as a good time to grade; when it has narrowed, it says wait; when even a PSA 10 would not cover the fee, it says skip.
-
-## Quick start
-
-For a persistent cards-only installation, see [Self-hosting](docs/SELF_HOSTING.md).
-Manual entry and CSV import work without API keys. The first-run checklist links
-to setup, provider connection tests, and backups.
-
-```bash
-npm install
-cp .env.example .env      # add ANTHROPIC_API_KEY (and optional price-source keys)
-npm run dev               # http://localhost:3000
-```
-
-Production: `npm run build && npm start`. Everything is stored locally in `apps/cards/data` (SQLite database, uploaded photos, and a Markdown copy of the collection); set `DATA_DIR` to move it.
-
-> Upgrading from a version before the app moved into `apps/cards`? Your collection is still where it was. On start the app looks for a `data` folder above itself and uses the one it finds, saying so in the log. Move it to `apps/cards/data`, or set `DATA_DIR`, to settle it permanently.
-
-Docker: `docker compose up -d --build cards` starts the card app on 3000 with its
-own named volume at `/data`. Add skins with `docker compose up -d --build skins`
-on port 3001. `docker compose up --build` still starts both apps. To build an image
-directly, pick the app with a build argument:
-
-```bash
-docker build -t collectcollect .                            # the card app
-docker build -t collectcollect-skins --build-arg APP=skins .
-```
-
-**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach. Failed attempts are rate limited, and changing the password invalidates existing sessions. Each session carries an id: signing out ends that one, wherever a copy of its cookie went, and *Sign out everywhere* on the Settings page ends every session issued so far — for the phone that was lost or the browser left signed in. The record lives in `sessions.json` in the data directory. Sessions from before this record existed are not recognised, so upgrading asks for the password once more.
-
-> Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
-
-**Behind a proxy.** The login limiter and the per-route limits count attempts per client. Without a proxy every client is one client, and the `X-Forwarded-For` header is ignored — anyone can send one. Set `TRUST_PROXY=1` only when a reverse proxy in front of the app sets that header, and it will be read — as will `X-Forwarded-Proto`, which is what lets the session cookie be marked `Secure` and the response carry HSTS when the proxy terminates TLS. Compose binds both apps to `127.0.0.1`; put the proxy in front and change the bind address there, since neither app speaks TLS.
-
-**Request origins.** Both apps refuse unknown public Host names and cross-site browser writes, including in passwordless mode. IP addresses, single-label names and private-use `.localhost`, `.local`, `.lan`, `.internal` and `.home.arpa` names work by default. Set `ALLOWED_HOSTS` to a comma-separated list of the names served by your reverse proxy, and have it preserve the public Host header. Scripts may omit browser Origin/Fetch Metadata headers, but JSON API bodies must use `Content-Type: application/json`. Multipart uploads and restores keep their existing format.
-
-**Webhooks.** The alert webhook is posted to by the server itself, so it has to be an address on the public internet: `localhost`, `*.local`, and any private, loopback or link-local address are refused when saved, a name that resolves to one is refused at delivery, and the request does not follow redirects.
-
-**What every response carries.** A content security policy that allows scripts only from the app itself, plus the one inline script that applies the theme before first paint, which is let through by a nonce minted per request; images from the app, `data:`/`blob:` and (for cards) any https host a price source's reference image might come from; nothing framed, nothing embedded. Alongside it: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, a strict referrer policy, and a permissions policy that refuses the camera except where scan mode uses it. `GET /api/health` answers without a session — `{ ok, app, database, scheduler: { enabled, running, lastRunAt } }`, and nothing more, since it answers anyone — for a container health check or a proxy. `database` is true only when a query has just run through the live connection: a database file whose restore journal cannot be replayed reports false, with the reason in the log rather than the response, and an install with no database yet reports false without one being created. `ok` means the process answers.
-
-**Limits on the expensive routes.** Identifying a photo (10 a minute), uploading (30), refreshing every price (6), pricing one card (120, since a scan or a bulk refresh sends one per card), reading a folder or a Steam inventory back in (6), importing a spreadsheet (30), downloading a backup or the folder (6), and restoring a backup or putting one back (6) each refuse with a 429 and a `Retry-After` past their limit. They are in memory and per process — protection against a runaway client or a double-clicked button, not a public API's defence. Only one whole-collection price refresh runs at a time, whoever asks: a second is told so with a 409, since the answer it wants is already being produced.
 
 ## How pricing works
 
@@ -61,6 +21,7 @@ docker build -t collectcollect-skins --build-arg APP=skins .
 | [Pokémon TCG API](https://pokemontcg.io) | Pokémon | optional `POKEMONTCG_API_KEY` | TCGplayer market price per printing (normal / holo / reverse / 1st ed.), Cardmarket EUR |
 | [Scryfall](https://scryfall.com/docs/api) | Magic | none | USD / EUR, foil and non-foil |
 | [YGOPRODeck](https://ygoprodeck.com/api-guide/) | Yu-Gi-Oh! | none | TCGplayer, eBay, Cardmarket, per-set price |
+| [eBay Marketplace Insights](https://developer.ebay.com/api-docs/buy/marketplace-insights/overview.html) | all | `EBAY_CLIENT_ID` + `EBAY_CLIENT_SECRET` (the Production keys of a developer account eBay has approved for this Limited Release API) | The median sold price, ungraded and per grade, of the last 90 days' sold listings, asked one call a second; a listing's title is used only when it names one grade plainly (a hedge such as "PSA 10?", a lot, or a grader the app keys no price for is left out). Not verified against a live account; eBay requires a category id the app does not send yet, and until it does an approved account's searches are refused, which Settings' *Test connection* reports |
 | Manual entry | all | — | Your own ungraded / graded prices, which override everything else |
 
 The first four also supply set checklists for completion tracking, except PriceCharting.
@@ -68,7 +29,7 @@ The first four also supply set checklists for completion tracking, except PriceC
 For each card the app shows:
 
 - **Ungraded (raw NM)** market price and where it came from.
-- **Graded copies**: real graded prices when a source has them (PriceCharting or your manual entry). Grades with no real data are shown as **estimates** (`est.`) computed as *ungraded price × multiplier*; the multipliers live in Settings and default to conservative round numbers, so tune them per your experience (TAG 10 and TAG 9 are in the defaults for a new install; an existing Settings keeps its own rows, so add them there to estimate TAG grades). When more than one source reports the same grade, the figure shown is their average and the card page lists each source behind it; a price you enter yourself still wins its grade outright. Today PriceCharting is the only source of graded prices, so the average appears once a second one is wired in.
+- **Graded copies**: real graded prices when a source has them (PriceCharting or your manual entry). Grades with no real data are shown as **estimates** (`est.`) computed as *ungraded price × multiplier*; the multipliers live in Settings and default to conservative round numbers, so tune them per your experience (TAG 10 and TAG 9 are in the defaults for a new install; an existing Settings keeps its own rows, so add them there to estimate TAG grades). When more than one source reports the same grade, the figure shown is their average and the card page lists each source behind it; a price you enter yourself still wins its grade outright. PriceCharting and eBay's sold listings both report graded prices, but until eBay's searches carry a category id (above) PriceCharting is in practice the only one, so the average appears once eBay answers.
 - **Your copy**: the value of the specific copy you own. A PSA 9 uses the PSA 9 / Grade 9 price; a raw Lightly Played copy uses the ungraded price × the LP condition multiplier.
 
 A refresh stores a snapshot when anything about the price changed, so a card's detail page shows how its price has moved and the portfolio chart fills in; one that finds the same prices only notes when it checked, so a card refreshed daily for a year does not carry a year of identical rows. A refresh that returns no price (source down, no source configured for that game, no match) is reported but never stored over a card's last known value.
@@ -85,13 +46,13 @@ A refresh stores a snapshot when anything about the price changed, so a card's d
 
 Centering is recorded on every card, raw or graded, as border ratios: front and back, left/right and top/bottom, typed in the way a grader writes them, taken from a report, or read from the photo. Each company publishes how far off a card may be at each grade, and the card page says how far the measured centering lets it grade with each ("Centering allows up to PSA 9 · BGS 9 · …"). Those limits were taken from guides quoting the published standards and are marked approximate; check the company's page before sending a card in. The 3D view shifts the print by the measured centering.
 
-**Scan mode.** `/scan` is for working through a binder or a stack. Shoot one card at a time with the camera, or drop in a batch of photos. Each shot runs through upload, identification and saving on its own, two at a time, and a card that matches something you already own is merged as an extra copy automatically. Anything the model was less than 80% sure of, or that matches more than one card you own, is set aside for review instead of being saved unattended.
+**Scan mode.** `/scan` is for working through a binder or a stack. Shoot one card at a time with the camera, or drop in a batch of photos. Each shot runs through upload, identification and saving on its own, two at a time, and a card that matches something you already own is merged as an extra copy automatically. Anything the model was less than 80% sure of, or that matches more than one card you own, is set aside for review instead of being saved unattended. Over plain http on a phone, use *Choose photos*; the live camera needs https.
 
 **Duplicates.** Saving a card that matches one you already have (same game and name, with the same number or set) offers to add it as another copy instead. A copy only joins a row it is interchangeable with: the same grade, grading company and cert number (two slabs are two objects), and the same variant, language and condition, since each of those is valued differently. Anything else is set aside for a decision rather than merged.
 
 **When a value changes.** Recording a grade, a condition or a price of your own, or changing the multipliers in Settings, revalues the card at once from the prices already fetched; nothing waits for the next refresh. A refresh that learns which product a source matched remembers it without counting as an edit, so refreshing the whole collection does not reorder it. If a source matched the wrong product, *Not this card* on the card page forgets the match and searches again by name, set and number; editing those fields does the same. A source is only believed when its best answer plausibly is the card: every word of the name (Magic included: a misspelt name is for you to correct, not for Scryfall's closest match to price), and the number or the set agreeing when you gave one.
 
-**Grading outlook math.** *max* is the PSA 10 price (real if a source reports it, otherwise ungraded × the PSA 10 multiplier); *min* is the PSA 8 / Grade 8 price on the same basis, falling back to the raw price; *upside* is max − raw − grading fee (Settings). A measured centering caps *max* at the best grade the company's centering limits allow (a 60/40 front can be a PSA 9 at most), priced at that grade or the next one down that has a price, and holds the photo's likely grade there too; the verdict, the Ready flag and the ready-to-grade alert follow. "Good time to grade" means today's upside is within 10% of the highest upside in the card's history and positive.
+**Grading outlook math.** *max* is the PSA 10 price (real if a source reports it, otherwise ungraded × the PSA 10 multiplier); *min* is the PSA 8 / Grade 8 price on the same basis, falling back to the raw price; *upside* is max − raw − grading fee (Settings). A measured centering caps *max* at the best grade the company's centering limits allow (a 60/40 front can be a PSA 9 at most), priced at that grade or the next one down that has a price, and holds the photo's likely grade there too; the verdict, the Ready flag and the ready-to-grade alert follow. *Near the best recorded premium* means today's upside is positive and within 10% of the widest the card's history recorded, read at one price a day (the day's last); with fewer than three different days the verdict names the upside and says it needs more history, so three refreshes in one afternoon do not make a verdict. It compares recorded prices; it does not predict a grade or a sale price.
 
 Sports cards have no free price API; without a PriceCharting token you can still enter prices manually.
 
@@ -101,7 +62,7 @@ Sports cards have no free price API; without a PriceCharting token you can still
 
 **Appraisal report.** `/report` is a printable valuation of everything you own, with photos, identifications, grades, per-copy and total values, and the source and date behind each price. Print to PDF from the browser. Set the owner name in Settings.
 
-**Import.** `/import` reads a CSV, whether it is this app's own export or a spreadsheet from another collection tool. Columns are matched by name, so headers like “Card Name”, “Edition”, “Qty” or “Price Paid” usually need no editing, and game and condition names are understood in the forms people actually write them ("Yu-Gi-Oh!", "Lightly Played", "VG"). A preview shows the matched columns, which columns were ignored, and any row it could not use, before anything is written. Rows matching a card you already own merge into it rather than duplicating; names are matched however their accents are cased ("ÉLECTRODE" and "électrode" are one card). One import reads at most 5,000 rows, and the preview says how many it left for another file.
+**Import.** `/import` reads a CSV, whether it is this app's own export or a spreadsheet from another collection tool. Columns are matched by name, so headers like “Card Name”, “Edition”, “Qty” or “Price Paid” usually need no editing, and game and condition names are understood in the forms people actually write them ("Yu-Gi-Oh!", "Lightly Played", "VG"). A preview shows the matched columns, which columns were ignored, and any row it could not use, before anything is written. Rows matching a card you already own merge into it rather than duplicating; names are matched however their accents are cased ("ÉLECTRODE" and "électrode" are one card). One import reads at most 5,000 rows, and the preview says how many it left for another file. Sports columns (team, rookie, parallel, serial number, autograph, relic, BGS subgrades) are read too; see [Sports cards](#sports-cards).
 
 **Set completion.** `/sets` lists every set your collection touches. Fetch a set's published checklist and it shows how complete the set is, which cards are still missing, and which you already have. Ownership is matched on collector number however it is written ("4/102" against "4"), falling back to the card name. Checklists come from the same sources as the prices: the Pokémon TCG API, Scryfall for Magic, and YGOPRODeck for Yu-Gi-Oh!. Sports cards have no checklist source, and the page says so rather than offering a button that cannot work.
 
@@ -129,7 +90,7 @@ The files hold every purchase and the newest thousand recorded prices per card o
 
 The archive is written and read by a small built-in zip writer and reader rather than a dependency. Tests check the writer against the system `unzip` and Python's `zipfile`, read back archives made by the system `zip` in both stored and deflated form, and confirm that a corrupted payload, a doctored entry name, a path that escapes, an oversized expansion and a database that will not open are each refused with the collection left untouched.
 
-**Export.** The Collection page has an *Export CSV* button (also `GET /api/export`) with every card, its grade or condition, purchase price, and latest ungraded / PSA 10 / your-copy prices.
+**Export.** The Collection page has an *Export CSV* button (also `GET /api/export`) with every card, its grade or condition, purchase price, and latest ungraded / PSA 10 / your-copy prices, and a sports card's team, rookie flag, parallel, serial number, autograph and relic flags and subgrades.
 
 ## Sports cards
 
@@ -142,14 +103,27 @@ The card app covers sports cards as a game type of its own rather than a separat
 | Team | |
 | Rookie card | flag |
 | Parallel / refractor | the parallel's name and colour as printed: Gold Refractor, Silver Prizm, Blue Wave 1:25 |
-| Serial number | `12/99`, however it was typed (`12 of 99`, `#12/99`) |
+| Serial number | `12/99`, however it was typed (`12 of 99`, `#12/99`); anything else is kept as typed |
 | Autograph, relic / patch | flags |
-| Grading company, grade, cert | PSA, BGS, SGC, CGC, TAG |
-| Subgrades | centering, corners, edges, surface, shown for BGS slabs |
+| Grading company, grade, cert | PSA, BGS, SGC, CGC, TAG… |
+| Subgrades | centering, corners, edges, surface: the four grades a BGS label prints, each from 1 to 10. The form asks for them on a BGS slab. They are not the card's measured centering (the border ratios, which have their own boxes) and not the grading company's report |
 
-**One specific object, or a stack?** A serial-numbered card is one specific object: `12/99` names it, so it is never merged with another copy and nothing is merged into it. So is a graded card at its own grade. Raw copies of the same card stack only when they are the same parallel: a base card and its Refractor are two rows, and two base copies are one row with a quantity of two and a purchase lot each.
+**One specific object, or a stack?** A serial-numbered card is one specific object: `12/99` names it, so it is never merged with another copy and nothing is merged into it, whether it arrives by scan, spreadsheet import, the intake API or the add form, which does not offer it as a copy of another card. A parallel is its own card: a base card and its Refractor are two rows, and copies of the same parallel (however its case or spacing) stack. Base copies, with no number and no parallel, stack as any card does: two base copies are one row with a quantity of two and a purchase lot each, provided grade, company, cert, variant, language and condition also agree. Restoring from the Markdown files follows the same rule: a file for a Refractor is never matched to the base card that holds its id.
 
-**Pricing.** There is no free sports-card price API. PriceCharting (`PRICECHARTING_TOKEN`, paid) is the only source, through the same adapter as every other game: the search carries the year, brand, set, player, number and the parallel, autograph and relic words the way PriceCharting names its listings, and a listing that names the parallel outranks the base card when the copy is one. Without a token, type the ungraded and graded prices in by hand on the card; they override every source and the chart, verdict and report work from them. Photo identification reads the team, RC logo, parallel, serial numbering, autograph and relic, and the four subgrades on a BGS label. Sports cards have no set-checklist source either, and the Sets page says so.
+**Pricing.** There is no free sports-card price API. PriceCharting (`PRICECHARTING_TOKEN`, paid) is the only working source, through the same adapter as every other game: the search carries the year, brand, set, player, number and the parallel, autograph and relic words the way PriceCharting names its listings, and a listing that names the parallel outranks the base card when the copy is one. Changing a card's parallel, autograph or relic makes the next refresh search afresh instead of asking for the product it matched before. Without a token, type the ungraded and graded prices in by hand on the card; they override every source and the chart, verdict and report work from them. Photo identification reads the team, RC logo, parallel, serial numbering, autograph and relic, and the four subgrades on a BGS label. Sports cards have no set-checklist source either, and the Sets page says so.
+
+**Spreadsheets.** Import reads team, rookie (or RC), parallel (or refractor, insert), serial number (`serial`, `serial number`, `numbered`, `print run`), autograph, relic and the four subgrades (`subgrade centering`… or plain `centering`, `corners`, `edges`, `surface`). A `serial` column is the numbering stamped on the card, not a cert number (use `cert`), and a `parallel` column is a parallel, not a variant. A row with a sport but no game reads as sports cards. The CSV export has team, rookie, parallel, serial_number, autograph, relic and subgrade_* columns, and importing it reads them back.
+
+## The value chart
+
+The line on the portfolio page is what the collection was worth as the app recorded it. Every purchase, sale, correction and new price is a step in a record kept from the day the app first opened, so the chart never totals today's cards against every old price. (*Show price history of current holdings* is the other view: today's copies priced at every old price, with no record of what was held when. It has no cost line and no split below.)
+
+- **Cost beside value.** A dashed line follows what the copies held cost, from the purchase lots. The tooltip names it and says how far the value is ahead of (▲ +) or behind (▼ −) it, over the same copies on both sides, so the gain at the newest point is the *Unrealized* figure above the chart. Only copies with a recorded cost, on cards that have a price, are counted, as in the return. The cost is today's recorded average per copy laid over the copies held at each step: a purchase edited since reads as if it had always been so, and a purchase or sale appears when it was entered, not on the date typed. Click *Cost basis* in the key under the chart to hide it; over a week a low cost can flatten the scale.
+- **Cards added are not gains.** When a window includes cards added, sold or priced for the first time, the change above the chart is split into how much came from those and how much from prices moving. The percentage beside the market's part is taken over the value held plus half of what came in (the simple Dietz return a fund reports for a period with money moving in and out), and the headline drops its own percentage then, since it would count the cards that came in as a gain.
+- **One close per bucket.** Refreshing every card writes a snapshot per card seconds apart. 1W is read by the hour, 1M and 3M by the day, 1Y by the week and ALL by how long the history is, each point the last in its bucket (cut at UTC midnight), so the chart draws the day's move and not the staircase of a refresh in progress. A collection too new to have closed a day is read at a finer bucket, down to the points as recorded.
+- **Scaled to the data.** The axis fits the range on screen instead of starting at zero, with a dotted rule at the value the window opened at, so a 2% week reads as a 2% week. The cost line is the first slot of the validated chart palette, dashed, so the two lines differ in shape as well as colour; direction is always the arrow and the sign as well as green or red.
+
+A card's own page carries the same chart for one copy, with the price you paid drawn across it.
 
 ## Card identification
 
@@ -187,112 +161,9 @@ The app is installable. Add it to a home screen and it opens without browser chr
 
 A small service worker makes that work and lets the shell open without a network, showing a plain "no connection" page. It deliberately never caches API responses or page HTML: prices, grades and the collection itself change, and a stale answer about what something is worth would be worse than no answer. Nor does it answer anything under `/api/`, a page's address included, so the way to Google and back during a sign-in always reaches the server.
 
-Five destinations fit on the tab bar; the last one is labelled *More* and leads to Settings, where the rest are listed. The skins app is installable in the same way, with its own icon and its own service worker. Because a service worker's scope is an origin and each app's worker clears every cache it does not own, the two apps have to be served from different origins — which two ports are, and which two paths on one host are not.
+Five destinations fit on the tab bar; the last one is labelled *More* and leads to Settings, where the rest are listed. The skins app is installable in the same way, with its own icon and its own service worker. Because a service worker's scope is an origin and each app's worker clears every cache it does not own, the two apps have to be served from different origins — which two ports are, and which two paths on one host are not. The four apps on the domain engine (Retro games, Comics, Watches, Whisky) are installable the same way, each with its own icon in its accent colour (a game pad, a speech bubble, a wristwatch, a tumbler), a name, splash and browser-chrome colour taken from its spec, and its own service worker, and each loads the same safety net as the card app: a note on any page whose scripts fail to arrive or throw while starting, and a note for a browser with JavaScript off. A browser offers *Install app* only on https or on localhost: over plain `http://<LAN address>` none of the six is installable, and Chrome on Android offers *Add to Home screen* as a shortcut that opens in a tab, with no service worker. To try the install on a phone without https, plug it in, run `adb reverse tcp:3004 tcp:3004` (one per app port) and open `http://localhost:3004` on the phone. [Phone access](docs/SELF_HOSTING.md#phone-access) says what works at an `http://` address and what Tailscale Serve adds. None of this has been tried on a real phone yet.
 
-The repository is an npm workspace, so a second collectible can get its own app
-without either one inheriting the other's assumptions. Root scripts fan out
-across all of them.
-
-```
-apps/cards/              this app
-apps/skins/              the same idea for CS2 items — see its own section below
-apps/retro-games/        four apps on the shared domain engine; each is a spec
-apps/comics/             (fields, rules, price sources, prompt, seed data) plus
-apps/watches/            the little that only it knows, and its own README
-apps/whisky/
-packages/core/           code with no opinion about what is being collected:
-                         the Markdown codec, the zip writer, the CSV reader,
-                         chart geometry, the components every app draws with,
-                         and under src/domain the engine that runs an app
-                         from its spec (schema, ledger, pricing, mirror, CSV,
-                         identification, backup, routes and pages)
-packages/create-domain/  scaffolds a new app on the engine in one command
-```
-
-Inside `apps/cards`:
-
-```
-src/app/                 Next.js App Router pages and API routes
-  /                      Portfolio: hero value, change, value chart, grading outlook
-  /scan                  Batch capture with automatic identify, merge and save
-  /collection            Card grid with search and game filter
-  api/identify           POST — identify a card from uploaded photos
-  api/uploads            POST photos / GET stored photo
-  api/cards[/id]         CRUD; /price refreshes prices, /prices returns history
-  api/prices/lookup      Price a not-yet-saved card
-  api/prices/refresh     POST — refresh every card (?stale=24 limits to stale ones)
-  api/export             GET — the collection as CSV (?type=sales for the sales ledger)
-  api/cards/[id]/sales   GET / POST — a card's sales; POST removes the copies sold
-  api/sales              GET all sales with realized totals; DELETE /api/sales/[id] undoes one
-  api/submissions[/id]   Grading batches; PATCH adds/removes cards, marks sent, records grades
-  api/alerts[/id]        GET the feed, POST marks all read, DELETE dismisses one
-  api/cards/intake       POST — atomic add-or-merge used by scan mode
-  api/backup             GET — the database and photos as one zip; /restore puts one back
-  api/cards/[id]/acquisitions
-                         GET/POST — what each copy cost; POST records another purchase
-  api/collection         GET — the collection as Markdown; /rebuild rewrites it, /import reads it back
-  api/import             POST — preview a CSV, or apply it with `apply: true`
-  api/locations          GET — storage locations in use, for autocomplete
-  api/sets/refresh       POST — fetch and store a set's published checklist
-  api/auth               POST signs in, DELETE signs out (only when APP_PASSWORD is set)
-  api/settings           Multipliers + provider status
-src/lib/identify/        Claude vision call and the identification schema
-src/lib/pricing/         Providers, matching heuristics, summary/valuation, refresh pipeline
-src/lib/analytics.ts     Portfolio value series, grading outlook (min/max/upside) and timing verdict
-src/lib/scheduler.ts     Hourly auto-refresh of stale prices (started from src/instrumentation.ts)
-src/components/charts/   Inline-SVG portfolio line and min/max outlook band charts
-src/lib/acquisitions.ts  Purchase lots: what each copy cost, consumed oldest first on a sale
-src/lib/markdown/        The plain-text copy: format, one card as a document, the
-                         on-disk mirror, and reading a collection back out of it
-src/lib/zip.ts           Dependency-free streaming zip writer used by the backup
-src/lib/csv.ts           RFC 4180 reader; src/lib/import.ts maps columns to cards
-src/lib/sets/            Set checklist providers, caching and completion matching
-src/lib/auth.ts          Optional password gate (Web Crypto, shared by proxy and routes)
-src/proxy.ts             Guards every route when APP_PASSWORD is set
-e2e/                     Playwright suite driving a real build
-src/lib/cards.ts, db.ts  SQLite (better-sqlite3) repository and schema
-src/components/          UI (add flow, card detail, price panel, settings)
-tests/                   Vitest suites (providers with mocked fetch, valuation, repository)
-```
-
-## Scripts
-
-```bash
-npm run dev         # development server
-npm run build       # production build
-npm test            # unit tests (vitest)
-npm run e2e         # end-to-end tests (playwright, boots its own servers)
-npm run typecheck   # tsc (after generating Next route types)
-npm run lint
-```
-
-Every script above runs from the repository root and covers every workspace.
-To drive one app on its own, add `-w @collectcollect/cards` — which is how you
-reach the app-only scripts, such as `npm run e2e:ui -w @collectcollect/cards`
-for the Playwright suite in UI mode.
-
-Each app also has a root shortcut for its dev server: `npm run cards` (3000),
-`npm run skins` (3001), `npm run retro-games` (3002), `npm run comics` (3003),
-`npm run watches` (3004) and `npm run whisky` (3005).
-
-## Testing
-
-Unit tests cover the pieces where a mistake is silent: price matching and the
-provider adapters (against recorded responses, never the network), the
-valuation and grading-outlook maths, the repository and its migrations, sales,
-submissions, alert rules, and the password gate.
-
-The end-to-end suites drive real production builds in Chromium against
-throwaway data directories. Identification and price lookups are intercepted, so
-the tests never call Anthropic or a price API, but everything else, including
-the database, runs for real. It covers adding a card by hand, duplicate
-merging, scan mode's add/merge/set-aside behaviour, a sale and its undo, a
-grading submission from draft to booked outcome, and the password gate. The
-skins app has its own suite, and the whisky app's stands for every app on the
-domain engine: it drives the shared portfolio, collection, item, report, add
-and import pages, plus the one thing that is whisky's alone — opening a bottle,
-which splits a copy off a stack and freezes what it was worth. Every suite plus
-lint, typecheck and build runs in CI on every push.
+A page that is not there — a deleted card's, or a mistyped address — is a 404 drawn inside the app, with the header still there to leave by. A page that fails to render says so on the page, with the error, rather than going blank.
 
 ## The other apps
 
@@ -300,15 +171,18 @@ Four more collections run on a shared **domain engine** in `packages/core/src/do
 
 `node packages/create-domain/index.mjs <id> --name … --singular … --plural … --prefix … --port …` scaffolds a new one with a working starter spec, tests and README.
 
+Each app's files for installing are four small routes in `src/app` (`manifest.ts`, `sw.js/route.ts`, `guard.js/route.ts`, `offline/page.tsx`) over `packages/core/src/domain/pwa.ts`, and its icons: `public/icons/*.png` and `public/favicon.ico`, committed and rendered from `scripts/icon.svg` by `npm run icons -w @collectcollect/<app>` (`scripts/render-icons.mjs`, sharp), the maskable icon on the spec's `theme.dark`, which is also the manifest's colour. The scaffolder renders a placeholder mark in your `--accent` colour; draw your own in `scripts/icon.svg` and run the script again. Without a session an app answers `/login`, `/api/auth`, `/api/health` and the installable shell (`DOMAIN_PUBLIC_PATHS`: `/offline`, `/manifest.webmanifest`, `/icons`, `/favicon.ico`, `/sw.js`, with the proxy's own `/guard.js` and `/_next/static`).
+
 | App | Port | What it tracks | One object, or a stack? | Price sources |
 | --- | --- | --- | --- | --- |
 | [Retro games](apps/retro-games/README.md) | 3002 | cartridges and discs, loose / CIB / sealed / graded (WATA, VGA, CGC), box, manual and cart condition, variants | graded copies are unique; identical loose, CIB or sealed copies stack | PriceCharting by completeness (paid), manual; grade-or-wait verdict on sealed and complete copies |
 | [Comics](apps/comics/README.md) | 3003 | single issues, key-issue flags, raw or slabbed (CGC, CBCS, PGX), page quality, signature series | slabs are unique; identical raw copies stack | PriceCharting by grade (paid, column mapping unverified), manual; cert-verification stub; grade-or-wait verdict on raw copies |
-| Sports cards | 3000 | part of the card app: team, rookie, parallel, serial numbering, autograph, relic, BGS subgrades | serial-numbered and graded cards are unique; raw copies stack within a parallel | PriceCharting (paid), manual; there is no free sports API |
-| [Watches](apps/watches/README.md) | 3004 | brand, model, reference, private serial, movement, case, dial, box and papers, service history | always unique | deliberately manual-only / frozen — no market source planned; manual with dated history; insurance appraisal with serial and photo switches |
-| [Whisky](apps/whisky/README.md) | 3005 | distillery, expression, age, cask, strength, size, bottle or batch, sealed or open, fill level | sealed identical bottles stack, numbered and open bottles are unique | deliberately manual-only / frozen — no market source planned; manual with dated history; an opened bottle's value is frozen and left out of the total |
+| [Watches](apps/watches/README.md) | 3004 | brand, model, reference, private serial, movement, case, dial, box and papers, service history | always unique | manual only, no market source is planned: values typed in, with dated history points; insurance appraisal with serial and photo switches |
+| [Whisky](apps/whisky/README.md) | 3005 | distillery, expression, age, cask, strength, size, bottle or batch, sealed or open, fill level | sealed identical bottles stack, numbered and open bottles are unique | manual only, no auction source is planned: values typed in, with dated history points; an opened bottle's value is frozen and left out of the total |
 
-They keep the conventions of the two older apps: everything self-hosted and local-first, one SQLite file per app in its own data directory (`<PREFIX>_DATA_DIR`), an optional password (`<PREFIX>_APP_PASSWORD`), hourly auto-refresh (`<PREFIX>_AUTO_REFRESH_HOURS`), and every item mirrored to Markdown under `data/collection`. Photo identification and PriceCharting use the same keys as the card app. Each has unit tests for its schema, its merge rule and its price adapter against a fake `fetch`. The pages they share are driven end to end by the whisky app's Playwright suite, so a change to the engine's portfolio, collection, item, report, add, import or login pages is caught for all of them at once.
+They keep the conventions of the two older apps: everything self-hosted and local-first, one SQLite file per app in its own data directory (`<PREFIX>_DATA_DIR`), an optional password (`<PREFIX>_APP_PASSWORD`), hourly auto-refresh (`<PREFIX>_AUTO_REFRESH_HOURS`), and every item mirrored to Markdown under `data/collection`. Photo identification and PriceCharting use the same keys as the card app. Each has unit tests for its schema, its merge rule and its price adapter against a fake `fetch`. The pages they share are driven end to end by the Playwright suites of retro games, comics and whisky (watches has none, so its pages are held only by the engine's own unit tests and by the other three suites, which render the same code), so a change to the engine's portfolio, collection, item, report, add, import or login pages is caught by three of the four at once. Each answers `GET /api/health` without a session with `{ ok, app: "collectcollect-<id>", database }` and nothing more, which is what the image's and Compose's health checks ask.
+
+They are not held to everything the two older apps are. Their gate is the password alone: no sign-in with Google, and no *Sign out everywhere* (signing out clears that browser's cookie; a copy of it stays good for 30 days, so change the password, or `<PREFIX>_APP_SECRET`, to end every session). Their security headers come from the same `createProxy` but are pinned by no README block and no website test (see [The website](#the-website)). They log no warning at startup for having no password; their Settings page says so instead. They have no About section and no per-route request limits (the sign-in limiter is the only one).
 
 ## The skins app
 
@@ -446,8 +320,8 @@ records, rather than refuses over, two copies of a folder.
 
 ## Running it
 
-For a persistent cards-only installation, see [Self-hosting](docs/SELF_HOSTING.md).
-Manual entry and CSV import work without API keys. The first-run checklist links
+For a persistent installation, see [Self-hosting](docs/SELF_HOSTING.md): it starts the
+card app and says how to start the other five. Manual entry and CSV import work without API keys. The first-run checklist links
 to setup, provider connection tests, and backups.
 
 ```bash
@@ -464,31 +338,34 @@ Production: `npm run build && npm start`. Everything is stored locally in `apps/
 
 Docker: `docker compose up -d --build cards` starts the card app on 3000 with its
 own named volume at `/data`. Add skins with `docker compose up -d --build skins`
-on port 3001. `docker compose up --build` still starts both apps. To build an image
+on port 3001, and the others the same way: `retro-games` on 3002, `comics` on 3003,
+`watches` on 3004 and `whisky` on 3005, each with a volume of its own.
+`docker compose up --build` starts all six. `scripts/install.sh` (Windows: `scripts/install.ps1`) is the one-command install: it writes `.env` with a password and a secret for every app, starts the apps you name (or `--all`), and with `--lan` publishes them for a phone on the same Wi-Fi ([Self-hosting](docs/SELF_HOSTING.md), "First installation" and "Phone access"). To build an image
 directly, pick the app with a build argument:
 
 ```bash
 docker build -t collectcollect .                            # the card app
 docker build -t collectcollect-skins --build-arg APP=skins .
+docker build -t collectcollect-whisky --build-arg APP=whisky .   # or retro-games, comics, watches
 ```
 
 Compose gives each app a 2 GB memory limit: a request body is buffered whole, up to 64 MB, so a few uploads or restores at once are the high-water mark. `bash scripts/release-candidate.sh <version>` validates a release candidate of the card image on this machine — the whole gate, a container boot, a goal surviving a restart — and packages the image with the candidate Compose file into `release/`, publishing nothing ([Self-hosting](docs/SELF_HOSTING.md) says how to try one).
 
-**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach (each app says so in its log at startup). Failed attempts are rate limited — eight a minute per client, reserved before the password is checked, so firing guesses in parallel buys nothing — and changing the password invalidates existing sessions. Each session carries an id: signing out ends that one, wherever a copy of its cookie went, and *Sign out everywhere* on the Settings page ends every session issued so far — for the phone that was lost or the browser left signed in. The record lives in `sessions.json` in the data directory, and a sign-out that cannot be written there says so rather than reporting success. The login page shows nothing of the app — no navigation, no unread-alert count — to someone who is not signed in. The cookie is signed with a random key kept beside it in `session-secret`, so a stolen cookie is no help to anyone guessing the password; `APP_SECRET` replaces that key if you would rather set one (make it random, `openssl rand -hex 32`: under sign-in with Google with no password beside it, one shorter than 32 bytes signs nobody in, below). Neither file is in a backup: a restore onto a new machine asks for the password once more. So does upgrading past the point either was introduced, since older sessions are not recognised.
+**Password.** Set `APP_PASSWORD` and the app asks for it once, then remembers the session for 30 days in a signed HttpOnly cookie. Leave it unset and there is no login at all, which is fine on a machine only you can reach (cards and skins say so in their log at startup; the other four, on their Settings page). Failed attempts are rate limited — eight a minute per client, reserved before the password is checked, so firing guesses in parallel buys nothing — and changing the password invalidates existing sessions. Each session carries an id: signing out ends that one, wherever a copy of its cookie went, and *Sign out everywhere* on the Settings page ends every session issued so far — for the phone that was lost or the browser left signed in. The record lives in `sessions.json` in the data directory, and a sign-out that cannot be written there says so rather than reporting success. The login page shows nothing of the app — no navigation, no unread-alert count — to someone who is not signed in. The cookie is signed with a random key kept beside it in `session-secret`, so a stolen cookie is no help to anyone guessing the password; `APP_SECRET` replaces that key if you would rather set one (make it random, `openssl rand -hex 32`: under sign-in with Google with no password beside it, one shorter than 32 bytes signs nobody in, below). Neither file is in a backup: a restore onto a new machine asks for the password once more. So does upgrading past the point either was introduced, since older sessions are not recognised. The domain apps (`RETRO_GAMES_APP_PASSWORD`, `COMICS_`, `WATCHES_`, `WHISKY_`) have the same limiter and the same 30-day cookie, and keep their own `session-secret` in their own data directory, replaced by `RETRO_GAMES_APP_SECRET`, `COMICS_APP_SECRET`, `WATCHES_APP_SECRET` or `WHISKY_APP_SECRET` when set; they keep no `sessions.json`, so signing out ends only that browser's cookie (above).
 
-**Sign in with Google.** Beside the password, or in its place, the app can let you in with a Google account: yours, and only the accounts you name. It needs a Google OAuth client of type *Web application* whose authorised redirect URI is the app's address followed by `api/auth/google/callback` (`https://cards.example.com/api/auth/google/callback`), and these variables: `APP_URL`, that address (the site's root, https, or `http://localhost` and `http://127.0.0.1` on this machine), `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and who may sign in: `GOOGLE_ALLOWED_SUBS`, Google's ids for the accounts, and/or `GOOGLE_ALLOWED_EMAILS`, addresses Google says are verified, each a comma- or space-separated list (an address is compared without regard to case). Prefer ids. An id names one Google account for good; an address is only as good as Google's check of it, and only for a `gmail.com` address or one in a Google Workspace domain does Google answer for the address itself: for any other, Google checked it once, when the account was made, and a domain that lapses and is registered again, or a mailbox provider that gives the address to someone else, can put another Google account behind the same verified address. The log names the id of each account let in by its address alone (once per account while the server runs), so the first sign-in tells you the id to move to `GOOGLE_ALLOWED_SUBS`. The login page then offers *Sign in with Google*: the browser goes to Google and comes back to `api/auth/google/callback`, where the app checks the answer — the code flow with PKCE, a state and a nonce held in a short-lived `__Host-` cookie, signed (not encrypted) with a random key the server process makes for itself and never with the key sessions are signed with, since anyone may start a sign-in (one under way when the server restarts goes back to the login page), and Google's signature, issuer, audience, expiry and nonce on the ID token (the shared kit's `google.js`, kept in `packages/core/src/kit`) — and then the list. An account on it gets the same session cookie the password gives, so it lasts 30 days, *Sign out* and *Sign out everywhere* end it, and the login page and the gate treat it alike; anything else lands back on the login page, which says "Sign-in didn't complete." once. The log names Google's id for an account the list turned away, so a first sign-in tells you the number to add; beyond that and the id of an account let in by its address (above), nothing from Google is shown or logged. The callback calls Google at most ten times a minute for one client (counted as the login limiter counts one, below). Setting any `GOOGLE_` variable turns the gate on whether or not the rest holds: until it does, nobody can sign in that way, the login page says it is not fully set up, and the log names what is missing or malformed, never a value — an empty list counts as missing, since it would let in every Google account there is. With no password, sessions are signed with the random key in `session-secret` or an `APP_SECRET` of at least 32 bytes, and never with one derived from nothing: nothing else secret goes into a session's signature then, so a key a person chose could be guessed offline from one cookie and used to sign sessions that *Sign out everywhere* cannot end. Where neither can be had, nobody can sign in and the log says why. Changing who may sign in ends every session, the password's included, as changing the password does (and so does turning sign-in with Google on or off). Google tells the app the account's id and, when it is verified, its address; the app compares them with the list and stores neither for an account it lets in — the session cookie names no one — and writes only an id to the log: of an account it turned away, or of one it let in by its address alone. Sign-in with Google works at `APP_URL` alone: Google returns only there and its cookie is `Secure`, so it needs https (or this machine), and the login page's button goes there from any other name the app answers to; a plain-http home address keeps the password. `APP_URL` and `APP_BASE_URL` (below) are normally the same https address, set twice for two jobs: `APP_BASE_URL`, which both apps read under that one name, tells the app which requests arrived over https (it can stay unset where a trusted proxy says so in `X-Forwarded-Proto`), while `APP_URL` is where Google sends the browser back, so it is the site's root and each app has its own (`SKINS_APP_URL` for skins).
+**Sign in with Google.** Beside the password, or in its place, the app can let you in with a Google account: yours, and only the accounts you name. It needs a Google OAuth client of type *Web application* whose authorised redirect URI is the app's address followed by `api/auth/google/callback` (`https://cards.example.com/api/auth/google/callback`), and these variables: `APP_URL`, that address (the site's root, https, or `http://localhost` and `http://127.0.0.1` on this machine), `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and who may sign in: `GOOGLE_ALLOWED_SUBS`, Google's ids for the accounts, and/or `GOOGLE_ALLOWED_EMAILS`, addresses Google says are verified, each a comma- or space-separated list (an address is compared without regard to case). Prefer ids. An id names one Google account for good; an address is only as good as Google's check of it, and only for a `gmail.com` address or one in a Google Workspace domain does Google answer for the address itself: for any other, Google checked it once, when the account was made, and a domain that lapses and is registered again, or a mailbox provider that gives the address to someone else, can put another Google account behind the same verified address. The log names the id of each account let in by its address alone (once per account while the server runs), so the first sign-in tells you the id to move to `GOOGLE_ALLOWED_SUBS`. The login page then offers *Sign in with Google*: the browser goes to Google and comes back to `api/auth/google/callback`, where the app checks the answer — the code flow with PKCE, a state and a nonce held in a short-lived `__Host-` cookie, signed (not encrypted) with a random key the server process makes for itself and never with the key sessions are signed with, since anyone may start a sign-in (one under way when the server restarts goes back to the login page), and Google's signature, issuer, audience, expiry and nonce on the ID token (the shared kit's `google.js`, kept in `packages/core/src/kit`) — and then the list. An account on it gets the same session cookie the password gives, so it lasts 30 days, *Sign out* and *Sign out everywhere* end it, and the login page and the gate treat it alike; anything else lands back on the login page, which says "Sign-in didn't complete." once. The log names Google's id for an account the list turned away, so a first sign-in tells you the number to add; beyond that and the id of an account let in by its address (above), nothing from Google is shown or logged. The callback calls Google at most ten times a minute for one client (counted as the login limiter counts one, below). Setting any `GOOGLE_` variable turns the gate on whether or not the rest holds: until it does, nobody can sign in that way, the login page says it is not fully set up, and the log names what is missing or malformed, never a value — an empty list counts as missing, since it would let in every Google account there is. With no password, sessions are signed with the random key in `session-secret` or an `APP_SECRET` of at least 32 bytes, and never with one derived from nothing: nothing else secret goes into a session's signature then, so a key a person chose could be guessed offline from one cookie and used to sign sessions that *Sign out everywhere* cannot end. Where neither can be had, nobody can sign in and the log says why. Changing who may sign in ends every session, the password's included, as changing the password does (and so does turning sign-in with Google on or off). Google tells the app the account's id and, when it is verified, its address; the app compares them with the list and stores neither for an account it lets in — the session cookie names no one — and writes only an id to the log: of an account it turned away, or of one it let in by its address alone. Sign-in with Google works at `APP_URL` alone: Google returns only there and its cookie is `Secure`, so it needs https (or this machine), and the login page's button goes there from any other name the app answers to; a plain-http home address keeps the password. `APP_URL` and `APP_BASE_URL` (below) are normally the same https address, set twice for two jobs: `APP_BASE_URL`, which every app reads under that one name, tells the app which requests arrived over https (it can stay unset where a trusted proxy says so in `X-Forwarded-Proto`), while `APP_URL` is where Google sends the browser back, so it is the site's root and each app has its own (`SKINS_APP_URL` for skins).
 
 > Even with a password, this is a single-user app holding one shared collection. It is meant for your own machine or private network, not for running a service for other people.
 
-**Behind a proxy.** The login limiter and the per-route limits count attempts per client. Without a proxy every client is one client, and the `X-Forwarded-For` header is ignored — anyone can send one. Set `TRUST_PROXY=1` only when a reverse proxy in front of the app sets that header, and it will be read — as will `X-Forwarded-Proto`, which is what lets the session cookie be marked `Secure` and the response carry HSTS when the proxy terminates TLS. Without it, `X-Forwarded-Proto` is believed nowhere: Next writes `https` into the address of any request whose header so much as contains it, from anyone, so the apps read neither. Both are read from the right: proxies append to these headers, so the rightmost entry is what your proxy saw and anything left of it is whatever the client typed; behind more than one proxy, `TRUSTED_PROXY_HOPS` says how many. `COOKIE_SECURE=1` (or `0`) settles the cookie's `Secure` flag outright, for a proxy the app cannot be told about. Compose binds both apps to `127.0.0.1`; put the proxy in front and change the bind address there, since neither app speaks TLS.
+**Behind a proxy.** The login limiter and the per-route limits count attempts per client. Without a proxy every client is one client, and the `X-Forwarded-For` header is ignored — anyone can send one. Set `TRUST_PROXY=1` only when a reverse proxy in front of the app sets that header, and it will be read — as will `X-Forwarded-Proto`, which is what lets the session cookie be marked `Secure` and the response carry HSTS when the proxy terminates TLS. Without it, `X-Forwarded-Proto` is believed nowhere: Next writes `https` into the address of any request whose header so much as contains it, from anyone, so the apps read neither. Both are read from the right: proxies append to these headers, so the rightmost entry is what your proxy saw and anything left of it is whatever the client typed; behind more than one proxy, `TRUSTED_PROXY_HOPS` says how many. `COOKIE_SECURE=1` (or `0`) settles the cookie's `Secure` flag outright, for a proxy the app cannot be told about. These names (`TRUST_PROXY`, `TRUSTED_PROXY_HOPS`, `COOKIE_SECURE`) are each read by all six apps under that one name, so one `.env` gives all of them the same answer; `COOKIE_SECURE=1` in particular makes every app treat every address, `localhost` included, as https and refuse a plain-http write. Compose binds every app to `127.0.0.1`; put the proxy in front and change the bind address there, since no app speaks TLS.
 
-**Host names and other sites.** Whether or not a password is set, each app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` / `.home.arpa` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`, and the proxy has to pass the original `Host` header through. The list replaces those defaults rather than adding to them, so name every way the instance is still reached (`ALLOWED_HOSTS=cards.example.com,192.168.1.20,cardbox.local`); `*` turns the check off. The health route ignores the list, since a container checks itself by address. Requests that a browser sends from anywhere but the app's own origin are refused for anything but a read, so a page you happen to visit cannot restore a backup over your collection or spend your API budget: `Sec-Fetch-Site` must say `same-origin`, and an `Origin` must match scheme, name and port. Behind a proxy that ends TLS, tell the app so — `TRUST_PROXY=1` with `X-Forwarded-Proto`, `APP_BASE_URL=https://…` or `COOKIE_SECURE=1` — or every write from the browser is refused as coming from another origin. `APP_BASE_URL` speaks for the address it names alone, name and port as the proxy passes them in `Host`: the LAN address or name listed beside the domain is reached over plain http, since neither app serves TLS, and keeps working that way. `COOKIE_SECURE=1` says every page is https, so it is for an instance reached only through the proxy. `curl` and scripts, which send no browser origin headers, are unaffected, but a body sent to the JSON API must say `Content-Type: application/json` (a `text/plain` form is something any page can send without asking, and its bytes can parse as JSON), or it is answered 415; a write with neither a body nor a `Content-Type`, such as a `DELETE` or a price refresh from a script, needs no header, and uploads, restores and folder imports stay `multipart/form-data`.
+**Host names and other sites.** Whether or not a password is set, each app answers only to the names it expects — localhost, an IP address, a single-label machine name, or a `.local` / `.lan` / `.internal` / `.home.arpa` name — so a hostile page cannot point a DNS name of its own at your instance and read the collection. Reaching it by a domain name (through a reverse proxy, say) needs `ALLOWED_HOSTS=cards.example.com`, and the proxy has to pass the original `Host` header through. The list replaces those defaults rather than adding to them, so name every way the instance is still reached (`ALLOWED_HOSTS=cards.example.com,192.168.1.20,cardbox.local`); `*` turns the check off. The health route ignores the list, since a container checks itself by address. Requests that a browser sends from anywhere but the app's own origin are refused for anything but a read, so a page you happen to visit cannot restore a backup over your collection or spend your API budget: `Sec-Fetch-Site` must say `same-origin`, and an `Origin` must match scheme, name and port. Behind a proxy that ends TLS, tell the app so — `TRUST_PROXY=1` with `X-Forwarded-Proto`, `APP_BASE_URL=https://…` or `COOKIE_SECURE=1` — or every write from the browser is refused as coming from another origin. `APP_BASE_URL` speaks for the address it names alone, name and port as the proxy passes them in `Host`: the LAN address or name listed beside the domain is reached over plain http, since no app serves TLS, and keeps working that way. It is one name read by all six apps, so one value in `.env` can name one address, and an app served at another port (or host) is treated as plain http and has its https writes refused; under Compose, give each service its own in `environment:` (Self-hosting, [Phone access](docs/SELF_HOSTING.md#phone-access)). `ALLOWED_HOSTS` matches names and not ports, so one list serves them all. `COOKIE_SECURE=1` says every page is https, so it is for an instance reached only through the proxy. `curl` and scripts, which send no browser origin headers, are unaffected, but a body sent to the JSON API must say `Content-Type: application/json` (a `text/plain` form is something any page can send without asking, and its bytes can parse as JSON), or it is answered 415; a write with neither a body nor a `Content-Type`, such as a `DELETE` or a price refresh from a script, needs no header, and uploads, restores and folder imports stay `multipart/form-data`.
 
 **Webhooks.** The alert webhook is posted to by the server itself, so it has to be an address on the public internet: `localhost`, `*.local`, and any private, loopback, link-local or reserved address (carrier-grade NAT, benchmarking, multicast and the like) are refused when saved, a name that resolves to one is refused at delivery, and the request does not follow redirects. The name is resolved once, inside the connection itself, and every address it answers with is checked before the one connected to is used, so a DNS answer that changes between a check and the request cannot point the post at your own network; each delivery opens a connection of its own, and an address carrying a user name or password is refused.
 
-**What every response carries** is in [The website](#the-website) below. `GET /api/health` answers without a session — `{ ok, app, version, database, scheduler: { enabled, running, lastRunAt } }`, and nothing more, since it answers anyone — for a container health check or a proxy. `database` is true only when a query has just run through the live connection: a database file whose restore journal cannot be replayed reports false, with the reason in the log rather than the response, and an install with no database yet reports false without one being created. `ok` means the process answers.
+**What every response carries** is in [The website](#the-website) below. In cards and skins `GET /api/health` answers without a session — `{ ok, app, version, database, scheduler: { enabled, running, lastRunAt } }`, and nothing more, since it answers anyone — for a container health check or a proxy. The four apps on the domain engine answer it too, with `{ ok, app, database }` only. `database` is true only when a query has just run through the live connection: a database file whose restore journal cannot be replayed reports false, with the reason in the log rather than the response, and an install with no database yet reports false without one being created. `ok` means the process answers.
 
-**Limits on the expensive routes.** Identifying a photo (10 a minute), uploading (30), refreshing every price (6), pricing one card (120, since a scan or a bulk refresh sends one per card), reading a folder or a Steam inventory back in (6), importing a spreadsheet (30), downloading a backup or the folder (6), and restoring a backup or putting one back (6) each refuse with a 429 and a `Retry-After` past their limit. They are in memory and per process — protection against a runaway client or a double-clicked button, not a public API's defence. No request body is accepted past 64 MB: each app's proxy makes Next buffer every body, and past its buffer Next would hand a route a body cut short rather than refuse it, so the buffer is set to that and every route's ceiling sits under it. Only one whole-collection price refresh runs at a time, whoever asks: a second is told so with a 409, since the answer it wants is already being produced.
+**Limits on the expensive routes.** In cards and skins, identifying a photo (10 a minute), uploading (30), refreshing every price (6), pricing one card (120, since a scan or a bulk refresh sends one per card), reading a folder or a Steam inventory back in (6), importing a spreadsheet (30), downloading a backup or the folder (6), and restoring a backup or putting one back (6) each refuse with a 429 and a `Retry-After` past their limit. They are in memory and per process — protection against a runaway client or a double-clicked button, not a public API's defence. No app accepts a request body past 64 MB: each app's proxy makes Next buffer every body, and past its buffer Next would hand a route a body cut short rather than refuse it, so the buffer is set to that in every app's `next.config.ts` and every route's ceiling sits under it (in the domain apps it was Next's default of 10 MB, which a backup with a few photos outgrew). Only one whole-collection price refresh runs at a time, whoever asks: a second is told so with a 409, since the answer it wants is already being produced. The domain apps have none of these per-route limits (the sign-in limiter is the only one).
 
 ### The website
 
@@ -502,7 +379,9 @@ reverse proxy in front should pass them through and add no policy of its own —
 two policies on one response are both enforced, and the stricter wins wherever
 they differ. Each app lives at the root of its own origin (its cookies, service
 worker and links all assume `/`), so give each one its own host name or port
-rather than a path on a shared one.
+rather than a path on a shared one. What follows describes cards and skins, whose
+headers are pinned here; the four domain apps are the exception set out at the end of
+the section.
 
 These are the headers each app sends on every response when it is served over
 https. Over plain http (the default on a home network) the same, less
@@ -640,6 +519,19 @@ page needs. `security.txt` expires on 2027-10-08, and each app's
 only routes and each app's `public/` folder are reachable, which the browser
 suite checks address by address.
 
+**The domain apps are the exception.** Retro games, comics, watches and whisky run the
+same `createProxy` for every path but the development server's hot-reload socket, so they
+refuse a host name they were not deployed under, a browser's cross-site write and a JSON
+write that does not say it is JSON, send the same policy, with `img-src 'self'` and no
+camera, over http or https as above, and their `next.config.ts` makes the trailing-slash
+redirect the proxy's, sends no `X-Powered-By` and buffers request bodies to 64 MB. Each
+loads `/guard.js` and draws its own not-found page. But nothing pins what they send: there
+is no block above for them, no `tests/website.test.ts` and no `e2e/website.spec.ts` (their
+browser specs do take `test` from their own `e2e/fixtures.ts`, so a policy violation, an
+uncaught exception or a request that leaves the site fails a test). Their `public/` holds
+their icons and favicon, and no `robots.txt` or `security.txt`. When one of these is added,
+it belongs here and in `CLAUDE.md`.
+
 ## Development
 
 ```bash
@@ -647,15 +539,21 @@ npm run dev               # the card app's development server (npm run skins for
 npm run check             # lint, typecheck, unit tests and the conventions test: the gate before a push
 npm run build             # production build of every workspace
 npm start                 # the card app from its build; npm run start:skins for the other
-npm test                  # unit tests (vitest), every workspace
-npm run test:e2e          # builds both apps, then both end-to-end suites (playwright; each boots its own servers and cleans up after)
+npm test                  # unit tests (vitest), every workspace; core's also runs the sign-in kit's self-test
+npm run test:e2e          # builds every app, then each end-to-end suite: cards, skins, retro-games, comics, whisky (playwright; each boots its own servers and cleans up after; watches has none)
 npm run test:all          # unit tests, then the end-to-end suites
 npm run test:conventions  # the repository's shape against CONVENTIONS.md
 npm run typecheck         # tsc in every workspace, after generating Next route types
 npm run lint              # eslint in every workspace, the shared package included
 ```
 
-`npm run e2e` is kept as another name for `npm run test:e2e`, which builds first.
+`npm run e2e` is kept as another name for `npm run test:e2e`, which builds first. The
+suites use fixed ports, three or four each: 3210–3211 for cards, 3220–3223 for skins,
+3230–3232 for whisky, 3240–3242 for retro games and 3250–3252 for comics.
+
+The four apps on the domain engine each have a root shortcut for their
+development server: `npm run retro-games` (port 3002), `npm run comics` (3003),
+`npm run watches` (3004) and `npm run whisky` (3005).
 
 Every script above runs from the repository root and covers every workspace.
 To drive one app on its own, add `-w @collectcollect/cards` — which is how you
@@ -667,8 +565,8 @@ Node 22 or later; `.nvmrc` says so for version managers and `engines` for npm,
 which warns under an older one. `CONTRIBUTING.md` has the checks a change is
 expected to pass. CI runs on every push, on pull requests, by hand and weekly:
 one `check` job runs lint, typecheck, the unit tests, the conventions test,
-both builds and both end-to-end suites; a `docker` job builds both images,
-boots each and asks it how it is; and an `audit` job runs the shared gate,
+the build of every app and every end-to-end suite (`npm run test:e2e`); a `docker` job
+builds the image of every app, boots each and asks it how it is; and an `audit` job runs the shared gate,
 `node .github/audit/npm-audit.mjs`: `npm audit --omit=dev` against the
 lockfile, red on every high or critical advisory that
 `.github/audit/accepted.json` does not accept (this repository keeps no such
@@ -685,9 +583,11 @@ submissions, alert rules, and the gate: the password, and sign-in with Google
 against a fake Google (`scripts/fake-google.mjs`: its own RSA key, token
 endpoint and consent screen) handed to the routes in place of `fetch`, with
 the kit's own self-test (`packages/core/src/kit/selftest.mjs`) run by
-`npm test`.
+`npm test`; and, for the domain engine, its repository, ledger, routes, pricing, CSV,
+Markdown, stored rows and `AppShell` (`packages/core/tests`) and each of its four apps' spec,
+merge rule, price adapter, health route and installability.
 
-The end-to-end suite drives a real production build in Chromium against a
+The cards and skins end-to-end suites drive a real production build in Chromium against a
 throwaway data directory. Identification is intercepted in the browser, and the
 servers under test are started with no network at all (`scripts/e2e-offline.mjs`),
 so a price lookup made on the server fails at once and says so; the tests never
@@ -699,8 +599,9 @@ sign-in with Google beside it (cards) and on its own (skins). Google's half of
 a sign-in is played the same way: its sign-in page by the test, answered at the
 protocol with a redirect back to the app, and its token endpoint and keys by
 the fake that `scripts/e2e-google.mjs` puts in front of the server's `fetch`.
-Every spec imports its `test` from `e2e/fixtures.ts` (each app's
-`tests/website.test.ts` fails on one that does not), so any page a test drives,
+Every spec imports its `test` from its app's `e2e/fixtures.ts` (cards' and skins'
+`tests/website.test.ts`, and `packages/core/tests/e2e-rules.test.ts` for every app that has
+a Playwright config, fail on one that does not), so any page a test drives,
 in a browser context of the test's own making too, fails it on a content
 security policy violation, an uncaught exception or a request that leaves the
 site (but the one navigation to Google's sign-in page, which the test answers
@@ -709,11 +610,23 @@ tests whose pages break them on purpose. `e2e/website.spec.ts` drives each app's
 main flow and starts every page it has, holding every response to the README's
 headers (see [The website](#the-website)).
 
-The type checker runs strict, with `noUncheckedIndexedAccess` on in every
-workspace: an element read out of an array or a table is `undefined` until the
-code has said what happens when it is not there. Every such read is narrowed
-rather than asserted — a `!` that turned out to be wrong is exactly the kind
-of silent wrong number this app exists to avoid.
+The retro-games, comics and whisky suites drive their app's production build in
+Chromium too, on three servers each (a seeded collection that is only read, an empty one
+that is written to, and one behind a password), each with a throwaway data directory:
+the engine's pages (portfolio, collection, an item, adding by hand and, in retro games and
+whisky, the report and the spreadsheet import), the gate, the theme and palette, the
+health route and the not-found page, and in whisky the installable shell, a restore past
+10 MB and the phone layout. Their servers start offline (`scripts/e2e-offline.mjs`) with
+`<PREFIX>_AUTO_REFRESH_HOURS=0`, `e2e/teardown.ts` removes their throwaway data
+directories when the run ends, and they keep a copy of the fixtures without the README
+header block or image hosts (their proxies name no image source); `site-rules.spec.ts` in
+each shows the watch catching a refused load, an uncaught exception and a request that
+leaves the site.
+
+The type checker runs strict, with `noUncheckedIndexedAccess` on in every workspace: an
+element read out of an array or a table is `undefined` until the code has said what
+happens when it is not there. Every such read is narrowed rather than asserted — a `!` that
+turned out to be wrong is exactly the kind of silent wrong number this app exists to avoid.
 
 ## Project layout
 
@@ -724,7 +637,15 @@ across all of them.
 ```
 apps/cards/              this app
 apps/skins/              the same idea for CS2 items — see its own section below
+apps/retro-games/        four apps on the shared domain engine; each is a spec
+apps/comics/             (fields, rules, price sources, prompt, seed data) plus
+apps/watches/            the little that only it knows, and its own README
+apps/whisky/
 packages/core/           code with no opinion about what is being collected
+packages/create-domain/  scaffolds a new app on the engine in one command
+scripts/                 install.sh and install.ps1, the e2e servers and their offline and
+                         fake-Google hooks, and render-icons.mjs, which renders an app's
+                         scripts/icon.svg into its icons and favicon (each app's `npm run icons`)
 ```
 
 Inside `packages/core/src`:
@@ -740,7 +661,7 @@ kit/                     The shared sign-in kit, copied byte for byte and never 
 sessions.ts              Ended sessions, kept in one small file beside the data
 proxy.ts                 The per-request gate: request-guard.ts, session check, CSP nonce, security headers
 forwarded.ts             Which X-Forwarded-* entry may be believed: the one a trusted proxy wrote
-limits.ts                The largest request body either app accepts, and the proxy buffer set from it
+limits.ts                The largest request body any app accepts, and the proxy buffer set from it
 restore-validation.ts    What a restored database may carry: no foreign triggers or views, the app's own indexes
 request-guard.ts         The host list, the cross-site write check and the JSON rule, ahead of the password
 net.ts, http.ts          What may be a webhook, whether a request came over TLS; route helpers
@@ -755,11 +676,17 @@ lookup.ts, series.ts     Prototype-safe table lookup; extent and thinning for lo
 appearance.ts            Light, dark or system and the palette: stored, applied, kept in step across tabs
 family-theme.css         The eight palettes' grounds, panels and accents, and the header's palette menu
 manifest.ts, service-worker.ts
-                         The installable app shell both apps share; each app only names itself
+                         The installable app shell every app shares; each only names itself
 guard.ts                 The safety net every page loads first, served at /guard.js
-charts/, components/     Chart geometry and the components both apps draw with, including the
+charts/, components/     Chart geometry and the components the apps draw with, including the
                          not-found, error and offline pages, the service worker registration,
                          the safety net's Started signal and the no-JavaScript note
+domain/                  The domain engine the four newer apps run on: from an app's spec, its
+                         schema, ledger, pricing, mirror, CSV, identification, backup and routes,
+                         its health route, and in pwa.ts the manifest, service worker and guard
+                         each app's route files serve
+pages/, components/domain/
+                         The pages and components those apps render from their spec
 ```
 
 Inside `apps/cards`:
@@ -797,7 +724,7 @@ src/app/                 Next.js App Router pages and API routes
 src/lib/identify/        Claude vision call and the identification schema
 src/lib/grading/         Agency report links, centering limits and the PSA cert client
 src/lib/pricing/         Providers, matching heuristics, summary/valuation, refresh pipeline
-src/lib/analytics.ts     Portfolio value over time (holdings, flows, cost basis), grading outlook and timing verdict
+src/lib/analytics.ts     Portfolio value over time (recorded holdings, cost, flows, closes), grading outlook (min/max/upside) and timing verdict
 src/lib/scheduler.ts     Hourly auto-refresh of stale prices (started from src/instrumentation.ts)
 src/lib/uploads.ts       The daily sweep of uploaded photos nothing points at
 src/lib/version.ts       The version the About section and the health route report

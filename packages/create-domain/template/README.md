@@ -25,6 +25,8 @@ npm install
 npm run dev -w @collectcollect/__ID__     # http://localhost:__PORT__
 ```
 
+The app is installable as it stands. Its icon (`scripts/icon.svg`, rendered to `public/icons` and `public/favicon.ico`) is a placeholder card stack in your accent colour: draw one of your own, then `npm run icons -w @collectcollect/__ID__`. `tests/pwa.test.ts` holds the manifest, guard and proxy wiring, and `tests/health.test.ts` the health route a container's health check asks; once the icons exist, copy `tests/installable.test.ts` from `apps/whisky` to hold them to the spec's dark ground.
+
 Environment variables (all optional): `__PREFIX___DATA_DIR` (default `./data`), `__PREFIX___APP_PASSWORD` and `__PREFIX___APP_SECRET` to require a login, `__PREFIX___AUTO_REFRESH_HOURS` (default 24, 0 disables), `MARKDOWN_MIRROR=off` for a read-only data volume, `ANTHROPIC_API_KEY` and `CLAUDE_MODEL` for identification.
 
 ## Tests

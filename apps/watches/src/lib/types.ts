@@ -100,7 +100,10 @@ function parseServiceText(text: string): unknown[] | null {
     .map((s) => s.trim())
     .filter(Boolean)
     .map((part) => {
-      const m = part.match(/^(\d{4}-\d{2}-\d{2})\s*[:\-–]\s*(.+)$/);
+      // The note starts at its first character that is not a space: a note that
+      // could also start with the spaces before it gave the two slots one run to
+      // share, which grew with the square of the run (tests/linear-parsing.test.ts).
+      const m = part.match(/^(\d{4}-\d{2}-\d{2})\s*[:\-–]\s*(\S.*)$/);
       return m ? { date: m[1], notes: m[2] } : { date: "", notes: part };
     });
 }

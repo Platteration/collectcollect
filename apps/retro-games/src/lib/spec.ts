@@ -2,7 +2,7 @@ import type { DomainSpec, ItemRecord } from "@collectcollect/core/domain/spec";
 import { manualProvider } from "@collectcollect/core/domain/pricing/index";
 import { GameIdentification, PROMPT, SYSTEM_PROMPT, toInput } from "./identify";
 import { priceChartingProvider } from "./pricing/pricecharting";
-import { describeGames, gradeWindowAlert, summarizeGames, type GameExtras } from "./pricing/summary";
+import { GAME_SUMMARY_FIELDS, describeGames, gradeWindowAlert, summarizeGames, type GameExtras } from "./pricing/summary";
 import { SEED } from "./seed";
 import { COMPANIES, COMPLETENESS, CONDITIONS, DEFAULT_SETTINGS, PLATFORMS, REGIONS, TIER_KEYS, type Game, type GameQuery, type GameSettings } from "./types";
 
@@ -89,6 +89,7 @@ export const spec: DomainSpec<Game, GameSettings, GameExtras, GameQuery> = {
     providers: [priceChartingProvider, manualProvider("A price typed on a game, under Loose, CIB, New or Graded, overrides PriceCharting for that key; past values can be entered by hand to draw the chart.")],
     query: (g) => ({ title: g.title, platform: g.platform, region: g.region, releaseYear: g.releaseYear, variant: g.variant, externalIds: g.externalIds }),
     summarize: summarizeGames,
+    storedFields: GAME_SUMMARY_FIELDS,
     describe: describeGames,
     manualKeys: TIER_KEYS,
     concurrency: 2,

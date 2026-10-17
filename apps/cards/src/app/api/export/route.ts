@@ -5,7 +5,10 @@ import { listSales } from "@/lib/sales";
 const COLUMNS = [
   "id", "game", "sport", "name", "set", "set_code", "number", "year", "rarity", "variant", "language", "manufacturer",
   "team", "rookie", "parallel", "serial_number", "autograph", "relic",
-  "quantity", "condition", "grading_company", "grade", "cert_number", "centering", "corners", "edges", "surface", "grading_status", "purchase_price", "location",
+  // The subgrades are named for what they are, apart from the centering a card is measured to.
+  "quantity", "condition", "grading_company", "grade", "cert_number",
+  "subgrade_centering", "subgrade_corners", "subgrade_edges", "subgrade_surface",
+  "grading_status", "purchase_price", "location",
   "value_each", "value_total", "ungraded_price", "psa_10_price", "psa_10_estimate", "price_source", "price_date", "notes",
 ] as const;
 

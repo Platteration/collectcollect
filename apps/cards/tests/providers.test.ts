@@ -3,9 +3,9 @@ import { fakeFetch } from "./helpers";
 import { buildQuery, pickVariantKey, pokemonTcgProvider } from "@/lib/pricing/providers/pokemontcg";
 import { ygoprodeckProvider } from "@/lib/pricing/providers/ygoprodeck";
 import { scryfallProvider } from "@/lib/pricing/providers/scryfall";
-import { buildSearch, priceChartingProvider, productToQuote, scoreProduct, setPriceChartingLimit } from "@/lib/pricing/providers/pricecharting";
+import { buildSearch, priceChartingProvider, productToQuote, scoreProduct, setPriceChartingLimit, type PcProduct } from "@/lib/pricing/providers/pricecharting";
 import { NO_LIMIT, rateLimit } from "@collectcollect/core/limiter";
-import { cardToQuery } from "@/lib/pricing/index";
+import { cardToQuery, queryParallel } from "@/lib/pricing/index";
 
 describe("Pokémon TCG provider", () => {
   it("builds a name+number query", () => {
@@ -257,8 +257,55 @@ describe("which printing a Magic price is for", () => {
   });
 });
 
+describe("what a provider refuses to call a match", () => {
+  it("does not take a Pokémon card that merely contains the name, from a set the query never mentioned", async () => {
+    const fetchImpl = fakeFetch([
+      ["api.pokemontcg.io/v2/cards?q=", { data: [{ id: "xy1-99", name: "Charizard's Charmander", number: "99", set: { id: "xy1", name: "XY" }, tcgplayer: { prices: { normal: { market: 2 } } } }] }],
+    ]);
+    expect(await pokemonTcgProvider.lookup({ game: "pokemon", name: "Charizard", cardNumber: "4/102", setName: "Base Set" }, fetchImpl)).toEqual([]);
+  });
+  it("still takes the best name match for a query that has nothing but a name, and a number that agrees over a set that does not", async () => {
+    const vmax = fakeFetch([
+      ["api.pokemontcg.io/v2/cards?q=", { data: [{ id: "swsh4-44", name: "Pikachu VMAX", number: "44", set: { id: "swsh4", name: "Vivid Voltage" }, tcgplayer: { prices: { holofoil: { market: 30 } } } }] }],
+    ]);
+    expect((await pokemonTcgProvider.lookup({ game: "pokemon", name: "Pikachu" }, vmax))[0]).toMatchObject({ ungraded: 30 });
+    const base2 = fakeFetch([
+      ["api.pokemontcg.io/v2/cards?q=", { data: [{ id: "base4-4", name: "Charizard", number: "4", set: { id: "base4", name: "Base Set 2" }, tcgplayer: { prices: { holofoil: { market: 250 } } } }] }],
+    ]);
+    expect((await pokemonTcgProvider.lookup({ game: "pokemon", name: "Charizard", cardNumber: "4/102", setName: "Base Set" }, base2))[0]).toMatchObject({ ungraded: 250 });
+  });
+  it("does not let a fuzzy Yu-Gi-Oh! search answer with a card missing a word of the name", async () => {
+    const fetchImpl = fakeFetch([
+      ["cardinfo.php?name=", { error: "No card matching your query was found" }, 400],
+      ["cardinfo.php?fname=", { data: [{ id: 23995346, name: "Blue-Eyes Ultimate Dragon", card_prices: [{ tcgplayer_price: "50.00" }] }] }],
+    ]);
+    expect(await ygoprodeckProvider.lookup({ game: "yugioh", name: "Blue-Eyes White Dragon" }, fetchImpl)).toEqual([]);
+  });
+  it("does not let Scryfall's fuzzy lookup answer with the closest card it knows", async () => {
+    const fetchImpl = fakeFetch([
+      [/cards\/named/, { id: "h", name: "Lightning Helix", set: "rav", set_name: "Ravnica: City of Guilds", collector_number: "213", prices: { usd: "1.00" } }],
+    ]);
+    expect(await scryfallProvider.lookup({ game: "mtg", name: "Lightning Bolt" }, fetchImpl)).toEqual([]);
+    // Every word, in any order, with the card's own punctuation: still the card.
+    const faces = fakeFetch([[/cards\/named/, { id: "f", name: "Fire // Ice", set: "apc", set_name: "Apocalypse", collector_number: "128", prices: { usd: "2.00" } }]]);
+    expect((await scryfallProvider.lookup({ game: "mtg", name: "Fire" }, faces))[0]).toMatchObject({ ungraded: 2 });
+  });
+  it("does not let PriceCharting match on one shared word and the category alone", async () => {
+    process.env.PRICECHARTING_TOKEN = "t";
+    try {
+      const fetchImpl = fakeFetch([
+        ["pricecharting.com", { status: "success", products: [{ id: "9", "product-name": "Holo Rare Wall Poster", "console-name": "Pokemon Promo", "loose-price": 500 }] }],
+      ]);
+      expect(await priceChartingProvider.lookup({ game: "pokemon", name: "Charizard Holo", setName: "Base Set" }, fetchImpl)).toEqual([]);
+    } finally {
+      delete process.env.PRICECHARTING_TOKEN;
+    }
+  });
+});
 
 describe("sports card searches", () => {
+  const trout = { game: "sports", name: "Mike Trout", cardNumber: "US175", setName: "Topps Update", year: 2011 } as const;
+
   it("puts the parallel, the autograph and the relic into the PriceCharting search", () => {
     const query = cardToQuery({
       game: "sports",
@@ -279,14 +326,44 @@ describe("sports card searches", () => {
     expect(buildSearch(query)).toBe("2011 Topps Chrome Mike Trout #US175 Gold Refractor Auto");
     // A base card without any of that searches as before.
     expect(cardToQuery({ game: "sports", name: "Mike Trout", sport: null, setName: null, setCode: null, cardNumber: null, year: null, variant: null, manufacturer: null, externalIds: {} }).parallel).toBeNull();
+    expect(queryParallel({ parallel: "  ", autograph: false, relic: null })).toBeNull();
+    expect(queryParallel({ parallel: null, autograph: true, relic: true })).toBe("Auto Relic");
+  });
+
+  it("leaves a trading card's search alone", () => {
+    expect(buildSearch({ game: "pokemon", name: "Charizard", cardNumber: "4/102", setName: "Base Set", parallel: "Reverse" })).toBe("Charizard #4 Base Set");
   });
 
   it("ranks the listing that names the parallel above the base card when the copy is one", () => {
     const base = { id: "1", "product-name": "Mike Trout #US175", "console-name": "2011 Topps Update", "loose-price": 5000 };
     const gold = { id: "2", "product-name": "Mike Trout #US175 [Gold Refractor]", "console-name": "2011 Topps Update", "loose-price": 90000 };
-    const plain = { game: "sports", name: "Mike Trout", cardNumber: "US175", setName: "Topps Update", year: 2011 } as const;
+    const plain = { ...trout };
     expect(scoreProduct(plain, base)).toBeGreaterThan(scoreProduct(plain, gold));
     const withParallel = { ...plain, parallel: "Gold Refractor" };
     expect(scoreProduct(withParallel, gold)).toBeGreaterThan(scoreProduct(withParallel, base));
+    // The colour counts on its own: for a Gold Refractor, the Gold listing outranks a Blue Refractor's.
+    const blue = { id: "3", "product-name": "Mike Trout #US175 [Blue Refractor]", "console-name": "2011 Topps Update", "loose-price": 30000 };
+    expect(scoreProduct(withParallel, gold)).toBeGreaterThan(scoreProduct(withParallel, blue));
+  });
+
+  it("asks PriceCharting for the parallel and takes the listing that names it", async () => {
+    process.env.PRICECHARTING_TOKEN = "t";
+    setPriceChartingLimit(NO_LIMIT);
+    try {
+      const products: PcProduct[] = [
+        { id: "1", "product-name": "Mike Trout #US175", "console-name": "Baseball Cards 2011 Topps Update", "loose-price": 5000 },
+        { id: "2", "product-name": "Mike Trout #US175 [Gold Refractor]", "console-name": "Baseball Cards 2011 Topps Update", "loose-price": 90000, "manual-only-price": 400000 },
+      ];
+      const fetchImpl = fakeFetch([["api/products", { status: "success", products }]]);
+      const quotes = await priceChartingProvider.lookup(cardToQuery({ ...trout, sport: "baseball", setCode: null, variant: null, manufacturer: "Topps", parallel: "Gold Refractor", externalIds: {} }), fetchImpl);
+      expect(quotes[0]).toMatchObject({ externalId: "2", ungraded: 900, graded: { "PSA 10": 4000 } });
+      const asked = decodeURIComponent(String((fetchImpl as unknown as { mock: { calls: Array<[string]> } }).mock.calls[0]?.[0]));
+      expect(asked).toContain("Gold Refractor");
+      // The same player's base card, asked for without a parallel, is the base listing.
+      const base = await priceChartingProvider.lookup(cardToQuery({ ...trout, sport: "baseball", setCode: null, variant: null, manufacturer: "Topps", externalIds: {} }), fetchImpl);
+      expect(base[0]).toMatchObject({ externalId: "1", ungraded: 50 });
+    } finally {
+      delete process.env.PRICECHARTING_TOKEN;
+    }
   });
 });

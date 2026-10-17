@@ -1,5 +1,5 @@
 import type { DomainSpec, ItemRecord } from "@collectcollect/core/domain/spec";
-import { manualProvider, summarizeSimple, type SimpleExtras } from "@collectcollect/core/domain/pricing/index";
+import { manualProvider, SIMPLE_SUMMARY_FIELDS, summarizeSimple, type SimpleExtras } from "@collectcollect/core/domain/pricing/index";
 import { money } from "@collectcollect/core/format";
 import { PROMPT, SYSTEM_PROMPT, WatchIdentification, toInput } from "./identify";
 import { SEED } from "./seed";
@@ -57,9 +57,10 @@ export const spec: DomainSpec<Watch, WatchSettings, SimpleExtras, WatchQuery> = 
     // Manual pricing is deliberate — this app is frozen as a manual-pricing engine-validation app with no market source planned.
     // If it ever graduates, a provider would only be added behind this existing PriceProvider slot; the query already carries brand, model and reference.
     // No provider is planned while frozen.
-    providers: [manualProvider("No market source is wired up yet. Type what each watch is worth, and enter past values with dates so the chart has a line to draw.")],
+    providers: [manualProvider("No market source is wired up. Type what each watch is worth, and enter past values with dates so the chart has a line to draw.")],
     query: (w) => ({ brand: w.brand, model: w.model, referenceNumber: w.referenceNumber }),
     summarize: ({ item, quotes, errors, fetchedAt }) => summarizeSimple({ item, quotes, errors, fetchedAt, priority: [] }),
+    storedFields: SIMPLE_SUMMARY_FIELDS,
     describe: (s) => (s.market === null ? "" : `${s.marketSource}: ${money(s.market)}`),
     manualNote: "The only source for now: what you say a watch is worth, and what it was worth on a date.",
   },

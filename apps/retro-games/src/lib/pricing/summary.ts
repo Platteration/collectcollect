@@ -1,4 +1,5 @@
-import { MANUAL_SOURCE, byPriority, manualQuote, type GradedExtras } from "@collectcollect/core/domain/pricing/index";
+import { GRADED_SUMMARY_FIELDS, MANUAL_SOURCE, byPriority, manualQuote, type GradedExtras } from "@collectcollect/core/domain/pricing/index";
+import type { SummaryFields } from "@collectcollect/core/domain/stored";
 import { gradingVerdict, isReadyToGrade, outlookSeries, type GradeKeys, type GradingSettings, type OutlookPoint } from "@collectcollect/core/grading";
 import { round2 } from "@collectcollect/core/pricing/match";
 import type { ItemRecord, NewAlert, PriceError, PriceQuote, PriceSnapshot, PriceSummary, Settings } from "@collectcollect/core/domain/spec";
@@ -23,6 +24,9 @@ export interface GameExtras extends GradedExtras {
 }
 
 export type GameSummary = PriceSummary<GameExtras>;
+
+/** How a stored game summary is read back: the graded fields, and the price of every tier. */
+export const GAME_SUMMARY_FIELDS: SummaryFields<GameExtras> = { ...GRADED_SUMMARY_FIELDS, tiers: "prices", tiersSource: "text" };
 
 /** Which recorded prices name the best graded outcome; a game has one graded figure, not one per grade. */
 export const GAME_GRADE_KEYS: GradeKeys = { maxKeys: ["Graded"], minKeys: [], companies: ["WATA", "VGA", "CGC", "Grade"] };
@@ -167,9 +171,9 @@ export function gradeWindowAlert(args: { item: ItemRecord<Game>; history: Array<
   const before = outlookSeries(history, grading, null, GAME_GRADE_KEYS);
   const after = [...before, ...outlookSeries([{ id: Number.MAX_SAFE_INTEGER, fetchedAt: next.fetchedAt, summary: next }], grading, null, GAME_GRADE_KEYS)];
   const wasReady = before.length > 0 && isReadyToGrade(before, gradingVerdict(before), grading);
-  const ready = isReadyToGrade(after, gradingVerdict(after), grading);
-  if (!ready || wasReady) return [];
-  const last = after[after.length - 1];
+  // The latest point, when it clears the owner's thresholds.
+  const last = isReadyToGrade(after, gradingVerdict(after), grading) ? after[after.length - 1] : undefined;
+  if (!last || wasReady) return [];
   return [
     {
       kind: "grade_window",

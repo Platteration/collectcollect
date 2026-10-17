@@ -1,4 +1,5 @@
 import type { ZodType } from "zod";
+import type { SummaryFields } from "./stored";
 
 /**
  * What an app has to say about its collectible for the engine to run it.
@@ -167,7 +168,12 @@ export interface PriceProvider<Q = unknown> {
   isConfigured(): boolean;
   /** Load a whole catalogue before a run of lookups; optional and always safe to skip. */
   prime?(fetchImpl?: typeof fetch): Promise<void>;
-  lookup(query: Q, fetchImpl?: typeof fetch): Promise<PriceQuote[]>;
+  /**
+   * `signal` aborts when the engine stops waiting for this source, so a source
+   * that queues its calls (PriceCharting's one a second) can drop one it was
+   * given up on instead of asking later for an answer nobody will read.
+   */
+  lookup(query: Q, fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<PriceQuote[]>;
 }
 
 export class ProviderError extends Error {
@@ -378,6 +384,12 @@ export interface DomainSpec<
     providers: PriceProvider<Q>[];
     query(item: ItemRecord<F>): Q;
     summarize(args: SummarizeArgs<F, S>): PriceSummary<X>;
+    /**
+     * The kind of each field `summarize` adds to the base ones, so a stored
+     * summary (one a restore installed included) is read back field by field
+     * into that shape rather than trusted (domain/stored.ts).
+     */
+    storedFields: SummaryFields<X>;
     /** How the recorded prices read in the Markdown value table and the history table. */
     describe?(summary: PriceSummary<X>): string;
     /** Keys the owner may type a price under (grades, completeness); empty for a single value. */
@@ -425,6 +437,11 @@ export interface DomainSpec<
   emptyNote?: string;
 }
 
+/** What an app calls itself on a home screen, in the install prompt and in the safety net's note: "CollectCollect Whisky". */
+export function appTitle(spec: Pick<DomainSpec, "name">): string {
+  return `CollectCollect ${spec.name}`;
+}
+
 /** The camelCase key as a snake_case column and front-matter key. */
 export function columnOf(key: string): string {
   return key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
@@ -462,7 +479,8 @@ export function conditionHolds(condition: FieldCondition | undefined, values: Re
 /** Label for an enum value, or the raw value when it is not an option. */
 export function optionLabel(field: FieldSpec | undefined, value: unknown): string {
   if (value === null || value === undefined || value === "") return "";
-  if (field?.type === "enum" && field.options && Object.hasOwn(field.options, String(value))) return field.options[String(value)];
+  const enumLabel = field?.type === "enum" && field.options && Object.hasOwn(field.options, String(value)) ? field.options[String(value)] : undefined;
+  if (enumLabel !== undefined) return enumLabel;
   if (field?.type === "boolean") return value ? "Yes" : "No";
   if (Array.isArray(value)) return value.map((v) => (field?.options && Object.hasOwn(field.options, String(v)) ? field.options[String(v)] : String(v))).join(", ");
   return String(value);

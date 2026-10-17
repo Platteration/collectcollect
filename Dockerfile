@@ -26,7 +26,11 @@ COPY apps/watches/package.json ./apps/watches/
 COPY apps/whisky/package.json ./apps/whisky/
 COPY packages/core/package.json ./packages/core/
 COPY packages/create-domain/package.json ./packages/create-domain/
-RUN npm ci
+# Then open a database, so a missing native binding fails the build: the
+# container's health check answers 200 whether or not a database opens (it
+# reports that as `database: false`), so a broken image would otherwise start.
+RUN npm ci \
+  && node -e "new (require('better-sqlite3'))(':memory:').close()"
 # .dockerignore keeps every `data` directory out of the context, which is
 # load-bearing rather than tidiness: the file tracer resolves the database path
 # statically, so a data directory present at build time is packaged into the

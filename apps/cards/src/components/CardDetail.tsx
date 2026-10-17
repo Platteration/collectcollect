@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { imageSrc, money, when } from "@/lib/format";
-import { GAMES, GRADING_STATUSES, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Sale, type Settings, subgradesLabel } from "@/lib/types";
+import { httpUrl, imageSrc, localDateInput, money, when, caveatSentence } from "@/lib/format";
+import { GAMES, GRADING_STATUSES, subgradesLabel, type CardRecord, type GradingStatus, type PriceSnapshot, type PriceSummary, type Sale, type Settings } from "@/lib/types";
 import { gradingVerdict, isReadyToGrade, outlookSeries } from "@/lib/analytics";
 import { OutlookChart } from "./charts/OutlookChart";
 import { PortfolioChart } from "./charts/PortfolioChart";
@@ -321,9 +321,12 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
   const valuePoints = [...history]
     .reverse()
     .filter((s) => s.summary.yourCopyValue)
-    // cost is per copy, matching the per-copy value the card chart plots.
-    .map((s) => ({ t: s.fetchedAt, value: s.summary.yourCopyValue!, ungraded: s.summary.ungraded ?? 0, priced: 1, cost: card.purchasePrice ?? 0, copies: card.quantity, flows: 0 }));
-  const valueChange = valuePoints.length > 1 ? valuePoints[valuePoints.length - 1].value - valuePoints[0].value : 0;
+    // cost is per copy, matching the per-copy value this chart plots; a card
+    // with no price recorded has no cost line.
+    .map((s) => ({ t: s.fetchedAt, value: s.summary.yourCopyValue!, ungraded: s.summary.ungraded ?? 0, priced: 1, cost: card.purchasePrice ?? 0 }));
+  const firstPoint = valuePoints[0];
+  const lastPoint = valuePoints.at(-1);
+  const valueChange = valuePoints.length > 1 && firstPoint && lastPoint ? lastPoint.value - firstPoint.value : 0;
   const ret = card.purchasePrice !== null && latest?.yourCopyValue ? latest.yourCopyValue - card.purchasePrice : null;
   const assessment = card.identification?.condition_assessment ?? null;
   const expectedGrade = assessment?.estimated_grade_high ?? assessment?.estimated_grade_low ?? null;
@@ -447,7 +450,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
             {(card.rookie || card.autograph || card.relic) && (
               <Field label="Card type" value={[card.rookie ? "Rookie" : null, card.autograph ? "Autograph" : null, card.relic ? "Relic" : null].filter(Boolean).join(" · ")} />
             )}
-            {card.subgrades && <Field label="Subgrades" value={subgradesLabel(card.subgrades)} />}
+            {card.subgrades && <Field label="Subgrades" value={subgradesLabel(card.subgrades)} wide />}
             <Field label="Added" value={when(card.createdAt)} />
             {card.notes && (
               <div className="col-span-2 sm:col-span-3">
@@ -487,7 +490,7 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
                 up={valueChange >= 0}
                 height={200}
                 label="Value of this card over time"
-                showCost
+                showCost={card.purchasePrice !== null}
                 costLabel="paid"
                 detail={(p) => `ungraded ${money(p.ungraded)}`}
               />
@@ -824,9 +827,10 @@ export function CardDetail({ card: initial, latest: initialLatest, history: init
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+/** `wide` takes the whole row, for a value too long for one of two columns on a phone. */
+function Field({ label, value, wide }: { label: string; value: string; wide?: boolean }) {
   return (
-    <div>
+    <div className={wide ? "col-span-2 sm:col-span-3" : undefined}>
       <dt className="text-xs uppercase tracking-wide text-neutral-500">{label}</dt>
       <dd>{value}</dd>
     </div>

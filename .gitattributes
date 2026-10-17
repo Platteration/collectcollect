@@ -1,0 +1,5 @@
+# A shell script is run by bash, which stops at the first carriage return
+# ("set: pipefail: invalid option name"). Git for Windows converts line endings
+# on checkout unless told not to, so scripts/install.sh arrives with CRLF and
+# the documented Git Bash install dies on line 9. LF, whatever core.autocrlf says.
+*.sh text eol=lf

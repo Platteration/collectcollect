@@ -3,7 +3,8 @@ import path from "node:path";
 import type { Ledger } from "../acquisitions";
 import type { DomainDb } from "../db";
 import { money, table } from "../../markdown/format";
-import type { DomainSpec, ItemRecord, PriceSnapshot, PriceSummary, Sale } from "../spec";
+import type { DomainSpec, ItemRecord, PriceSnapshot, Sale } from "../spec";
+import { readStoredSummary } from "../stored";
 import { itemFileName, itemMarkdown, idFromFileName, parseItemMarkdown, recordFromInput, displayValue, type ItemBundle } from "./document";
 
 /**
@@ -118,15 +119,8 @@ export function createMirror<F extends object, S extends object, X extends objec
 
   function snapshotsFor(itemId: number): PriceSnapshot<X>[] {
     const rows = readRows("SELECT * FROM price_snapshots WHERE item_id = ? ORDER BY fetched_at DESC, id DESC", itemId) as Array<Record<string, unknown>>;
-    const out: PriceSnapshot<X>[] = [];
-    for (const r of rows) {
-      try {
-        out.push({ id: Number(r.id), itemId: Number(r.item_id), fetchedAt: String(r.fetched_at), summary: JSON.parse(String(r.summary)) as PriceSummary<X> });
-      } catch {
-        /* a snapshot that will not parse is not worth failing the mirror over */
-      }
-    }
-    return out;
+    // Read field by field (stored.ts): a summary that will not parse reads as one with no price, rather than failing the mirror.
+    return rows.map((r) => ({ id: Number(r.id), itemId: Number(r.item_id), fetchedAt: String(r.fetched_at), summary: readStoredSummary<X>(r.summary, String(r.fetched_at), spec.pricing.storedFields) }));
   }
 
   function bundleFor(item: ItemRecord<F>): ItemBundle<F, X> {
@@ -181,9 +175,19 @@ export function createMirror<F extends object, S extends object, X extends objec
       if (now - state.dirtySince >= INDEX_MAX_WAIT_MS) return;
       clearTimeout(state.indexTimer);
     }
-    state.indexTimer = setTimeout(() => {
+    state.indexTimer = setTimeout(function writeWhenFree() {
       state.indexTimer = null;
-      if (state.indexDirty) writeIndex();
+      if (!state.indexDirty) return;
+      // A restore is moving the collection folder aside and rebuilding it.
+      // Writing the index now would make a folder of its own in the middle of
+      // that; the restore rebuilds the folder when it is done, and this tries
+      // again after it.
+      if (db.databaseLocked()) {
+        state.indexTimer = setTimeout(writeWhenFree, INDEX_QUIET_MS);
+        state.indexTimer.unref?.();
+        return;
+      }
+      writeIndex();
     }, INDEX_QUIET_MS);
     state.indexTimer.unref?.();
   }

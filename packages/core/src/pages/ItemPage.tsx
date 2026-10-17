@@ -75,7 +75,10 @@ export async function ItemPage<F extends object, S extends object, X extends obj
     .filter((f) => f.value !== "");
 
   const history = [...snapshots].reverse().filter((s) => s.summary.yourCopyValue !== null).map((s) => ({ t: s.fetchedAt, value: s.summary.yourCopyValue as number }));
-  const up = history.length < 2 || history[history.length - 1].value >= history[0].value;
+  // Up unless the newest value is below the oldest; one value or none is not a fall.
+  const [oldest, ...later] = history;
+  const newest = later.at(-1);
+  const up = !oldest || !newest || newest.value >= oldest.value;
   const hasSources = spec.pricing.providers.some((p) => p.isConfigured() && p.id !== "manual");
   const certApplies = spec.cert && (spec.cert.applies ? spec.cert.applies(item) : true);
   const image = imageOf(item);

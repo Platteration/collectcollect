@@ -11,6 +11,9 @@ describe("pricing a watch", () => {
     const statuses = engine.statuses();
     expect(statuses.find((s) => s.id === "manual")).toMatchObject({ configured: true });
     expect(statuses.find((s) => s.id === "manual")?.note).toMatch(/Type what each watch is worth/);
+    // No source is planned, so the note must not promise one is coming.
+    expect(statuses.find((s) => s.id === "manual")?.note).toMatch(/^No market source is wired up\. /);
+    expect(statuses.find((s) => s.id === "manual")?.note).not.toMatch(/\byet\b/i);
   });
 
   it("values a watch at what the owner said, and a refresh changes nothing", async () => {
@@ -32,8 +35,8 @@ describe("pricing a watch", () => {
     engine.refresh.addManualSnapshot(watch.id, { value: 12300, at: "2026-03-01" });
     const history = engine.repo.listSnapshots(watch.id);
     expect(history.map((s) => s.summary.yourCopyValue)).toEqual([12300, 12800, 11800]);
-    expect(history[0].summary.yourCopyBasis).toBe("Entered by hand");
-    expect(history[2].summary.yourCopyBasis).toBe("Chrono24 median");
+    expect(history[0]?.summary.yourCopyBasis).toBe("Entered by hand");
+    expect(history[2]?.summary.yourCopyBasis).toBe("Chrono24 median");
     expect(engine.valuation(watch, history[0])).toEqual({ value: 12300, basis: "Entered by hand" });
     expect(() => engine.refresh.addManualSnapshot(watch.id, { value: "lots" })).toThrow(/number/);
   });
@@ -46,6 +49,6 @@ describe("pricing a watch", () => {
     const alerts = engine.alerts.listAlerts();
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toMatchObject({ kind: "price_move", itemId: watch.id });
-    expect(alerts[0].title).toMatch(/Rolex Submariner up 20.0%/);
+    expect(alerts[0]?.title).toMatch(/Rolex Submariner up 20.0%/);
   });
 });

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test.describe("adding a game by hand", () => {
   test("saves what was typed and opens it", async ({ page }) => {
@@ -15,7 +15,9 @@ test.describe("adding a game by hand", () => {
     await expect(page.getByRole("heading", { name: "Castlevania: Symphony of the Night" })).toBeVisible();
     await expect(page.getByText(/paid \$90\.00 each/)).toBeVisible();
     // A game arrives loose unless said otherwise, and loose copies stack.
-    await expect(page.getByText("Loose", { exact: true })).toBeVisible();
+    // Said twice: the condition badge under the title and the Completeness fact in the record.
+    await expect(page.locator(".badge").filter({ hasText: /^Loose$/ })).toBeVisible();
+    await expect(page.getByRole("definition").filter({ hasText: /^Loose$/ })).toBeVisible();
   });
 
   test("takes a second identical game as another copy rather than a second row", async ({ page }) => {

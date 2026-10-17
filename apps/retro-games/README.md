@@ -43,7 +43,7 @@ Auto-refresh re-prices anything older than `RETRO_GAMES_AUTO_REFRESH_HOURS` (def
 
 ## Grade it, or wait?
 
-The grade / wait / skip verdict from the card app runs on every sealed or complete copy, with the graded price (real or estimated) as the best outcome and the copy's own tier price as raw. Settings hold the grading fee (default $100 all in), and what "ready to grade" needs: at least $100 of upside after the fee and at least 30% of the raw value. When a copy first clears those thresholds while the gap is at its widest, a **Grading window** alert is raised (and POSTed to the webhook, if set).
+The grade / wait / skip verdict shared with the card app runs on every sealed or complete copy, with the graded price (real or estimated) as the best outcome and the copy's own tier price as raw. It reads one price per day (the day's last) and says nothing about timing until it has three different days, so three refreshes in one afternoon read 'Up to $… upside' with a note, not a verdict. It then says 'Near the best recorded premium' when today's upside is within 10% of the widest recorded, 'Gap has narrowed' when it is below, and skip when even the graded price would not cover the fee. It compares recorded prices; it does not predict a grade or a sale price. Settings hold the grading fee (default $100 all in), and what "ready to grade" needs: at least $100 of upside after the fee and at least 30% of the raw value. When a copy first clears those thresholds while the gap is at its widest, a **Grading window** alert is raised (and POSTed to the webhook, if set).
 
 ## Photo identification
 
@@ -71,12 +71,19 @@ npm test -w @collectcollect/retro-games
 ```
 
 - `tests/spec.test.ts`: schema validation, defaults, cross-field rules, CSV aliases, the unique-vs-stackable rule, identification mapping, the Markdown mirror and the seed.
-- `tests/pricecharting.test.ts`: the search string per platform and region, ranking, the price-field mapping, id lookup and search fallback, error handling, all against a fake `fetch`.
+- `tests/pricecharting.test.ts`: the search string per platform and region, ranking, the price-field mapping, id lookup and search fallback, error handling (a refused token and PriceCharting's rate limit), all against a fake `fetch`. The shared client's pacing, one call a second across the app, is tested in `packages/core/tests/pricecharting.test.ts`.
 - `tests/summary.test.ts`: what a copy is worth by completeness and condition, graded and estimated prices, manual overrides, the grade-or-wait outlook and the grading-window alert.
+- `tests/extras.test.ts`, `tests/health.test.ts`, `tests/installable.test.ts`, `tests/pwa.test.ts`, `tests/e2e-teardown.test.ts`: the price list and grade panel, the health route through the password gate, the icons and the installable shell's wiring, and the end-to-end suite's cleanup.
+
+```sh
+npm run e2e -w @collectcollect/retro-games
+```
+
+The end-to-end suite drives a real production build in Chromium on three servers (a seeded collection that is only read, an empty one written to, and one behind a password), each started offline with the price refresh off and removed when the run ends; every spec takes `test` from `e2e/fixtures.ts`, so a policy violation, an uncaught exception or a request that leaves the site fails it. It covers the portfolio, the collection, a game's page, adding by hand, the report, importing a spreadsheet and the password gate, the health route, the not-found page and the theme and palette. The shared pages are also driven by `apps/whisky`'s suite.
 
 ## Known gaps
 
 - PriceCharting's graded price is one number per game; a WATA 9.8 and a 9.0 read the same figure. There is no per-grade source for games.
 - Console names for PriceCharting are unverified against the live API (no network access while this was written). If a platform never matches, fix its name in `priceChartingConsole` in `src/lib/types.ts`.
 - No certificate verification for WATA, VGA or CGC. The cert number is stored and printed on the report only.
-- No end-to-end suite of its own. The pages this app renders come from the shared engine and are covered end to end by `apps/whisky`, which drives a real build through the portfolio, the collection, an item, the report, adding by hand, importing a spreadsheet and the password gate. What is not covered there is the grade-or-wait panel, which unit tests reach but a browser does not.
+- The grade-or-wait panel is reached by unit tests, not by the browser suite.

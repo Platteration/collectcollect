@@ -36,6 +36,7 @@ async function stubScans(page: Page, cards: StubCard[], waitFirst = false) {
       year: 1999, rarity: null, variant: null, language: "English", manufacturer: null, subject: null,
       grading: { company: null, grade: null, cert_number: null }, condition_notes: null,
       confidence: card.confidence ?? 0.95, alternatives: [], search_query: card.name,
+      ...card.extra,
     };
     const db = database();
     try {

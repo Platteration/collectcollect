@@ -1,12 +1,19 @@
 import { round2 } from "./pricing/match";
+import { extent } from "./series";
 
 /**
  * The grade / wait / skip verdict, generalised.
  *
- * Written for trading cards and moved here so a sealed game or a raw comic
- * gets the same reasoning: how much a graded outcome would add over what the
- * copy is worth today, whether that gap is at its widest, and whether it
- * clears the fee. The card app re-exports these with its own defaults.
+ * Written for trading cards so a sealed game or a raw comic gets the same
+ * reasoning: how much a graded outcome would add over what the copy is worth
+ * today, whether that gap is at its widest, and whether it clears the fee.
+ *
+ * The card app keeps its own version (gradingVerdict and isReadyToGrade in
+ * apps/cards/src/lib/analytics.ts), which also reads a measured centering and
+ * records where each price came from. The rule that decides the verdict is the
+ * same in both, and a change to it is made to both: one price a day, three
+ * days before timing is judged, and wording that compares what was recorded
+ * and predicts nothing.
  *
  * It works on any summary that carries an ungraded price, real graded prices
  * keyed by grade, and estimated graded prices keyed the same way.
@@ -34,10 +41,15 @@ export interface GradeKeys {
 }
 
 export const CARD_GRADE_KEYS: GradeKeys = {
-  maxKeys: ["PSA 10", "BGS 10", "CGC 10", "SGC 10"],
+  maxKeys: ["PSA 10", "BGS 10", "CGC 10", "SGC 10", "TAG 10"],
   minKeys: ["PSA 8", "Grade 8", "CGC 8", "BGS 8", "PSA 7", "Grade 7"],
-  companies: ["PSA", "Grade", "CGC", "BGS"],
+  companies: ["PSA", "Grade", "CGC", "BGS", "SGC", "TAG"],
 };
+
+/** The companies a key set prices an expected grade by; the card companies when it names none. */
+function companiesOf(keys: GradeKeys): string[] {
+  return keys.companies ?? CARD_GRADE_KEYS.companies ?? [];
+}
 
 export interface Outlook {
   /** What the owner's raw copy is worth today (condition-adjusted). */
@@ -53,7 +65,12 @@ export interface Outlook {
   upside: number;
   /** min − raw − fee: what grading adds if it comes back a mid grade (negative = you lose money). */
   downside: number;
-  /** Whether min/max came from real graded sales (true) or from the multiplier estimates. */
+  /**
+   * Whether the best case (max) came from a real graded sale (true) or from
+   * the multiplier estimates. The card app's own flag also asks it of the low
+   * case; here the low case can be the raw price itself, as it is for a
+   * sealed game that has no mid grade, so only the best case is asked.
+   */
   fromRealData: boolean;
   /** Value at the grade the photo suggests this copy would receive, when one was estimated. */
   likely: number | null;
@@ -89,7 +106,7 @@ export function gradingOutlook(
   if (!max) return null;
   const min = pick(summary, keys.minKeys) ?? { value: raw, label: "Ungraded", real: false };
   const fee = settings.gradingFee;
-  const likely = atGrade(summary, expectedGrade, keys.companies ?? CARD_GRADE_KEYS.companies!);
+  const likely = atGrade(summary, expectedGrade, companiesOf(keys));
   return {
     likely: likely?.value ?? null,
     likelyLabel: likely?.label ?? null,
@@ -135,9 +152,15 @@ export interface Verdict {
 
 /**
  * Heuristic on when to send a raw copy in. "Prime" means the gap between the
- * gem-mint price and the raw price is at or near the widest it has been and
- * comfortably clears the grading fee; "wait" means the gap is narrower than it
- * was; "skip" means even a gem-mint result would not pay for the fee.
+ * gem-mint price and the raw price is at or near the widest it has been among
+ * the days recorded and comfortably clears the grading fee; "wait" means the
+ * gap is narrower than it was; "skip" means even a gem-mint result would not
+ * pay for the fee.
+ *
+ * The timing is read from one point per day, the day's last, and judged only
+ * once there are three days: pressing Refresh three times in an afternoon is
+ * one day of history, not three. It compares recorded prices and does not
+ * predict the grade a copy would get or what it would sell for.
  */
 export function gradingVerdict(series: OutlookPoint[]): Verdict {
   const last = series[series.length - 1];
@@ -150,29 +173,32 @@ export function gradingVerdict(series: OutlookPoint[]): Verdict {
       upsideVsPeak: null,
     };
   }
-  if (series.length < 3) {
+  const days = new Map<string, OutlookPoint>();
+  for (const point of series) days.set(point.t.slice(0, 10), point);
+  const daily = [...days.values()];
+  if (daily.length < 3) {
     return {
       kind: "insufficient",
       headline: `Up to ${fmt(last.upside)} upside`,
-      detail: "Not enough history yet to tell whether the gap is widening. Prices refresh daily; check back in a week.",
+      detail: "This comparison needs prices from at least three different days. Repeated refreshes today do not add another day of history.",
       upsideVsPeak: null,
     };
   }
-  const peak = Math.max(...series.map((p) => p.upside));
+  const [, peak] = extent(daily.map((p) => p.upside));
   const ratio = peak > 0 ? last.upside / peak : 0;
-  const trend = last.upside - series[Math.max(0, series.length - 4)].upside;
+  const trend = last.upside - (daily[Math.max(0, daily.length - 4)] ?? last).upside;
   if (ratio >= 0.9) {
     return {
       kind: "prime",
-      headline: "Good time to grade",
-      detail: `The ${last.maxLabel} premium over raw is ${fmt(last.upside)} after fees, ${ratio >= 0.999 ? "the widest" : "close to the widest"} it has been.${trend > 0 ? " Still widening." : ""}`,
+      headline: "Near the best recorded premium",
+      detail: `The ${last.maxLabel} premium over raw is ${fmt(last.upside)} after fees, ${ratio >= 0.999 ? "the widest" : "close to the widest"} recorded here.${trend > 0 ? " Still widening." : ""} This comparison does not predict the grade or a sale price.`,
       upsideVsPeak: ratio,
     };
   }
   return {
     kind: "wait",
     headline: "Gap has narrowed",
-    detail: `Upside is ${fmt(last.upside)} now versus ${fmt(peak)} at its widest. ${trend > 0 ? "It is recovering." : "Consider waiting for the graded premium to come back."}`,
+    detail: `Upside is ${fmt(last.upside)} now versus ${fmt(peak)} at its widest recorded here. ${trend > 0 ? "The recorded gap has increased recently." : "The recorded gap is below its earlier peak."}`,
     upsideVsPeak: ratio,
   };
 }

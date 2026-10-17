@@ -144,3 +144,66 @@ describe("what a scan may be folded into", () => {
     expect(listCards()).toHaveLength(2);
   });
 });
+
+describe("a scanned sports card", () => {
+  const sports = (over: Partial<Identification> = {}, confidence = 0.95): Identification => ({
+    ...identification("Mike Trout", confidence),
+    game: "sports", sport: "baseball", set_name: "Topps Chrome", set_code: null, card_number: "US175", year: 2011, language: "English", manufacturer: "Topps",
+    team: "Los Angeles Angels", rookie: true, parallel: null, serial_number: null, autograph: false, relic: false,
+    ...over,
+  });
+  const scan = (id: Identification) => {
+    const d = draft(), claim = claimScanIdentification(d.id, d.revision);
+    return finishScanIdentification(d.id, claim.token, id);
+  };
+
+  it("brings the team, the flags, the parallel, the numbering and the subgrades through to the saved card", () => {
+    const d = scan(sports({ parallel: "Gold Refractor", serial_number: "12/50", autograph: true, relic: true, grading: { company: "BGS", grade: "9.5", cert_number: "0012345678", subgrades: { centering: 9.5, corners: 9.5, edges: 10, surface: 9 } } }));
+    expect(d.input).toMatchObject({ team: "Los Angeles Angels", rookie: true, parallel: "Gold Refractor", serialNumber: "12/50", autograph: true, relic: true, subgrades: { centering: 9.5, corners: 9.5, edges: 10, surface: 9 } });
+    const saved = commitScanDraft(d.id, d.revision, "auto").draft;
+    expect(getCard(saved.cardId!)).toMatchObject({ team: "Los Angeles Angels", rookie: true, parallel: "Gold Refractor", serialNumber: "12/50", autograph: true, relic: true, subgrades: { surface: 9 }, gradingCompany: "BGS" });
+    // An identification made before any of this still scans: the sports fields are absent, not null.
+    const older = scan({ ...identification("Pikachu") });
+    expect(older.input).toMatchObject({ team: null, rookie: false, parallel: null, serialNumber: null, autograph: false, relic: false, subgrades: null });
+    expect(commitScanDraft(older.id, older.revision, "auto").draft.status).toBe("committed");
+  });
+
+  it("saves a numbered card as its own card, however many look like it", () => {
+    const base = createCard({ game: "sports", name: "Mike Trout", setName: "Topps Chrome", cardNumber: "US175", year: 2011, language: "English" });
+    const first = scan(sports({ serial_number: "12/50" }));
+    const savedFirst = commitScanDraft(first.id, first.revision, "auto").draft;
+    // No review stop and no merge: the base card is not what this is.
+    expect(savedFirst).toMatchObject({ status: "committed", result: "created" });
+    const again = scan(sports({ serial_number: "12/50" }));
+    expect(commitScanDraft(again.id, again.revision, "auto").draft).toMatchObject({ status: "committed", result: "created" });
+    expect(listCards().map((c) => c.serialNumber ?? "none").sort()).toEqual(["12/50", "12/50", "none"]);
+    expect(getCard(base.id)?.quantity).toBe(1);
+  });
+
+  it("stacks a base scan on the base card even when a numbered card and a Refractor are held", () => {
+    const base = createCard({ game: "sports", name: "Mike Trout", setName: "Topps Chrome", cardNumber: "US175", year: 2011, language: "English" });
+    createCard({ game: "sports", name: "Mike Trout", setName: "Topps Chrome", cardNumber: "US175", year: 2011, language: "English", serialNumber: "7/25" });
+    createCard({ game: "sports", name: "Mike Trout", setName: "Topps Chrome", cardNumber: "US175", year: 2011, language: "English", parallel: "Refractor" });
+    const d = scan(sports());
+    expect(commitScanDraft(d.id, d.revision, "auto").draft).toMatchObject({ status: "committed", result: "merged", cardId: base.id });
+    expect(getCard(base.id)?.quantity).toBe(2);
+    // And a Refractor scan stacks on the Refractor alone.
+    const r = scan(sports({ parallel: "refractor" }));
+    const merged = commitScanDraft(r.id, r.revision, "auto").draft;
+    expect(merged.result).toBe("merged");
+    expect(getCard(merged.cardId!)).toMatchObject({ parallel: "Refractor", quantity: 2 });
+  });
+
+  it("will not fold a numbered scan, or a different parallel, into a card the owner picks", () => {
+    const base = createCard({ game: "sports", name: "Mike Trout", setName: "Topps Chrome", cardNumber: "US175", year: 2011, language: "English" });
+    const numbered = scan(sports({ serial_number: "12/50" }));
+    expect(() => commitScanDraft(numbered.id, numbered.revision, "merge", base.id)).toThrow(/numbered card.*separate/);
+    const refractor = scan(sports({ parallel: "Gold Refractor" }));
+    expect(() => commitScanDraft(refractor.id, refractor.revision, "merge", base.id)).toThrow(/separate/);
+    expect(getCard(base.id)?.quantity).toBe(1);
+    // The same parallel is a compatible merge, and the owner's pick is honoured.
+    const gold = createCard({ game: "sports", name: "Mike Trout", setName: "Topps Chrome", cardNumber: "US175", year: 2011, language: "English", parallel: "Gold Refractor" });
+    const ok = commitScanDraft(refractor.id, refractor.revision, "merge", gold.id).draft;
+    expect(ok).toMatchObject({ status: "committed", result: "merged", cardId: gold.id });
+  });
+});

@@ -42,7 +42,7 @@ function conditionFromGrade(grade: string | null | undefined): string {
 let counter = 0;
 const nextKey = () => `item-${Date.now()}-${counter++}`;
 
-function formFromIdentification(id: Identification): CardFormState {
+export function formFromIdentification(id: Identification): CardFormState {
   return {
     ...emptyForm(id.game),
     name: id.name,
@@ -64,10 +64,10 @@ function formFromIdentification(id: Identification): CardFormState {
     gradingCompany: id.grading.company ?? "",
     grade: id.grading.grade ?? "",
     certNumber: id.grading.cert_number ?? "",
-    centering: id.grading.subgrades?.centering?.toString() ?? "",
-    corners: id.grading.subgrades?.corners?.toString() ?? "",
-    edges: id.grading.subgrades?.edges?.toString() ?? "",
-    surface: id.grading.subgrades?.surface?.toString() ?? "",
+    subCentering: id.grading.subgrades?.centering?.toString() ?? "",
+    subCorners: id.grading.subgrades?.corners?.toString() ?? "",
+    subEdges: id.grading.subgrades?.edges?.toString() ?? "",
+    subSurface: id.grading.subgrades?.surface?.toString() ?? "",
     notes: id.condition_notes ? `Condition notes: ${id.condition_notes}` : "",
     condition: conditionFromGrade(id.condition_assessment?.estimated_grade_low),
     ...centeringToForm(centeringFromIdentification(id)),
@@ -243,6 +243,9 @@ export function AddCardFlow({ claudeConfigured, initialInput }: { claudeConfigur
         const params = new URLSearchParams({ similar: "1", game: input.game, name: input.name });
         if (input.cardNumber) params.set("number", input.cardNumber);
         if (input.setName) params.set("set", input.setName);
+        // A numbered card, and a parallel, are not the same card as one held without them.
+        if (input.serialNumber) params.set("serial", input.serialNumber);
+        if (input.parallel) params.set("parallel", input.parallel);
         const { cards } = await api<{ cards: CardRecord[] }>(`/api/cards?${params}`);
         if (cards.length) {
           patch(item.key, { status: "review", duplicates: cards });

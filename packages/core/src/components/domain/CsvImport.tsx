@@ -18,6 +18,7 @@ interface Preview {
   rows: Row[];
   total: number;
   usable: number;
+  skippedForSize: number;
 }
 interface Result {
   created: number;
@@ -118,6 +119,12 @@ export function CsvImport({ titleField, noun, example }: { titleField: string; n
           {preview.unmapped.length > 0 && (
             <p className="text-xs" style={{ color: "var(--muted)" }}>
               Ignored, because nothing here matches them: {preview.unmapped.join(", ")}.
+            </p>
+          )}
+          {preview.skippedForSize > 0 && (
+            <p className="text-sm" role="status" style={{ color: "var(--chart-bad-text)" }}>
+              This file has {preview.skippedForSize} more row{preview.skippedForSize === 1 ? "" : "s"} than one import can take. Only the first {preview.total} are
+              read and will be imported; split the file and import the rest separately.
             </p>
           )}
           {!result && preview.rows.length > 0 && (

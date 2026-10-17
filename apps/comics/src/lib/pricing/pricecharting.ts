@@ -79,17 +79,17 @@ export const priceChartingProvider: PriceProvider<ComicQuery> = {
   optional: true,
   note: "Set PRICECHARTING_TOKEN (paid API) for raw and graded prices by grade. Its comic columns are mapped from memory and flagged in the README. Without it, type prices in by hand.",
   isConfigured: isPriceChartingConfigured,
-  async lookup(q, fetchImpl = fetch) {
+  async lookup(q, fetchImpl = fetch, signal) {
     const token = priceChartingToken();
     if (!token) return [];
     const knownId = q.externalIds?.pricecharting;
     if (knownId) {
-      const product = await fetchProduct(token, knownId, fetchImpl);
+      const product = await fetchProduct(token, knownId, fetchImpl, signal);
       if (product) return [productToQuote(product)];
     }
     let products: PcProduct[];
     try {
-      products = await searchProducts(token, buildSearch(q), fetchImpl);
+      products = await searchProducts(token, buildSearch(q), fetchImpl, signal);
     } catch (e) {
       if (e instanceof PriceChartingError) throw new ProviderError("pricecharting", e.message);
       throw e;

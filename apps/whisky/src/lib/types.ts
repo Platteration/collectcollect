@@ -63,7 +63,14 @@ export interface BottleQuery {
   bottleSize: number;
 }
 
-/** "Bottle 123/2000", "123 of 2000", "No. 123/2000" name one bottle; "Batch 12", "L2023" name a run. */
+/**
+ * "Bottle 123/2000", "123 of 2000", "No. 123/2000" name one bottle; "Batch 12", "L2023" name a run.
+ *
+ * The space after the word belongs to the word: with the word optional and a
+ * space slot on each side of it, a run of spaces could be split between the two
+ * slots every way there is, which took a third of a second over twenty thousand
+ * spaces and grew with the square of the run (tests/linear-parsing.test.ts).
+ */
 export function isBottleNumber(text: string | null | undefined): boolean {
-  return /^\s*(?:bottle|no\.?|#)?\s*\d+\s*(?:\/|of)\s*\d+\s*$/i.test(text ?? "");
+  return /^\s*(?:(?:bottle|no\.?|#)\s*)?\d+\s*(?:\/|of)\s*\d+\s*$/i.test(text ?? "");
 }

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { parseCardMarkdown } from "@/lib/markdown/card";
+import { previewImport } from "@/lib/import";
+import { serial } from "@/lib/types";
 import { goalRecord } from "@/lib/goals/markdown";
 import { looksLikeOneRatio, parseCentering, parseSide } from "@/lib/grading/centering";
 import { readCentering } from "@/lib/grading/schema";
 import { caveatSentence } from "@/lib/format";
 import { readLotPart, splitSource } from "@collectcollect/core/markdown/format";
+import { readTitle } from "@/lib/pricing/providers/ebay";
 
 /**
  * Text the app did not write — a card file read back in, a request's
@@ -209,5 +212,113 @@ describe("the scans read exactly what the patterns they replaced read", () => {
     expect(disagreements(files, goalRecord, recordBefore)).toEqual([]);
     const caveats = drawn(["glare", ".", ";", ",", "!", ...spacing], 20_000, 17);
     expect(disagreements(caveats, caveatSentence, (caveat) => caveat.replace(/[.;,]?\s*$/, ""))).toEqual([]);
+  });
+});
+
+describe("a sports card's serial number", () => {
+  // The pattern is "an optional #, a number, a slash or 'of', a number": every run of
+  // digits or spaces is followed by a different kind of character. These are the inputs
+  // a pattern with two quantifiers over the same run would have taken seconds over.
+  it("is read in linear time from a number, a run of spaces or a run of 'of' that never ends the way a serial does", () => {
+    const hostile = [
+      `${"1".repeat(64_000)}x`,
+      `1${spaces(64_000)}x`,
+      `1/${spaces(64_000)}x`,
+      `#${spaces(64_000)}1/`,
+      `${"1/".repeat(32_000)}x`,
+      `1${"of".repeat(32_000)}`,
+      `${"1 ".repeat(32_000)}/1`,
+    ];
+    for (const text of hostile) {
+      const run = timed(() => serial(text));
+      expect(run.value, text.slice(0, 12)).toBe(text.trim());
+      expect(run.ms, text.slice(0, 12)).toBeLessThan(BUDGET_MS);
+    }
+    // A very long number on both sides is a serial, and is read in the same time.
+    const long = timed(() => serial(`${"1".repeat(30_000)} OF ${"2".repeat(30_000)}`));
+    expect(long.value).toBe(`${"1".repeat(30_000)}/${"2".repeat(30_000)}`);
+    expect(long.ms).toBeLessThan(BUDGET_MS);
+  });
+
+  it("is read in linear time wherever a file or a spreadsheet can put it", () => {
+    const text = `${"1".repeat(64_000)}x`;
+    const row = timed(() => previewImport(["name,game,serial", `Mike Trout,sports,${text}`].join("\n")));
+    expect(row.value.rows[0]?.input?.serialNumber).toBe(text);
+    expect(row.ms).toBeLessThan(BUDGET_MS);
+    const card = timed(() => parseCardMarkdown(['---', 'name: "Mike Trout"', 'game: "sports"', `serial_number: "${text}"`, `subgrades: {"centering":"${"9".repeat(64_000)}"}`, "---", "", "# Mike Trout", ""].join("\n")));
+    expect(card.value?.input.serialNumber).toBe(text);
+    expect(card.value?.input.subgrades).toBeNull();
+    expect(card.ms).toBeLessThan(BUDGET_MS);
+  });
+
+  it("still reads the forms a person types", () => {
+    for (const typed of ["12/99", "12 / 99", "12 of 99", "12OF99", "#12/99", "# 12 / 99", " 12/99 "]) expect(serial(typed), typed).toBe("12/99");
+    for (const kept of ["1/1", "SP", "Gold /50", "12-99", "12/", "/99", "12 99", "12/99 x"]) expect(serial(kept), kept).toBe(kept);
+    expect(serial("  ")).toBeNull();
+    expect(serial(null)).toBeNull();
+    expect(serial(undefined)).toBeNull();
+  });
+
+  it("reads exactly the grammar it documents, on short strings drawn from the characters that matter", () => {
+    // The same grammar written as a scan: '#'?, spaces, digits, spaces, '/' or 'of', spaces, digits, end.
+    const before = (text: string): string | null => {
+      const s = text.trim();
+      if (!s) return null;
+      let i = 0;
+      const skip = () => {
+        while (i < s.length && /\s/.test(s[i]!)) i++;
+      };
+      const digits = () => {
+        const from = i;
+        while (i < s.length && s[i]! >= "0" && s[i]! <= "9") i++;
+        return s.slice(from, i);
+      };
+      if (s[i] === "#") i++;
+      skip();
+      const a = digits();
+      skip();
+      if (s[i] === "/") i++;
+      else if (s.slice(i, i + 2).toLowerCase() === "of") i += 2;
+      else return s;
+      skip();
+      const b = digits();
+      return a && b && i === s.length ? `${a}/${b}` : s;
+    };
+    const inputs = drawn(["1", "12", "99", "/", "of", "OF", "#", "x", " ", "  ", "\t", "\u00a0", "\n", "\r", "\u2028"], 30_000, 23, 9);
+    // Reaching the cases that matter: a good many of them are serials written some other way, and a good many are not serials.
+    expect(inputs.filter((text) => /^\d+\/\d+$/.test(serial(text) ?? "") && serial(text) !== text.trim()).length).toBeGreaterThan(300);
+    expect(inputs.filter((text) => text.trim() && !/^\d+\/\d+$/.test(serial(text) ?? "")).length).toBeGreaterThan(300);
+    expect(disagreements(inputs, serial, before)).toEqual([]);
+  });
+});
+
+describe("reading a sold listing's title", () => {
+  // The seller wrote it, and eBay's limit is 80 characters, but the reader does
+  // not lean on that: it is handed the title whole.
+  it("reads a title of hundreds of thousands of characters in linear time, whatever it repeats", () => {
+    const hostile: Array<[string, string, unknown]> = [
+      ["spaces before a grade", `${spaces(300_000)}psa${spaces(300_000)}10`, { kind: "graded", grade: "PSA 10" }],
+      ["a grader on every word", "psa ".repeat(75_000), { kind: "skip", reason: "grade-unclear" }],
+      ["label words after a grader", `psa ${"gem mt ".repeat(40_000)}10`, { kind: "skip", reason: "grade-unclear" }],
+      ["the same reading again and again", "psa 10 ".repeat(50_000), { kind: "graded", grade: "PSA 10" }],
+      ["two words that are graders only with a grade", "tag ace ".repeat(40_000), { kind: "ungraded" }],
+      ["numbers with dots, none a grade", `${"1.".repeat(150_000)}9`, { kind: "ungraded" }],
+      ["digits without end", `psa ${"9".repeat(300_000)}`, { kind: "skip", reason: "grade-unclear" }],
+      ["letters without end", "a".repeat(300_000), { kind: "ungraded" }],
+      ["a multiple's x", "x1".repeat(150_000), { kind: "ungraded" }],
+      ["an x after every space", " x".repeat(150_000), { kind: "ungraded" }],
+      ["question marks", "?".repeat(300_000), { kind: "skip", reason: "hedged" }],
+      ["a lot at the end", `${"charizard ".repeat(30_000)}lot`, { kind: "skip", reason: "lot" }],
+    ];
+    for (const [what, title, expected] of hostile) {
+      const run = timed(() => readTitle(title));
+      expect(run.value, what).toEqual(expected);
+      expect(run.ms, what).toBeLessThan(BUDGET_MS);
+    }
+  });
+
+  it("reads a title the same with any spacing between its words", () => {
+    expect(readTitle(`Charizard${spaces(50_000)}BGS${spaces(50_000)}Black${spaces(10)}Label${spaces(50_000)}10`)).toEqual(readTitle("Charizard BGS Black Label 10"));
+    expect(readTitle("Charizard BGS Black Label 10")).toEqual({ kind: "graded", grade: "BGS 10 Black Label" });
   });
 });

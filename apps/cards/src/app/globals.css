@@ -65,6 +65,8 @@ body {
   border: 1px solid var(--line);
   background: var(--surface);
   box-shadow: inset 0 1px 0 var(--tabletop-shine), 0 3px 0 var(--tabletop-edge);
+  /* A chart drawn inside a panel cuts its hover halo from the panel, not the ground. */
+  --chart-surface: var(--surface);
 }
 @utility btn {
   @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
@@ -529,8 +531,6 @@ body {
 
 /* Shared illustrated tabletop controls; chart colors and card art retain their semantics. */
 @media screen {
-  :root { --accent: #296f69; --accent-ink: #fffaf0; --accent-solid: #296f69; }
-  [data-theme="dark"] { --accent: #88c9c0; --accent-ink: #19232d; --accent-solid: #88c9c0; }
   .btn-primary, .btn-secondary {
     border-radius: 0.75rem;
     box-shadow: 0 3px 0 var(--tabletop-edge);

@@ -83,19 +83,19 @@ export const priceChartingProvider: PriceProvider<GameQuery> = {
   optional: true,
   note: "Set PRICECHARTING_TOKEN (paid API) for loose, CIB, sealed and graded prices on every platform. Without it, type prices in by hand.",
   isConfigured: isPriceChartingConfigured,
-  async lookup(q, fetchImpl = fetch) {
+  async lookup(q, fetchImpl = fetch, signal) {
     const token = priceChartingToken();
     if (!token) return [];
     // A product matched before is fetched by id, so a title that matches
     // several listings cannot drift between refreshes.
     const knownId = q.externalIds?.pricecharting;
     if (knownId) {
-      const product = await fetchProduct(token, knownId, fetchImpl);
+      const product = await fetchProduct(token, knownId, fetchImpl, signal);
       if (product) return [productToQuote(product)];
     }
     let products: PcProduct[];
     try {
-      products = await searchProducts(token, buildSearch(q), fetchImpl);
+      products = await searchProducts(token, buildSearch(q), fetchImpl, signal);
     } catch (e) {
       if (e instanceof PriceChartingError) throw new ProviderError("pricecharting", e.message);
       throw e;

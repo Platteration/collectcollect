@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import type { Identification } from "../src/lib/types";
 
 /** A card photo made in the browser, so the tests need no binary fixtures. */
 export async function cardPhoto(page: Page, rgb: [number, number, number]): Promise<{ name: string; mimeType: string; buffer: Buffer }> {
@@ -21,6 +22,8 @@ export interface StubCard {
   card_number?: string;
   confidence?: number;
   game?: string;
+  /** Anything else the identification says, such as a sports card's team or serial number. */
+  extra?: Partial<Identification>;
 }
 
 /**
@@ -63,6 +66,7 @@ export async function stubIdentify(page: Page, cards: StubCard[]) {
           confidence: c.confidence ?? 0.95,
           alternatives: [],
           search_query: c.name,
+          ...c.extra,
         },
       }),
     });

@@ -193,6 +193,38 @@ describe("rows an import cannot decide about", () => {
 });
 
 
+describe("a file larger than one import", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("reads no more rows than the cap, and says how many it left", () => {
+    const rows = MAX_IMPORT_ROWS + 25;
+    const csv = ["name,game", ...Array.from({ length: rows }, (_, i) => `Card ${i},pokemon`)].join("\n");
+    const preview = previewImport(csv);
+    // Derived from the file, not from the constant: whatever the cap is, the
+    // rows read plus the rows reported must account for every row in the file.
+    expect(preview.rows.length + preview.skippedForSize).toBe(rows);
+    expect(preview.skippedForSize).toBeGreaterThan(0);
+    expect(preview.total).toBe(preview.rows.length);
+    expect(applyImport(preview).created).toBe(preview.rows.length);
+  }, 120_000);
+
+  it("leaves a file under the cap alone", () => {
+    const csv = ["name,game", "Charizard,pokemon", "Blastoise,pokemon"].join("\n");
+    expect(previewImport(csv).skippedForSize).toBe(0);
+  });
+
+  it("finds a duplicate through the index rather than by reading every card", () => {
+    createCard({ game: "pokemon", name: "Charizard" });
+    // SQLite's own plan, not a stopwatch: both columns have to be used, or the
+    // lookup degrades to a scan of every card in that game once per row.
+    const plan = getDb()
+      .prepare("EXPLAIN QUERY PLAN SELECT * FROM cards WHERE game = ? AND name_key = ? ORDER BY updated_at DESC, id DESC")
+      .all("pokemon", "charizard") as Array<{ detail: string }>;
+    expect(plan.map((r) => r.detail).join(" ")).toMatch(/USING INDEX idx_cards_lookup \(game=\? AND name_key=\?\)/);
+    expect(findSimilar({ game: "pokemon", name: " CHARIZARD " })).toHaveLength(1);
+  });
+});
+
 describe("sports columns", () => {
   beforeEach(() => setDb(openDatabase(":memory:")));
 
@@ -203,7 +235,7 @@ describe("sports columns", () => {
     ].join("\n");
     const preview = previewImport(csv);
     expect(preview.unmapped).toEqual([]);
-    expect(preview.rows[0].input).toMatchObject({
+    expect(preview.rows[0]?.input).toMatchObject({
       game: "sports",
       name: "Mike Trout",
       team: "Los Angeles Angels",
@@ -223,6 +255,75 @@ describe("sports columns", () => {
 
   it("no longer reads a serial column as a cert number, and a parallel column as a variant", () => {
     const preview = previewImport(["name,game,serial,parallel", "Mike Trout,sports,7/25,Silver Prizm"].join("\n"));
-    expect(preview.rows[0].input).toMatchObject({ serialNumber: "7/25", parallel: "Silver Prizm", certNumber: null, variant: null });
+    expect(preview.rows[0]?.input).toMatchObject({ serialNumber: "7/25", parallel: "Silver Prizm", certNumber: null, variant: null });
+    // A cert column is still the cert.
+    expect(previewImport(["name,game,cert", "Mike Trout,sports,0012345678"].join("\n")).rows[0]?.input).toMatchObject({ certNumber: "0012345678", serialNumber: null });
+  });
+
+  it("settles a row's game from its sport only when the row names no game", () => {
+    const preview = previewImport(["name,sport,game", "Mike Trout,baseball,", "Pikachu,baseball,pokemon", "Zorro,baseball,wizards", "Nobody,,"].join("\n"));
+    expect(preview.rows.map((r) => r.input?.game ?? null)).toEqual(["sports", "pokemon", null, null]);
+    expect(preview.rows[2]?.problem).toBe('Unknown game "wizards"');
+    expect(preview.rows[3]?.problem).toMatch(/No game column/);
+    // Without any game column, a chosen game still wins, as it always did.
+    expect(previewImport("name,sport\nMike Trout,baseball", { game: "other" }).rows[0]?.input?.game).toBe("other");
+  });
+
+  it("still refuses a game that is a name on Object.prototype", () => {
+    // Headers and games are folded to lower case without punctuation before they
+    // are looked up, so "constructor" is the one such name that survives the fold.
+    // A plain table lookup, or `in`, returns the function for it; the guard is
+    // lookup() and isGame().
+    const preview = previewImport(["name,game,sport", "A,constructor,baseball", "B,Constructor,"].join("\n"));
+    expect(preview.rows.map((r) => r.input)).toEqual([null, null]);
+    expect(preview.rows.map((r) => r.problem)).toEqual(['Unknown game "constructor"', 'Unknown game "Constructor"']);
+    // And a condition by such a name is not taken as one.
+    expect(previewImport("name,game,condition\nA,pokemon,constructor").rows[0]?.input?.condition).toBe("NM");
+  });
+
+  it("reads a flag however a spreadsheet writes it, and a subgrade only as a number on the scale", () => {
+    const csv = [
+      "name,game,rookie,auto,relic,centering,corners,edges,surface",
+      "A,sports,RC,yes,1,9,10,0,11",
+      "B,sports,no,,false,55/45,x,9.5,",
+    ].join("\n");
+    const rows = previewImport(csv).rows;
+    expect(rows[0]?.input).toMatchObject({ rookie: true, autograph: true, relic: true, subgrades: { centering: 9, corners: 10, edges: null, surface: null } });
+    expect(rows[1]?.input).toMatchObject({ rookie: false, autograph: false, relic: false, subgrades: { centering: null, corners: null, edges: 9.5, surface: null } });
+  });
+
+  it("keeps a numbered card and a parallel apart from base copies, and stacks the base copies", () => {
+    const csv = [
+      "name,game,set,number,parallel,serial,qty",
+      "Mike Trout,sports,Topps Chrome,US175,,,1",
+      "Mike Trout,sports,Topps Chrome,US175,,,2",
+      "Mike Trout,sports,Topps Chrome,US175,Gold Refractor,,1",
+      "Mike Trout,sports,Topps Chrome,US175,Gold Refractor,12/50,1",
+      "Mike Trout,sports,Topps Chrome,US175,Gold Refractor,12/50,1",
+    ].join("\n");
+    expect(applyImport(previewImport(csv))).toMatchObject({ created: 4, merged: 1, skipped: [] });
+    expect(listCards().map((c) => `${c.parallel ?? "base"}:${c.serialNumber ?? "-"}:${c.quantity}`).sort()).toEqual(["Gold Refractor:-:1", "Gold Refractor:12/50:1", "Gold Refractor:12/50:1", "base:-:3"]);
+  });
+
+  it("reads this app's own export of a sports card back as the same card", async () => {
+    const { GET } = await import("@/app/api/export/route");
+    createCard({
+      game: "sports", sport: "baseball", name: "Mike Trout", setName: "Topps Chrome", cardNumber: "US175", year: 2011, manufacturer: "Topps",
+      team: "Los Angeles Angels", rookie: true, parallel: "Gold Refractor", serialNumber: "12/50", autograph: true, relic: false,
+      gradingCompany: "BGS", grade: "9.5", certNumber: "0012345678", subgrades: { centering: 9.5, corners: 9.5, edges: 10, surface: 9 },
+      centering: { front: { lr: "55/45" } },
+    });
+    const csv = await (await GET(new Request("http://localhost/api/export"))).text();
+    const header = csv.split("\r\n")[0]!.split(",");
+    expect(header).toEqual(expect.arrayContaining(["team", "rookie", "parallel", "serial_number", "autograph", "relic", "subgrade_centering", "subgrade_corners", "subgrade_edges", "subgrade_surface"]));
+    const exported = listCards()[0]!;
+    setDb(openDatabase(":memory:"));
+    const preview = previewImport(csv);
+    expect(preview.unmapped).toEqual(expect.not.arrayContaining(["team", "parallel", "serial_number", "subgrade_centering"]));
+    expect(applyImport(preview)).toMatchObject({ created: 1, skipped: [] });
+    expect(listCards()[0]).toMatchObject({
+      name: exported.name, team: exported.team, rookie: true, parallel: "Gold Refractor", serialNumber: "12/50", autograph: true, relic: false,
+      gradingCompany: "BGS", grade: "9.5", certNumber: "0012345678", subgrades: exported.subgrades, manufacturer: "Topps",
+    });
   });
 });

@@ -1,4 +1,4 @@
-import type { CardRecord, PriceQuote, PriceSource, PriceSummary, Settings } from "../types";
+import type { CardRecord, PriceQuote, PriceSummary, Settings } from "../types";
 import type { CardQuery, PriceProvider } from "./types";
 import { ProviderError } from "./types";
 import { priceChartingProvider } from "./providers/pricecharting";
@@ -7,6 +7,7 @@ import { pokemonTcgProvider } from "./providers/pokemontcg";
 import { ygoprodeckProvider } from "./providers/ygoprodeck";
 import { scryfallProvider } from "./providers/scryfall";
 import { round2 } from "./match";
+import { SOURCE_PRIORITY } from "./priority";
 
 /** Priority order: sources listed first win when several report an ungraded price. */
 export const PROVIDERS: PriceProvider[] = [
@@ -72,7 +73,6 @@ export async function fetchQuotes(
   return { quotes, errors };
 }
 
-const SOURCE_PRIORITY: PriceSource[] = ["manual", "pricecharting", "pokemontcg", "scryfall", "ygoprodeck", "ebay"];
 
 function manualQuote(manual: ManualPrices | undefined, fetchedAt: string): PriceQuote | null {
   const graded = Object.fromEntries(
@@ -230,7 +230,8 @@ export function summarize(
  * What a refresh compares to decide whether it learned anything: every figure
  * the app shows or sums, and what each source matched, but not when it was
  * asked. Two summaries the same by this measure are the same price, and the
- * second is a check, not a snapshot.
+ * second is a check, not a snapshot. The sources behind each graded price are
+ * not compared on their own: they are derived from the quotes, which are.
  */
 export function sameSummary(a: PriceSummary, b: PriceSummary): boolean {
   const project = (s: PriceSummary) =>
@@ -250,13 +251,20 @@ export function sameSummary(a: PriceSummary, b: PriceSummary): boolean {
   return project(a) === project(b);
 }
 
+/**
+ * A parallel, an autograph and a relic are each their own listing at every
+ * price guide, so they go into the search the way the guides name them.
+ * Null for a card that is none of these, which searches as it always did.
+ */
+export function queryParallel(card: { parallel?: string | null; autograph?: boolean | null; relic?: boolean | null }): string | null {
+  const words = [card.parallel?.trim() || null, card.autograph ? "Auto" : null, card.relic ? "Relic" : null].filter(Boolean).join(" ");
+  return words || null;
+}
+
 export function cardToQuery(
   card: Pick<CardRecord, "game" | "name" | "sport" | "setName" | "setCode" | "cardNumber" | "year" | "variant" | "manufacturer" | "externalIds"> &
     Partial<Pick<CardRecord, "parallel" | "autograph" | "relic">>,
 ): CardQuery {
-  // A parallel, an autograph and a relic are each their own listing at every
-  // price guide, so they go into the search the way the guides name them.
-  const parallel = [card.parallel ?? null, card.autograph ? "Auto" : null, card.relic ? "Relic" : null].filter(Boolean).join(" ");
   return {
     game: card.game,
     name: card.name,
@@ -266,8 +274,8 @@ export function cardToQuery(
     cardNumber: card.cardNumber,
     year: card.year,
     variant: card.variant,
+    parallel: queryParallel(card),
     manufacturer: card.manufacturer,
-    parallel: parallel || null,
     externalIds: card.externalIds,
   };
 }

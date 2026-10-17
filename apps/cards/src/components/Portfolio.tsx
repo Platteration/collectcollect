@@ -3,9 +3,8 @@
 import { thinPoints } from "@collectcollect/core/series";
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { api } from "@/lib/api-client";
-import { RANGES, performance, rangeSeries, type Allocation, type OutlookPoint, type PortfolioPoint, type Range, type Realized, type Returns, type Verdict } from "@/lib/analytics";
+import { PriceRefresh } from "@collectcollect/core/components/PriceRefresh";
+import { RANGES, capOutlook, performance, rangeSeries, type Allocation, type OutlookPoint, type PortfolioPoint, type Range, type Realized, type Returns, type Verdict } from "@/lib/analytics";
 import { money, when } from "@/lib/format";
 import { GAMES, GRADING_STATUSES, type Game, type GradingStatus, type Settings } from "@/lib/types";
 import { PortfolioChart } from "./charts/PortfolioChart";
@@ -83,20 +82,22 @@ export function Portfolio({ points: historyPoints, pricePoints, historyStartedAt
   const [showAll, setShowAll] = useState(false);
   const [hover, setHover] = useState<PortfolioPoint | null>(null);
   const [costLine, setCostLine] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
 
-  const visible = useMemo(() => rangeSeries(points, range), [points, range]);
+  // The window, read at one close per hour, day or week by its range, so a
+  // refresh of every card draws the day's move rather than a staircase.
+  const visible = useMemo(() => thinPoints(rangeSeries(points, range)), [points, range]);
   const latest = points[points.length - 1] ?? null;
   const shown = hover ?? latest;
   // Hovering measures from the start of the window to the point under the cursor.
-  const delta = useMemo(() => performance(visible[0], hover ?? visible[visible.length - 1]), [visible, hover]);
+  const delta = useMemo(() => performance(visible[0], hover ?? (visible.length > 1 ? visible.at(-1) : undefined)), [visible, hover]);
   const up = delta.amount >= 0;
   const moveUp = delta.move >= 0;
-  // The cost line is only meaningful once some card has a purchase price on it.
-  const hasCost = useMemo(() => points.some((p) => p.cost > 0), [points]);
+  // The cost line is only meaningful once some card has a purchase price on it,
+  // and only the recorded history knows what was held when.
+  const hasCost = useMemo(() => points.some((p) => (p.cost ?? 0) > 0), [points]);
   const showCost = hasCost && costLine;
   const copiesShown = shown?.copies ?? copyCount;
+  const opening = visible.length > 1 ? (visible[0]?.value ?? null) : null;
 
   if (cardCount === 0 && realized.sales === 0 && !historyPoints.some(p => p.value > 0)) {
     return (
@@ -148,10 +149,10 @@ export function Portfolio({ points: historyPoints, pricePoints, historyStartedAt
               </span>
             </div>
             {delta.flows !== 0 && (
-              // Buying a card lifts the line without the collection having earned
-              // anything; say how much of the move was the market and how much was you.
+              // Adding a card lifts the line without the collection having earned
+              // anything; say how much of the change was that and how much was prices.
               <div className="mt-1 text-sm text-neutral-500">
-                {delta.flows > 0 ? `${money(delta.flows)} of that is cards added` : `${money(Math.abs(delta.flows))} left with cards sold`} ·{" "}
+                {delta.flows > 0 ? `${money(delta.flows)} of that is cards added or newly priced` : `${money(Math.abs(delta.flows))} left with cards sold`} ·{" "}
                 <span className={`font-medium ${moveUp ? "delta-up" : "delta-down"}`}>
                   {moveUp ? "▲" : "▼"} {money(Math.abs(delta.move))}
                   {delta.movePercent !== null ? ` (${Math.abs(delta.movePercent).toFixed(2)}%)` : ""}
@@ -208,6 +209,8 @@ export function Portfolio({ points: historyPoints, pricePoints, historyStartedAt
         </div>
 
         <div className="mt-4">
+          <p className="mb-2 text-xs text-neutral-500">{historyMode ? `Collection value recorded since ${when(historyStartedAt)}. Changes include purchases, sales and corrections; this is not investment return.` : "Price history of current holdings: earlier points use the quantities held today."}</p>
+          <button type="button" className="btn-secondary mb-2" onClick={() => { setHistoryMode(!historyMode); setHover(null); }}>{historyMode ? "Show price history of current holdings" : "Show actual collection history"}</button>
           <PortfolioChart points={visible} up={up} onHover={setHover} showCost={showCost} />
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -216,35 +219,48 @@ export function Portfolio({ points: historyPoints, pricePoints, historyStartedAt
               <button
                 key={r}
                 type="button"
-                onClick={() => setRange(r)}
                 aria-pressed={range === r}
+                onClick={() => setRange(r)}
                 className={`rounded-md px-3 py-1 text-xs font-medium ${range === r ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900" : "text-neutral-600 hover:bg-black/5 dark:text-neutral-300 dark:hover:bg-white/10"}`}
               >
                 {r}
               </button>
             ))}
           </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-500">
-            <span className="flex items-center gap-1.5">
-              <span className="inline-block h-0.5 w-4 rounded-full" style={{ background: up ? "var(--chart-good)" : "var(--chart-bad)" }} />
+          {/* What the chart's marks are, with the figures at the point shown. */}
+          <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-500" aria-label="Chart key">
+            <li className="flex items-center gap-1.5">
+              <svg width="16" height="4" aria-hidden="true">
+                <line x1="0" y1="2" x2="16" y2="2" stroke={up ? "var(--chart-good)" : "var(--chart-bad)"} strokeWidth="2" strokeLinecap="round" />
+              </svg>
               Value {money(shown?.value ?? 0)}
-            </span>
+            </li>
             {hasCost && (
-              <button
-                type="button"
-                onClick={() => setCostLine((on) => !on)}
-                aria-pressed={costLine}
-                title={costLine ? "Hide the cost-basis line" : "Show what the copies held cost"}
-                className={`flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-black/5 dark:hover:bg-white/10 ${costLine ? "" : "opacity-50"}`}
-              >
-                <svg width="16" height="4" aria-hidden="true">
-                  <line x1="0" y1="2" x2="16" y2="2" stroke="var(--chart-series-1)" strokeWidth="1.5" strokeDasharray="5 4" />
-                </svg>
-                Cost basis {money(shown?.cost ?? 0)}
-              </button>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => setCostLine((on) => !on)}
+                  aria-pressed={costLine}
+                  title={costLine ? "Hide the cost-basis line" : "Show what the copies held cost"}
+                  className={`-mx-2 flex items-center gap-1.5 rounded px-2 py-1 hover:bg-black/5 dark:hover:bg-white/10 ${costLine ? "" : "opacity-60"}`}
+                >
+                  <svg width="16" height="4" aria-hidden="true">
+                    <line x1="0" y1="2" x2="16" y2="2" stroke="var(--chart-series-1)" strokeWidth="1.5" strokeDasharray="5 4" />
+                  </svg>
+                  Cost basis {money(shown?.cost ?? 0)}
+                </button>
+              </li>
             )}
-            <span>{copiesShown} copies held</span>
-          </div>
+            {opening !== null && (
+              <li className="flex items-center gap-1.5">
+                <svg width="16" height="4" aria-hidden="true">
+                  <line x1="0" y1="2" x2="16" y2="2" stroke="var(--chart-axis)" strokeWidth="1" strokeDasharray="2 3" />
+                </svg>
+                Range start {money(opening)}
+              </li>
+            )}
+            <li>{copiesShown} cop{copiesShown === 1 ? "y" : "ies"} held</li>
+          </ul>
         </div>
       </section>
 

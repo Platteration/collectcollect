@@ -1,5 +1,5 @@
 import type { Acquisition } from "../acquisitions";
-import { money, parseDocument, readFenced, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "../../markdown/format";
+import { money, parseDocument, readFenced, readLotPart, readMoney, readSection, readTable, slug, table, writeFrontMatter } from "../../markdown/format";
 import { bool, num, str } from "../normalize";
 import type { DomainSpec, Identification, ItemInput, ItemRecord, PriceSnapshot, PriceSummary, Sale } from "../spec";
 import { columnOf, optionLabel } from "../spec";
@@ -83,17 +83,21 @@ function lotsCell(lots: Array<{ quantity: number; unitCost: number | null; acqui
     .join(" · ");
 }
 
-const LOT_RE = /^\s*(\d+)\s*@\s*(.*?)\s*(?:\((\d{4}-\d{2}-\d{2})\))?\s*$/;
-
+/**
+ * The lots a sale was cut from, read back from its cell. A file read back in is
+ * text someone else may have written, so each part is read by `readLotPart`, a
+ * scan, as the card app reads it: the pattern this used to be (a lazy `(.*?)`
+ * between two `\s*`) held the server for seconds on a few thousand spaces.
+ */
 function parseLotsCell(text: string): ParsedSaleLot[] {
   const out: ParsedSaleLot[] = [];
   if (!text) return out;
   for (const part of text.split("·")) {
-    const match = LOT_RE.exec(part);
-    if (!match) continue;
-    const quantity = Number(match[1]);
+    const lot = readLotPart(part);
+    if (!lot) continue;
+    const quantity = Number(lot.quantity);
     if (!Number.isInteger(quantity) || quantity < 1) continue;
-    out.push({ quantity, unitCost: readMoney(match[2] ?? ""), acquiredOn: match[3] ?? null });
+    out.push({ quantity, unitCost: readMoney(lot.cost), acquiredOn: lot.day });
   }
   return out;
 }
@@ -126,7 +130,8 @@ export function itemMarkdown<F extends object, X extends object>(
   opts: DocumentOptions<X> = {},
 ): string {
   const { item, sales, snapshots, acquisitions, saleLots } = bundle;
-  const latest = snapshots.length ? snapshots[0].summary : null;
+  const newest = snapshots[0];
+  const latest = newest?.summary ?? null;
   const photoHref = opts.photoHref ?? ((name: string) => `../uploads/${name}`);
   const values = item as unknown as Record<string, unknown>;
 
@@ -171,10 +176,10 @@ export function itemMarkdown<F extends object, X extends object>(
   const value = latest?.yourCopyValue ?? null;
   if (value !== null || item.purchasePrice !== null) {
     const bits: string[] = [];
-    if (value !== null) {
+    if (newest && value !== null) {
       bits.push(`Last valued at **${money(value)}**${item.quantity > 1 ? ` per copy (${money(value * item.quantity)} in total)` : ""}.`);
       if (latest?.yourCopyBasis) bits.push(/[.!?]$/.test(latest.yourCopyBasis) ? latest.yourCopyBasis : `${latest.yourCopyBasis}.`);
-      bits.push(`Priced ${snapshots[0].fetchedAt.slice(0, 10)}.`);
+      bits.push(`Priced ${newest.fetchedAt.slice(0, 10)}.`);
     }
     if (item.purchasePrice !== null) bits.push(`Paid ${money(item.purchasePrice)}${item.quantity > 1 ? " per copy" : ""}.`);
     blocks.push(bits.join(" "));
@@ -324,7 +329,7 @@ export function parseItemMarkdown<F extends object>(spec: Pick<DomainSpec<F, obj
   const sales: ParsedItem<F>["sales"] = [];
   for (const row of readTable(body, "Sales")) {
     const [soldAt, copies, each, fees, cost, venue, notes] = row;
-    const unitPrice = readMoney(each);
+    const unitPrice = readMoney(each ?? "");
     const quantitySold = num(copies);
     if (!soldAt || Number.isNaN(Date.parse(soldAt)) || unitPrice === null || quantitySold === null || quantitySold < 1) {
       warnings.push(`Skipped an unreadable sale row: ${row.join(" | ")}`);
@@ -333,8 +338,8 @@ export function parseItemMarkdown<F extends object>(spec: Pick<DomainSpec<F, obj
     sales.push({
       quantity: Math.round(quantitySold),
       unitPrice,
-      fees: readMoney(fees) ?? 0,
-      unitCost: readMoney(cost),
+      fees: readMoney(fees ?? "") ?? 0,
+      unitCost: readMoney(cost ?? ""),
       soldAt,
       venue: venue || null,
       notes: notes || null,

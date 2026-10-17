@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 const csv = [
   "title,system,region,complete,qty,paid",
@@ -29,7 +29,12 @@ test.describe("importing a spreadsheet", () => {
   test("reads the words a spreadsheet uses for a platform and a completeness", async ({ page }) => {
     await page.goto("/collection?q=Sonic+the+Hedgehog");
     await page.getByRole("link", { name: /Sonic the Hedgehog/ }).click();
-    await expect(page.getByText(/Genesis \/ Mega Drive · NTSC-U/)).toBeVisible();
-    await expect(page.getByText("Loose", { exact: true })).toBeVisible();
+    // On the game's own page before anything is read: the collection page it leaves also
+    // says "Loose" (in its filter and on the tile) and the platform, and would match too.
+    await expect(page).toHaveURL(/\/items\/\d+$/);
+    // Exactly the line under the title: the breadcrumb above it ends with the same words.
+    await expect(page.getByText("Genesis / Mega Drive · NTSC-U", { exact: true })).toBeVisible();
+    await expect(page.locator(".badge").filter({ hasText: /^Loose$/ })).toBeVisible();
+    await expect(page.getByRole("definition").filter({ hasText: /^Loose$/ })).toBeVisible();
   });
 });

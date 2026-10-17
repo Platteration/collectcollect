@@ -551,3 +551,105 @@ describe("looking a card up on PSA", () => {
     expect((await read<{ error: string }>(bad)).error).toMatch(/grading report.*tag\.score/);
   });
 });
+
+describe("what the routes do with a sports card", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  const trout = { game: "sports", sport: "baseball", name: "Mike Trout", setName: "Topps Chrome", cardNumber: "US175", year: 2011, language: "English" } as const;
+
+  it("saves, edits and reads back the sports fields as JSON, flags typed the way a client might type them", async () => {
+    const { POST } = await import("@/app/api/cards/route");
+    const created = await POST(json("http://localhost/api/cards", "POST", { ...trout, team: "Angels", rookie: "yes", parallel: "Gold Refractor", serialNumber: "#12 of 50", autograph: true, subgrades: { centering: "9.5", corners: 9, edges: 10, surface: 9 } }));
+    expect(created.status).toBe(201);
+    const { card } = await read<{ card: { id: number } }>(created);
+    expect(card).toMatchObject({ team: "Angels", rookie: true, parallel: "Gold Refractor", serialNumber: "12/50", autograph: true, relic: false, subgrades: { centering: 9.5, corners: 9, edges: 10, surface: 9 } });
+    const { PATCH, GET } = await import("@/app/api/cards/[id]/route");
+    const patched = await PATCH(json("http://localhost/api/cards/1", "PATCH", { rookie: false, relic: true, subgrades: null }), ctx({ id: String(card.id) }) as never);
+    expect((await read<{ card: unknown }>(patched)).card).toMatchObject({ rookie: false, relic: true, subgrades: null, team: "Angels", serialNumber: "12/50" });
+    expect((await read<{ card: unknown }>(await GET(new Request("http://localhost/api/cards/1"), ctx({ id: String(card.id) }) as never))).card).toMatchObject({ relic: true, parallel: "Gold Refractor" });
+  });
+
+  it("takes a numbered card into the intake as its own card", async () => {
+    const { POST } = await import("@/app/api/cards/intake/route");
+    const send = (extra: object) => POST(json("http://localhost/api/cards/intake", "POST", { ...trout, ...extra }));
+    expect((await send({})).status).toBe(201);
+    expect((await send({})).status).toBe(200); // a base copy stacks
+    expect((await read<{ result: string }>(await send({ serialNumber: "12/50" }))).result).toBe("created");
+    expect((await read<{ result: string }>(await send({ parallel: "Refractor" }))).result).toBe("created");
+    expect(getCard(1)?.quantity).toBe(2);
+  });
+
+  it("offers a form only the cards a copy of this one could be added to", async () => {
+    const { GET } = await import("@/app/api/cards/route");
+    createCard({ ...trout });
+    createCard({ ...trout, serialNumber: "7/25" });
+    createCard({ ...trout, parallel: "Refractor" });
+    const similar = async (query: string) =>
+      (await read<{ cards: Array<{ serialNumber: string | null; parallel: string | null }> }>(await GET(new Request(`http://localhost/api/cards?similar=1&game=sports&name=Mike%20Trout&number=US175${query}`)))).cards.map(
+        (c) => `${c.parallel ?? "base"}:${c.serialNumber ?? "-"}`,
+      );
+    // Held: a base card, a numbered card and a Refractor.
+    expect(await similar("")).toEqual(["base:-"]);
+    expect(await similar("&parallel=refractor")).toEqual(["Refractor:-"]);
+    expect(await similar("&serial=12%2F50")).toEqual([]);
+    expect(await similar("&parallel=Gold%20Refractor")).toEqual([]);
+  });
+
+  it("offers a scan in review only the cards it could be merged into", async () => {
+    const { GET } = await import("@/app/api/scan-drafts/[id]/route");
+    const { randomUUID } = await import("node:crypto");
+    const { createScanDraft, patchScanDraft } = await import("@/lib/scan-drafts");
+    const base = createCard({ ...trout });
+    createCard({ ...trout, serialNumber: "7/25" });
+    createCard({ ...trout, parallel: "Refractor" });
+    const draft = createScanDraft(randomUUID(), { name: `${randomUUID()}.jpg`, color: null });
+    const candidates = async (input: object, revision: number) => {
+      const saved = patchScanDraft(draft.id, revision, { input: { ...trout, ...input } });
+      const body = await read<{ candidates: Array<{ id: number }> }>(await GET(new Request("http://localhost/api/scan-drafts/x"), ctx({ id: draft.id }) as never));
+      return { revision: saved.revision, ids: body.candidates.map((c) => c.id) };
+    };
+    const plain = await candidates({}, draft.revision);
+    expect(plain.ids).toEqual([base.id]);
+    const numbered = await candidates({ serialNumber: "12/50" }, plain.revision);
+    expect(numbered.ids).toEqual([]);
+    const refractor = await candidates({ serialNumber: null, parallel: "REFRACTOR" }, numbered.revision);
+    expect(refractor.ids).toHaveLength(1);
+    expect(refractor.ids).not.toContain(base.id);
+  });
+
+  it("prices a card that is not saved yet with its parallel, autograph and relic in the search", async () => {
+    vi.stubEnv("PRICECHARTING_TOKEN", "t");
+    const { fakeFetch } = await import("./helpers");
+    const { NO_LIMIT } = await import("@collectcollect/core/limiter");
+    const { setPriceChartingLimit } = await import("@/lib/pricing/providers/pricecharting");
+    setPriceChartingLimit(NO_LIMIT);
+    const fetchImpl = fakeFetch([
+      [
+        "api/products",
+        {
+          status: "success",
+          products: [
+            { id: "1", "product-name": "Mike Trout #US175", "console-name": "Baseball Cards 2011 Topps Chrome", "loose-price": 5000 },
+            { id: "2", "product-name": "Mike Trout #US175 [Gold Refractor] [Autographed]", "console-name": "Baseball Cards 2011 Topps Chrome", "loose-price": 90000 },
+          ],
+        },
+      ],
+    ]);
+    vi.stubGlobal("fetch", fetchImpl);
+    const { POST } = await import("@/app/api/prices/lookup/route");
+    const res = await POST(json("http://localhost/api/prices/lookup", "POST", { ...trout, manufacturer: "Topps", parallel: "Gold Refractor", autograph: true, relic: false }));
+    expect(res.status).toBe(200);
+    const { summary } = await read<{ summary: { quotes: Array<{ externalId?: string }> } }>(res);
+    expect(summary.quotes[0]?.externalId).toBe("2");
+    const asked = decodeURIComponent(String((fetchImpl as unknown as { mock: { calls: Array<[string]> } }).mock.calls[0]?.[0]));
+    expect(asked).toContain("Mike Trout #US175 Gold Refractor Auto");
+    // A parallel that is not text, and a flag that is not a flag, are not put into a search.
+    const odd = await POST(json("http://localhost/api/prices/lookup", "POST", { ...trout, parallel: { toString: "x" }, autograph: "true", relic: 1 }));
+    expect(odd.status).toBe(200);
+    expect(decodeURIComponent(String((fetchImpl as unknown as { mock: { calls: Array<[string]> } }).mock.calls[1]?.[0]))).not.toMatch(/Auto|Relic|object/);
+  });
+});

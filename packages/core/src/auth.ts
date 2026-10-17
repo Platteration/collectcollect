@@ -276,7 +276,7 @@ export function createAuth(config: AuthConfig): Auth {
  * the gate is off, otherwise only with a session the proxy would honour.
  * A revocation record that cannot be read is "no", as it is in the proxy.
  */
-export async function signedIn(auth: Auth, token: string | undefined, sessions?: { revoked(): Revoked }): Promise<boolean> {
+export async function signedIn(auth: Pick<Auth, "authEnabled" | "verifyToken">, token: string | undefined, sessions?: { revoked(): Revoked }): Promise<boolean> {
   if (!auth.authEnabled()) return true;
   let revoked: Revoked | undefined;
   try {

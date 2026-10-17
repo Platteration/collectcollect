@@ -2,16 +2,6 @@ import type { Game, PriceQuote } from "../../types";
 import type { CardQuery, PriceProvider } from "../types";
 import { ProviderError } from "../types";
 import { numberPart, round2, sameNumber, setSimilarity, tokenOverlap, tokens } from "../match";
-import {
-  PriceChartingError,
-  fetchProduct,
-  isPriceChartingConfigured,
-  priceChartingToken,
-  productUrl,
-  searchProducts,
-  type PcProduct,
-  type PcPriceField,
-} from "@collectcollect/core/pricing/pricecharting";
 import { rateLimit, retryAfterMs, type RateLimit } from "@collectcollect/core/limiter";
 
 /**
@@ -20,9 +10,8 @@ import { rateLimit, retryAfterMs, type RateLimit } from "@collectcollect/core/li
  * graded prices (PSA / BGS / CGC / SGC / TAG) and it covers Pokémon, Yu-Gi-Oh!,
  * Magic and sports cards alike, so when it is configured it is preferred.
  *
- * The HTTP client lives in the shared package, since a game or a comic is
- * priced from the same API; what stays here is what the price fields mean for
- * a trading card:
+ * Prices come back in cents. For trading cards the legacy video-game field
+ * names map to grades as follows (its "Description of Keys" table):
  *   loose-price -> Ungraded      cib-price -> Grade 7        new-price -> Grade 8
  *   graded-price -> Grade 9      box-only-price -> Grade 9.5  manual-only-price -> PSA 10
  *   bgs-10-price -> BGS 10       condition-17-price -> CGC 10  condition-18-price -> SGC 10
@@ -30,9 +19,26 @@ import { rateLimit, retryAfterMs, type RateLimit } from "@collectcollect/core/li
  *   condition-21-price -> TAG 10
  */
 
-export type { PcProduct };
+export interface PcProduct {
+  id: string;
+  "product-name": string;
+  "console-name": string;
+  "release-date"?: string;
+  "loose-price"?: number;
+  "cib-price"?: number;
+  "new-price"?: number;
+  "graded-price"?: number;
+  "box-only-price"?: number;
+  "manual-only-price"?: number;
+  "bgs-10-price"?: number;
+  "condition-17-price"?: number;
+  "condition-18-price"?: number;
+  "condition-19-price"?: number;
+  "condition-20-price"?: number;
+  "condition-21-price"?: number;
+}
 
-const GRADED_FIELDS: Array<[PcPriceField, string]> = [
+const GRADED_FIELDS: Array<[keyof PcProduct, string]> = [
   ["cib-price", "Grade 7"],
   ["new-price", "Grade 8"],
   ["graded-price", "Grade 9"],
@@ -85,7 +91,7 @@ export function buildSearch(q: CardQuery): string {
     parts.push(q.name);
     if (num) parts.push(`#${num}`);
     // A named parallel is its own product on PriceCharting ("Gold Refractor"),
-    // so it goes into the search; a plain variant word like "auto" does too.
+    // and so are an autograph and a relic: they go into the search.
     if (q.parallel) parts.push(q.parallel);
   } else {
     parts.push(q.name);
@@ -123,8 +129,10 @@ export function scoreProduct(q: CardQuery, p: PcProduct): number {
     if (v.includes(kw) && pn.includes(kw)) score += 0.5;
     if (!v.includes(kw) && pn.includes(kw) && kw !== "holo") score -= 0.5;
   }
-  // A parallel's own words ("gold", "prizm") count when the copy has them and against it when it does not.
-  for (const word of tokens(q.parallel)) if (pn.includes(word)) score += 0.5;
+  // The parallel's own words ("gold", "prizm") count for each one the listing
+  // names, so the listing of the parallel outranks the base card when the copy is one.
+  const named = new Set(tokens(productName));
+  for (const word of tokens(q.parallel)) if (named.has(word)) score += 0.5;
   return score;
 }
 
@@ -143,7 +151,7 @@ export function productToQuote(p: PcProduct, fetchedAt = new Date().toISOString(
     source: "pricecharting",
     sourceLabel: "PriceCharting",
     currency: "USD",
-    url: productUrl(p),
+    url: `https://www.pricecharting.com/search-products?type=prices&q=${encodeURIComponent(`${p["product-name"]} ${p["console-name"]}`)}`,
     matchedName: p["product-name"],
     matchedDetail: p["console-name"],
     ungraded: cents(p["loose-price"]),
@@ -159,24 +167,26 @@ export const priceChartingProvider: PriceProvider = {
   label: "PriceCharting",
   games: ["pokemon", "yugioh", "mtg", "sports", "other"],
   optional: true,
-  note: "Set PRICECHARTING_TOKEN (paid API) to get graded PSA/BGS/CGC/SGC prices for every category. The only sports-card price source; there is no free sports API.",
-  isConfigured: isPriceChartingConfigured,
+  note: "Set PRICECHARTING_TOKEN (paid API) to get graded PSA/BGS/CGC/SGC/TAG prices for every category.",
+  isConfigured: () => Boolean(process.env.PRICECHARTING_TOKEN),
   async lookup(q, fetchImpl = fetch, signal?: AbortSignal) {
-    const token = priceChartingToken();
+    const token = process.env.PRICECHARTING_TOKEN;
     if (!token) return [];
-    const pacedFetch = (url: string | URL) => paced(fetchImpl, String(url), signal);
     const knownId = q.externalIds?.pricecharting;
     if (knownId) {
-      const product = await fetchProduct(token, knownId, pacedFetch as typeof fetch);
-      if (product) return [productToQuote(product)];
+      const res = await paced(fetchImpl, `https://www.pricecharting.com/api/product?t=${encodeURIComponent(token)}&id=${encodeURIComponent(knownId)}`, signal);
+      if (res.ok) {
+        const body = (await res.json()) as PcProduct & { status?: string };
+        if (body.status === "success" && body["product-name"]) return [productToQuote(body)];
+      }
     }
-    let products: PcProduct[];
-    try {
-      products = await searchProducts(token, buildSearch(q), pacedFetch as typeof fetch);
-    } catch (e) {
-      if (e instanceof PriceChartingError) throw new ProviderError("pricecharting", e.message);
-      throw e;
+    const res = await paced(fetchImpl, `https://www.pricecharting.com/api/products?t=${encodeURIComponent(token)}&q=${encodeURIComponent(buildSearch(q))}`, signal);
+    if (!res.ok) throw new ProviderError("pricecharting", `PriceCharting returned HTTP ${res.status}`);
+    const body = (await res.json()) as { status?: string; products?: PcProduct[]; "error-message"?: string };
+    if (body.status && body.status !== "success") {
+      throw new ProviderError("pricecharting", body["error-message"] ?? `PriceCharting error: ${body.status}`);
     }
+    const products = body.products ?? [];
     if (products.length === 0) return [];
     const top = products.map((p) => ({ p, s: scoreProduct(q, p) })).sort((a, b) => b.s - a.s)[0];
     // Half the name's words alone score 2, and a category word 1: a product

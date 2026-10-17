@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { discardDeferredMirror, flushDeferredMirror, intakeCardWithin } from "./cards";
 import { getDb } from "./db";
 import { headerKey, parseCsv } from "@collectcollect/core/csv";
-import { CONDITIONS, GAMES, cleanSubgrades, flag, type CardInput, type Condition, type Game } from "./types";
+import { cleanSubgrades, flag, isCondition, isGame, type CardInput, type Condition, type Game } from "./types";
+import { lookup } from "@collectcollect/core/lookup";
 
 /**
  * Column aliases, so an export from another collection tool usually lands
@@ -20,16 +21,19 @@ const COLUMNS: Record<string, string[]> = {
   variant: ["variant", "printing", "finish", "foil"],
   language: ["language", "lang"],
   manufacturer: ["manufacturer", "brand", "publisher"],
+  // Sports cards. A parallel is its own card and "serial" is the numbering
+  // stamped on it ("12/99"), not a grader's cert number.
   team: ["team", "club"],
   rookie: ["rookie", "rc", "rookiecard", "isrookie"],
   parallel: ["parallel", "refractor", "parallelname", "insert"],
   serialNumber: ["serialnumber", "serial", "numbered", "numberedto", "serialnumbered", "printrun"],
   autograph: ["autograph", "auto", "autographed", "signed", "signature"],
   relic: ["relic", "memorabilia", "patch", "jersey", "gameused"],
-  subCentering: ["centering", "subcentering", "centeringgrade"],
-  subCorners: ["corners", "subcorners", "cornersgrade"],
-  subEdges: ["edges", "subedges", "edgesgrade"],
-  subSurface: ["surface", "subsurface", "surfacegrade"],
+  // The four grades a BGS label prints. "sub" keeps them apart from centering as measured.
+  subCentering: ["subgradecentering", "subcentering", "centering", "centeringgrade"],
+  subCorners: ["subgradecorners", "subcorners", "corners", "cornersgrade"],
+  subEdges: ["subgradeedges", "subedges", "edges", "edgesgrade"],
+  subSurface: ["subgradesurface", "subsurface", "surface", "surfacegrade"],
   quantity: ["quantity", "qty", "count", "copies"],
   condition: ["condition", "cond", "gradecondition"],
   gradingCompany: ["gradingcompany", "grader", "gradingservice", "company"],
@@ -175,8 +179,8 @@ export function previewImport(text: string, defaults: { game?: Game } = {}): Imp
     if (!name) return { line, input: null, problem: "No card name in this row", warning: null };
 
     const rawGame = headerKey(value(row, "game"));
-    // A sports spreadsheet rarely has a "game" column at all; a sport named on the row settles it.
-    const game = GAME_ALIASES[rawGame] ?? defaults.game ?? (rawGame && rawGame in GAMES ? (rawGame as Game) : value(row, "sport") ? "sports" : null);
+    // A sports spreadsheet rarely has a game column; a sport named on a row with no game settles it.
+    const game = lookup(GAME_ALIASES, rawGame) ?? defaults.game ?? (isGame(rawGame) ? rawGame : !rawGame && value(row, "sport") ? "sports" : null);
     if (!game) {
       return {
         line,

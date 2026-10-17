@@ -12,7 +12,11 @@ services:
         APP: cards
     # Bound to this machine only. Neither app speaks TLS and a password is
     # optional, so exposing a port to the network is a decision, not a default;
-    # put a reverse proxy in front and change the bind address there.
+    # put a reverse proxy in front and change the bind address there. For a
+    # phone on the same Wi-Fi, `scripts/install.sh --lan` writes a
+    # compose.override.yaml that publishes the apps it starts on every
+    # interface (docs/SELF_HOSTING.md, "Phone access"); deleting that file puts
+    # them back.
     ports:
       - "127.0.0.1:3000:3000"
     # Optional: the apps run with no .env at all. What each one reads from it
@@ -87,17 +91,36 @@ services:
     mem_limit: 2g
     restart: unless-stopped
 
+  # The four apps below carry what cards and skins do, for the same reasons
+  # (see cards): bound to this machine, the data directory pinned to the
+  # volume, a health check on /api/health, a longer stop, no capabilities and
+  # a memory limit. Each reads its own PREFIX_ variables from .env.
   retro-games:
     build:
       context: .
       args:
         APP: retro-games
     ports:
-      - "3002:3000"
+      - "127.0.0.1:3002:3000"
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment:
+      RETRO_GAMES_DATA_DIR: /data
     volumes:
       - collectcollect-retro-games-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
     restart: unless-stopped
 
   comics:
@@ -106,11 +129,26 @@ services:
       args:
         APP: comics
     ports:
-      - "3003:3000"
+      - "127.0.0.1:3003:3000"
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment:
+      COMICS_DATA_DIR: /data
     volumes:
       - collectcollect-comics-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
     restart: unless-stopped
 
   watches:
@@ -119,11 +157,26 @@ services:
       args:
         APP: watches
     ports:
-      - "3004:3000"
+      - "127.0.0.1:3004:3000"
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment:
+      WATCHES_DATA_DIR: /data
     volumes:
       - collectcollect-watches-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
     restart: unless-stopped
 
   whisky:
@@ -132,11 +185,26 @@ services:
       args:
         APP: whisky
     ports:
-      - "3005:3000"
+      - "127.0.0.1:3005:3000"
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment:
+      WHISKY_DATA_DIR: /data
     volumes:
       - collectcollect-whisky-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
     restart: unless-stopped
 
 volumes:

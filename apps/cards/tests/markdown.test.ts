@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb, openDatabase, setDb } from "@/lib/db";
-import { addAcquisition, addSnapshot, createCard, deleteCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
+import { addAcquisition, addSnapshot, createCard, deleteCard, getCard, listCards, listSnapshots, updateCard } from "@/lib/cards";
 import { deleteSale, recordSale } from "@/lib/sales";
 import { cardsDir, collectionDir, collectionStatus, flushCollection, readCardFiles, rebuildCollection } from "@/lib/markdown/mirror";
 import { importCardFiles } from "@/lib/markdown/restore";
@@ -168,14 +168,16 @@ describe("a card as a document", () => {
       rookie: true,
       parallel: "Base",
       serialNumber: "1/1",
-      autograph: false,
+      autograph: true,
       relic: true,
       quantity: 2,
       condition: "LP",
       gradingCompany: "PSA",
       grade: "8",
-      certNumber: "1234",
+      certNumber: "12345678",
       subgrades: { centering: 9, corners: 9, edges: 9, surface: 9 },
+      centering: { front: { lr: "60/40" } },
+      gradingReport: psaReport(),
       purchasePrice: 40,
       notes: "Off-centre.",
       imagePath: "11111111-1111-4111-8111-111111111111.jpg",
@@ -785,29 +787,55 @@ function totalValue(): number {
   return listCards().reduce((sum, card) => sum + (latest.get(card.id)?.summary.yourCopyValue ?? 0) * card.quantity, 0);
 }
 
+describe("a card with a very long price history", () => {
+  beforeEach(() => setDb(openDatabase(":memory:")));
+
+  it("lists its newest thousand prices and says how many older ones the database holds", () => {
+    const card = createCard({ game: "pokemon", name: "Long history" });
+    const insert = getDb().prepare("INSERT INTO price_snapshots (card_id, fetched_at, summary) VALUES (?, ?, ?)");
+    getDb().transaction(() => {
+      for (let i = 1; i <= 1200; i++) insert.run(card.id, new Date(Date.UTC(2020, 0, 1) + i * 864e5).toISOString(), JSON.stringify(summary(i, new Date(Date.UTC(2020, 0, 1) + i * 864e5).toISOString())));
+      // One row nothing can read is passed over, as it always was.
+      insert.run(card.id, "2019-01-01T00:00:00.000Z", "{not json");
+    })();
+    updateCard(card.id, { notes: "rewrite the file" });
+    const text = fileFor(card.id);
+    const parsed = parseCardMarkdown(text);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.snapshots).toHaveLength(1000);
+    expect(parsed!.snapshots[0]?.summary).toMatchObject({ yourCopyValue: 1200, ungraded: 1200, ungradedSource: "PriceCharting", graded: { "PSA 10": 12000, "PSA 9": 3600 }, gradedSource: "PriceCharting", yourCopyBasis: "Ungraded price, Near Mint." });
+    expect(parsed!.snapshots.at(-1)?.summary.yourCopyValue).toBe(201);
+    expect(text).toContain("200 earlier prices not shown; the database holds them.");
+    // The price rows are dated 2020 to 2023; the one purchase row is dated today.
+    expect(text.split("\n").filter((line) => /^\| 202[0-3]-/.test(line)).length).toBe(1000);
+  });
+});
+
 describe("sports card files", () => {
   beforeEach(() => setDb(openDatabase(":memory:")));
 
+  const trout = {
+    game: "sports" as const,
+    sport: "Baseball",
+    name: "Mike Trout",
+    setName: "Topps Chrome",
+    cardNumber: "US175",
+    year: 2011,
+    team: "Los Angeles Angels",
+    rookie: true,
+    parallel: "Gold Refractor",
+    serialNumber: "12/50",
+    autograph: true,
+    relic: false,
+    gradingCompany: "BGS",
+    grade: "9.5",
+    certNumber: "0012345678",
+    subgrades: { centering: 9.5, corners: 9.5, edges: 10, surface: 9 },
+  };
+
   it("writes the sports fields to the front matter and reads them back", () => {
-    const card = createCard({
-      game: "sports",
-      sport: "Baseball",
-      name: "Mike Trout",
-      setName: "Topps Chrome",
-      cardNumber: "US175",
-      year: 2011,
-      team: "Los Angeles Angels",
-      rookie: true,
-      parallel: "Gold Refractor",
-      serialNumber: "12/50",
-      autograph: true,
-      relic: false,
-      gradingCompany: "BGS",
-      grade: "9.5",
-      certNumber: "0012345678",
-      subgrades: { centering: 9.5, corners: 9.5, edges: 10, surface: 9 },
-    });
-    const text = fs.readFileSync(path.join(cardsDir(), fs.readdirSync(cardsDir())[0]), "utf8");
+    const card = createCard(trout);
+    const text = fileFor(card.id);
     expect(text).toContain("Los Angeles Angels · Gold Refractor · 12/50 · RC · Auto");
     const parsed = parseCardMarkdown(text)!;
     expect(parsed.input).toMatchObject({ team: "Los Angeles Angels", rookie: true, parallel: "Gold Refractor", serialNumber: "12/50", autograph: true, relic: false, subgrades: { centering: 9.5, corners: 9.5, edges: 10, surface: 9 } });
@@ -816,5 +844,99 @@ describe("sports card files", () => {
     expect(older.input).toMatchObject({ team: null, rookie: false, parallel: null, serialNumber: null, autograph: false, relic: false, subgrades: null });
     expect(older.warnings).toEqual([]);
     expect(card.id).toBe(1);
+  });
+
+  it("keeps the measured centering and the grading report in the same file", () => {
+    // The sports keys went into the front matter once at the cost of these two.
+    const card = createCard({ ...trout, centering: { front: { lr: "55/45", tb: "52/48" } }, gradingReport: psaReport({ company: "BGS", cert: "0012345678", grade: "9.5" }) });
+    const front = parseDocument(fileFor(card.id)).data;
+    expect(front).toHaveProperty("centering");
+    expect(front).toHaveProperty("grading_report");
+    expect(front.subgrades).toEqual({ centering: 9.5, corners: 9.5, edges: 10, surface: 9 });
+    expect(front.centering).not.toHaveProperty("corners");
+    const parsed = parseCardMarkdown(fileFor(card.id))!;
+    expect(parsed.input.centering).toEqual({ front: { lr: [55, 45], tb: [52, 48] }, back: { lr: null, tb: null } });
+    expect(parsed.input.gradingReport).toMatchObject({ company: "BGS", cert: "0012345678" });
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("writes a card that is none of these exactly as it always did", () => {
+    const card = createCard({ game: "pokemon", name: "Eevee", setName: "Jungle" });
+    const text = fileFor(card.id);
+    for (const key of ["team", "rookie", "parallel", "serial_number", "autograph", "relic", "subgrades"]) expect(text, key).not.toMatch(new RegExp(`^${key}:`, "m"));
+    expect(text).toContain("Pokémon · Jungle");
+    expect(text).not.toContain("RC");
+  });
+
+  it("reads a hand-edited or damaged sports block as far as it can, and never loses the card", () => {
+    const text = fileFor(createCard(trout).id);
+    const edited = text
+      .replace(/^rookie:.*$/m, 'rookie: "maybe"')
+      .replace(/^autograph:.*$/m, 'autograph: "yes"')
+      .replace(/^serial_number:.*$/m, "serial_number: 12")
+      .replace(/^subgrades:.*$/m, 'subgrades: {"centering":99,"corners":"9","edges":true,"surface":[]}')
+      .replace(/^team:.*$/m, "team: null");
+    const parsed = parseCardMarkdown(edited)!;
+    expect(parsed.input).toMatchObject({ name: "Mike Trout", rookie: false, autograph: true, serialNumber: "12", team: null, subgrades: { centering: null, corners: 9, edges: null, surface: null } });
+    expect(parseCardMarkdown(text.replace(/^subgrades:.*$/m, 'subgrades: "9.5"'))!.input.subgrades).toBeNull();
+  });
+
+  const sportsIdentification = {
+    game: "sports", sport: "baseball", name: "Mike Trout", set_name: "Topps Chrome", set_code: null, card_number: "US175", year: 2011, rarity: null, variant: null,
+    language: "English", manufacturer: "Topps", subject: null, team: "Los Angeles Angels", rookie: true, parallel: "Gold Refractor", serial_number: "12/50", autograph: false, relic: false,
+    grading: { company: "BGS", grade: "9.5", cert_number: null, subgrades: { centering: 9.5, corners: 9.5, edges: 10, surface: 9 } },
+    condition_notes: null, confidence: 0.9, alternatives: [], search_query: "2011 Topps Chrome Mike Trout US175",
+  };
+
+  it("reads an identification with the sports fields, and one written before them", () => {
+    const identification = sportsIdentification;
+    const card = createCard({ ...trout, identification: identification as never });
+    const parsed = parseCardMarkdown(fileFor(card.id))!;
+    expect(parsed.warnings).toEqual([]);
+    expect(parsed.input.identification).toMatchObject({ team: "Los Angeles Angels", parallel: "Gold Refractor", grading: { subgrades: { edges: 10 } } });
+    // The flags may be null in one written by a version that left them out, and the block still describes a card.
+    const nulls = parseCardMarkdown(fileFor(createCard({ ...trout, identification: { ...identification, rookie: null, autograph: null, relic: null, grading: { company: null, grade: null, cert_number: null, subgrades: null } } as never }).id))!;
+    expect(nulls.warnings).toEqual([]);
+    expect(nulls.input.identification).toMatchObject({ name: "Mike Trout" });
+  });
+
+  it("survives losing the database: every field comes back, centering and report included", () => {
+    const card = createCard({
+      ...trout,
+      centering: { front: { lr: "55/45" } },
+      gradingReport: psaReport({ company: "BGS", cert: "0012345678", grade: "9.5" }),
+      identification: sportsIdentification as never,
+    });
+    flushCollection();
+    const files = readCardFiles();
+    setDb(openDatabase(":memory:"));
+    expect(importCardFiles(files)).toMatchObject({ created: 1, skipped: [] });
+    const restored = listCards()[0]!;
+    expect(restored).toMatchObject({ ...trout, centering: card.centering, gradingReport: card.gradingReport, quantity: 1 });
+    expect(restored.identification).toMatchObject({ serial_number: "12/50" });
+  });
+
+  it("does not mistake a parallel or a numbered card for the card whose id a file claims", () => {
+    // Card 1 here is the Refractor; the file says card 1 is the base card. Matching
+    // them by name and set would replace the Refractor with the base card's fields.
+    const base = createCard({ game: "sports", name: "Mike Trout", setName: "Topps Chrome" });
+    flushCollection();
+    const files = readCardFiles();
+    expect(files).toHaveLength(1);
+    setDb(openDatabase(":memory:"));
+    const refractor = createCard({ game: "sports", name: "Mike Trout", setName: "Topps Chrome", parallel: "Gold Refractor" });
+    expect(importCardFiles(files)).toMatchObject({ created: 1, replaced: 0 });
+    expect(listCards().map((c) => `${c.id}:${c.parallel ?? "base"}`).sort()).toEqual([`${refractor.id}:Gold Refractor`, "2:base"]);
+    // Nor one numbered card for another.
+    setDb(openDatabase(":memory:"));
+    const numbered = createCard({ game: "sports", name: "Mike Trout", setName: "Topps Chrome", serialNumber: "13/50" });
+    const other = { name: "0001-mike-trout.md", text: files[0]!.text.replace(/^name: .*$/m, 'name: "Mike Trout"\nserial_number: "12/50"') };
+    expect(importCardFiles([other])).toMatchObject({ created: 1, replaced: 0 });
+    expect(listCards().map((c) => c.serialNumber).sort()).toEqual(["12/50", "13/50"]);
+    expect(getCard(numbered.id)?.serialNumber).toBe("13/50");
+    // The same card is still found, so running a restore twice adds nothing.
+    expect(importCardFiles([other])).toMatchObject({ created: 0, replaced: 1 });
+    expect(listCards()).toHaveLength(2);
+    expect(base.id).toBe(1);
   });
 });

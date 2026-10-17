@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
-import { CONDITIONS, GAMES, GAME_IDS, GRADING_COMPANIES, SUBGRADE_KEYS, type CardInput, type Game, type Subgrades } from "@/lib/types";
+import { CONDITIONS, GAMES, GAME_IDS, GRADING_COMPANIES, SUBGRADE_KEYS, type CardInput, type Centering, type CenteringInput, type Game, type Ratio, type Subgrades } from "@/lib/types";
+import { ratioText } from "@/lib/grading/centering";
+import { CenteringInputs, type CenteringForm } from "./CenteringInputs";
 
 /** String-typed form state; converted to CardInput on submit. */
 export interface CardFormState extends CenteringForm {
@@ -18,7 +20,7 @@ export interface CardFormState extends CenteringForm {
   language: string;
   manufacturer: string;
   team: string;
-  /** "true" or "" like a checkbox. */
+  /** "true" or "", like a checkbox. */
   rookie: string;
   parallel: string;
   serialNumber: string;
@@ -29,11 +31,14 @@ export interface CardFormState extends CenteringForm {
   gradingCompany: string;
   grade: string;
   certNumber: string;
-  /** BGS subgrades as typed, one field each. */
-  centering: string;
-  corners: string;
-  edges: string;
-  surface: string;
+  /**
+   * The four grades a BGS label prints, as typed. Prefixed `sub` because the
+   * form already has a centering of its own: the measured border ratios.
+   */
+  subCentering: string;
+  subCorners: string;
+  subEdges: string;
+  subSurface: string;
   purchasePrice: string;
   location: string;
   notes: string;
@@ -62,10 +67,10 @@ export const emptyForm = (game: Game = "pokemon"): CardFormState => ({
   gradingCompany: "",
   grade: "",
   certNumber: "",
-  centering: "",
-  corners: "",
-  edges: "",
-  surface: "",
+  subCentering: "",
+  subCorners: "",
+  subEdges: "",
+  subSurface: "",
   purchasePrice: "",
   location: "",
   notes: "",
@@ -117,10 +122,10 @@ export function formFromCard(card: Partial<CardInput> & { game: Game; name: stri
     gradingCompany: s(card.gradingCompany),
     grade: s(card.grade),
     certNumber: s(card.certNumber),
-    centering: s(card.subgrades?.centering),
-    corners: s(card.subgrades?.corners),
-    edges: s(card.subgrades?.edges),
-    surface: s(card.subgrades?.surface),
+    subCentering: s(card.subgrades?.centering),
+    subCorners: s(card.subgrades?.corners),
+    subEdges: s(card.subgrades?.edges),
+    subSurface: s(card.subgrades?.surface),
     purchasePrice: s(card.purchasePrice),
     location: s(card.location),
     notes: s(card.notes),
@@ -154,18 +159,31 @@ export function formToInput(f: CardFormState): CardInput {
     gradingCompany: t(f.gradingCompany),
     grade: t(f.grade),
     certNumber: t(f.certNumber),
+    // Sent as typed, like centering below; the server keeps a number from 1 to 10 and drops the rest.
     subgrades: subgradesFromForm(f),
+    // Sent as the text typed; the server reads "55/45" and refuses what is not a ratio.
+    centering: { front: { lr: t(f.centeringFrontLr), tb: t(f.centeringFrontTb) }, back: { lr: t(f.centeringBackLr), tb: t(f.centeringBackTb) } },
     purchasePrice: n(f.purchasePrice),
     location: t(f.location),
     notes: t(f.notes),
   };
 }
 
+/** What the four subgrade fields hold, or null when none of them holds anything. */
 function subgradesFromForm(f: CardFormState): Subgrades | null {
   const n = (v: string) => (v.trim() === "" ? null : Number(v));
-  const out = { centering: n(f.centering), corners: n(f.corners), edges: n(f.edges), surface: n(f.surface) };
+  const out: Subgrades = { centering: n(f.subCentering), corners: n(f.subCorners), edges: n(f.subEdges), surface: n(f.subSurface) };
   return SUBGRADE_KEYS.some((k) => out[k] !== null) ? out : null;
 }
+
+/** The subgrade fields, with the label each is shown under. */
+const SUBGRADE_FIELDS = [
+  ["subCentering", "Centering subgrade"],
+  ["subCorners", "Corners subgrade"],
+  ["subEdges", "Edges subgrade"],
+  ["subSurface", "Surface subgrade"],
+] as const;
+const SUBGRADE_FORM_KEYS = SUBGRADE_FIELDS.map(([key]) => key);
 
 interface Props {
   value: CardFormState;
@@ -195,7 +213,8 @@ export function CardForm({ value, onChange, disabled, purchasePriceReadOnly }: P
   const toggle = (key: "rookie" | "autograph" | "relic") => () => onChange({ ...value, [key]: value[key] === "true" ? "" : "true" });
   const isSports = value.game === "sports";
   const isGraded = value.gradingCompany !== "" || value.grade !== "";
-  const isBgs = value.gradingCompany.toUpperCase() === "BGS";
+  // A BGS label prints four subgrades. They also show for a card that already holds some, so a stored one is never out of reach.
+  const showSubgrades = value.gradingCompany.toUpperCase() === "BGS" || SUBGRADE_FORM_KEYS.some((k) => value[k] !== "");
 
   return (
     <fieldset disabled={disabled} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -316,12 +335,12 @@ export function CardForm({ value, onChange, disabled, purchasePriceReadOnly }: P
             <span className="label">Cert number</span>
             <input className="input" value={value.certNumber} onChange={set("certNumber")} />
           </label>
-          {isBgs && (
-            <div className="grid grid-cols-4 gap-2 sm:col-span-2">
-              {(["centering", "corners", "edges", "surface"] as const).map((k) => (
-                <label key={k} className="block">
-                  <span className="label capitalize">{k}</span>
-                  <input className="input" value={value[k]} onChange={set(k)} inputMode="decimal" placeholder="9.5" />
+          {showSubgrades && (
+            <div className="grid grid-cols-2 items-end gap-2 sm:col-span-2 sm:grid-cols-4">
+              {SUBGRADE_FIELDS.map(([key, label]) => (
+                <label key={key} className="block">
+                  <span className="label">{label}</span>
+                  <input className="input" value={value[key]} onChange={set(key)} inputMode="decimal" placeholder="9.5" />
                 </label>
               ))}
             </div>

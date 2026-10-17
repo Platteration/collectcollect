@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { domainDataDir } from "./data-dir";
 import { columnOf, type DomainSpec, type FieldSpec } from "./spec";
 
 /**
@@ -22,6 +23,8 @@ export interface DomainDb {
   setDb(db: Database.Database | undefined): void;
   lockDatabase(reason: string): boolean;
   unlockDatabase(): void;
+  /** Whether a restore holds the lock right now. */
+  databaseLocked(): boolean;
   databaseExists(): boolean;
   building(): boolean;
   /** The live connection without going through the restore lock. */
@@ -131,14 +134,13 @@ CREATE TABLE IF NOT EXISTS settings (
 
 export function createDomainDb(spec: Pick<DomainSpec, "id" | "envPrefix" | "fields">): DomainDb {
   const dbFileName = `collectcollect-${spec.id}.db`;
-  const dataDirEnv = `${spec.envPrefix}_DATA_DIR`;
   const dbFileEnv = `${spec.envPrefix}_DATABASE_FILE`;
   const globalKey = `__collectcollect_${spec.id.replace(/[^a-z0-9]/gi, "_")}`;
   const store = globalThis as unknown as Record<string, { db?: Database.Database; locked?: string } | undefined>;
   const state = () => (store[globalKey] ??= {});
 
   function dataDir(): string {
-    const dir = process.env[dataDirEnv] ? path.resolve(process.env[dataDirEnv]!) : path.resolve(process.cwd(), "data");
+    const dir = domainDataDir(spec.envPrefix);
     fs.mkdirSync(dir, { recursive: true });
     return dir;
   }
@@ -201,6 +203,7 @@ export function createDomainDb(spec: Pick<DomainSpec, "id" | "envPrefix" | "fiel
     unlockDatabase() {
       state().locked = undefined;
     },
+    databaseLocked: () => Boolean(state().locked),
     unlocked: () => state().db,
   };
 }

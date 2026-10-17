@@ -1,24 +1,30 @@
 # Contributing
 
-This is one repository holding two apps and a shared package, all TypeScript,
-all checked the same way. The whole of what a change is expected to pass is two
+This is one repository holding six apps (cards, skins, and retro-games, comics,
+watches and whisky on the shared domain engine) and two shared packages
+(`packages/core` and `packages/create-domain`), all TypeScript, all checked the
+same way. The whole of what a change is expected to pass is two
 lines, run from the root:
 
 ```bash
 npm run check       # lint, typecheck, unit tests, and the conventions test
-npm run test:e2e    # builds both apps, then drives each in Chromium
+npm run test:e2e    # builds every app, then drives each one that has a browser suite in Chromium
 ```
 
 `npm run test:e2e` (also `npm run e2e`) builds first, since the suites drive a
 real production build. The suites boot their own servers on fixed ports (3210–3211 for cards,
-3220–3223 for skins) against throwaway data directories, and clean up after
+3220–3223 for skins, 3230–3232 for whisky, 3240–3242 for retro-games, 3250–3252 for
+comics; watches has no suite) against throwaway data directories, and clean up after
 themselves.
 
 ## What goes where
 
-- `apps/cards` and `apps/skins` are separate apps that share nothing but
-  `packages/core`. A change to one should not need the other to change; a
-  change to `packages/core` should keep both suites green.
+- The six apps share nothing but `packages/core`. A change to one should not
+  need another to change; a change to `packages/core` should keep every suite
+  green. `retro-games`, `comics`, `watches` and `whisky` are specs over the
+  domain engine in `packages/core/src/domain` (CLAUDE.md, "The domain engine"),
+  so a change to the engine is a change to all four; `packages/create-domain`
+  scaffolds a fifth.
 - `packages/core` holds only code with no opinion about what is being
   collected. If a helper needs to know whether it is looking at a card or a
   skin, it does not belong there.

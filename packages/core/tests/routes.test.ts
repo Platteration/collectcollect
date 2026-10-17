@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createRoutes } from "../src/domain/routes";
 import { widgetEngine } from "./widgets";
+import { MAX_REQUEST_BYTES } from "../src/limits";
 
 const ctx = (params: Record<string, string>) => ({ params: Promise.resolve(params) });
 const json = (url: string, method: string, body: unknown) =>
@@ -26,6 +27,25 @@ describe("the generic routes", () => {
     for (const id of ["abc", "0", "-1", "999"]) expect((await routes.item.GET(new Request("http://x"), ctx({ id }))).status).toBe(404);
     expect((await routes.item.DELETE(new Request("http://x"), ctx({ id: String(item.id) }))).status).toBe(200);
     expect(engine.repo.listItems()).toHaveLength(0);
+  });
+
+  it("finds no item, purchase, sale or alert when the handler is given no route context", async () => {
+    engine.repo.createItem({ name: "Gizmo" });
+    const bare = new Request("http://x");
+    const answers = await Promise.all([
+      routes.item.GET(bare),
+      routes.item.PATCH(json("http://x", "PATCH", { location: "Shelf" })),
+      routes.item.DELETE(bare),
+      routes.itemPrices.GET(bare),
+      routes.itemSales.GET(bare),
+      routes.itemAcquisitions.GET(bare),
+      routes.lot.GET(bare),
+      routes.lot.DELETE(bare),
+      routes.sale.DELETE(bare),
+      routes.alert.DELETE(bare),
+    ]);
+    expect(answers.map((res) => res.status)).toEqual(answers.map(() => 404));
+    expect(engine.repo.listItems()).toHaveLength(1);
   });
 
   it("filters the list from the query string", async () => {
@@ -71,12 +91,40 @@ describe("the generic routes", () => {
     const zip = await routes.collection.GET();
     expect(zip.status).toBe(200);
     const bytes = new Uint8Array(await zip.arrayBuffer());
-    expect(String.fromCharCode(bytes[0], bytes[1])).toBe("PK");
+    expect(String.fromCharCode(...bytes.subarray(0, 2))).toBe("PK");
   });
 
   it("serves an upload only under a name it wrote, and identifies nothing without photos", async () => {
     expect((await routes.upload.GET(new Request("http://x"), ctx({ name: "../../secrets.jpg" }))).status).toBe(404);
     expect((await routes.identify.POST(json("http://x", "POST", { uploads: [] }))).status).toBe(400);
     expect((await routes.identify.POST(json("http://x", "POST", { uploads: ["aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg"] }))).status).toBe(404);
+  });
+});
+
+describe("the routes that take a file", () => {
+  const routes = createRoutes(widgetEngine());
+  /** A multipart request that says it is `bytes` long; its body is never that long, so a route that reads it is not refusing it up front. */
+  const declaring = (bytes: number) =>
+    new Request("http://x/upload", { method: "POST", body: "--x--\r\n", headers: { "content-type": "multipart/form-data; boundary=x", "content-length": String(bytes) } });
+
+  it("refuse a body larger than the request buffer before reading it, with a reason, rather than receiving it cut short", async () => {
+    const over = MAX_REQUEST_BYTES + 1;
+    const restore = await routes.backupRestore.POST(declaring(over));
+    expect(restore.status).toBe(413);
+    expect(((await restore.json()) as { error: string }).error).toBe(`That archive is larger than ${MAX_REQUEST_BYTES / 1024 / 1024} MB. Unpack it into the data directory by hand instead.`);
+    const folder = await routes.collectionImport.POST(declaring(over));
+    expect(folder.status).toBe(413);
+    expect(((await folder.json()) as { error: string }).error).toContain(`larger than ${MAX_REQUEST_BYTES / 1024 / 1024} MB`);
+    const photos = await routes.uploads.POST(declaring(over));
+    expect(photos.status).toBe(413);
+    expect(((await photos.json()) as { error: string }).error).toContain("in all");
+  });
+
+  it("read a body that is within the buffer as before", async () => {
+    const empty = (url: string) => new Request(url, { method: "POST", body: new FormData() });
+    expect((await routes.backupRestore.POST(empty("http://x/api/backup/restore"))).status).toBe(400);
+    expect(((await (await routes.backupRestore.POST(empty("http://x/api/backup/restore"))).json()) as { error: string }).error).toBe("No archive received");
+    expect(((await (await routes.uploads.POST(empty("http://x/api/uploads"))).json()) as { error: string }).error).toBe("No files received");
+    expect(((await (await routes.collectionImport.POST(empty("http://x/api/collection/import"))).json()) as { error: string }).error).toBe("No files received");
   });
 });

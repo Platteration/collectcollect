@@ -2,19 +2,17 @@ import { getDb } from "./db";
 import type {
   CardInput,
   CardRecord,
-  Centering,
   Condition,
   Game,
-  GradingReport,
   Identification,
   PriceSnapshot,
   PriceSummary,
   Settings,
 } from "./types";
-import { CONDITIONS, GAMES, GRADING_STATUSES, MAX_MONEY, MAX_QUANTITY, cleanSubgrades, flag, isCondition, isGame, serial, type GradingStatus } from "./types";
+import { CONDITIONS, GAMES, GRADING_STATUSES, MAX_MONEY, cleanSubgrades, flag, isCondition, isGame, MAX_QUANTITY, serial, type Centering, type GradingReport, type GradingStatus, type Subgrades } from "./types";
+import { readCentering, readGradingReport } from "./grading/schema";
 import { addLot, costBasisByCard, deleteLot, getLot, listLots, reconcileToQuantity, recomputePurchasePrice, type AcquisitionInput } from "./acquisitions";
 import { IdentificationSchema } from "./identify/schema";
-import { readCentering, readGradingReport } from "./grading/schema";
 import { isValidUploadName } from "./images";
 import { nameKey } from "./name-key";
 import { mirrorCard, unmirrorCard } from "./markdown/mirror";
@@ -43,12 +41,12 @@ export interface CardRow {
   serial_number: string | null;
   autograph: number;
   relic: number;
-  subgrades: string | null;
   quantity: number;
   condition: string;
   grading_company: string | null;
   grade: string | null;
   cert_number: string | null;
+  subgrades: string | null;
   centering: string | null;
   grading_report: string | null;
   purchase_price: number | null;
@@ -114,17 +112,18 @@ export function rowToCard(row: CardRow): CardRecord {
     language: row.language,
     manufacturer: row.manufacturer,
     team: row.team,
+    // A flag is 1 or nothing: a restored row can hold anything in the column.
     rookie: row.rookie === 1,
     parallel: row.parallel,
-    serialNumber: row.serial_number,
+    serialNumber: serial(row.serial_number),
     autograph: row.autograph === 1,
     relic: row.relic === 1,
-    subgrades: cleanSubgrades(parseJson<unknown>(row.subgrades, null)),
     quantity: row.quantity,
     condition: isCondition(row.condition) ? row.condition : "NM",
     gradingCompany: row.grading_company,
     grade: row.grade,
     certNumber: row.cert_number,
+    subgrades: readStored<Subgrades>(row.subgrades, cleanSubgrades),
     centering: readStored<Centering>(row.centering, readCentering),
     gradingReport: readStored<GradingReport>(row.grading_report, readGradingReport),
     purchasePrice: row.purchase_price,
@@ -229,6 +228,10 @@ const StoredIdentification = IdentificationSchema.partial().extend({
   // Partial inside too: an identification made before a field such as
   // centering_ratios existed is still a real one.
   grading: IdentificationSchema.shape.grading.partial().optional(),
+  // The sports flags came later: absent, or null, in an older identification.
+  rookie: IdentificationSchema.shape.rookie.nullish(),
+  autograph: IdentificationSchema.shape.autograph.nullish(),
+  relic: IdentificationSchema.shape.relic.nullish(),
   condition_assessment: IdentificationSchema.shape.condition_assessment.partial().nullish(),
 });
 
@@ -277,12 +280,12 @@ export function normalizeInput(input: CardInput): Required<
     serialNumber: serial(input.serialNumber),
     autograph: flag(input.autograph),
     relic: flag(input.relic),
-    subgrades: cleanSubgrades(input.subgrades),
     quantity,
     condition,
     gradingCompany: str(input.gradingCompany),
     grade: str(input.grade),
     certNumber: str(input.certNumber),
+    subgrades: cleanSubgrades(input.subgrades),
     // Both readers throw with a reason, as a bad quantity does, so a malformed
     // ratio or report is refused at the door rather than stored and shown.
     centering: readCentering(input.centering),
@@ -352,23 +355,29 @@ export function createCard(input: CardInput): CardRecord {
   const now = new Date().toISOString();
   const result = getDb()
     .prepare(
-      `INSERT INTO cards (game, sport, name, set_name, set_code, card_number, year, rarity, variant,
+      // name_key is bound, not computed in SQL: one function (nameKey) defines
+      // the key for the writers, for findSimilar and for the backfill, so the
+      // stored value and the value looked up cannot fold differently.
+      `INSERT INTO cards (game, sport, name, name_key, set_name, set_code, card_number, year, rarity, variant,
         language, manufacturer, team, rookie, parallel, serial_number, autograph, relic, subgrades,
-        quantity, condition, grading_company, grade, cert_number, purchase_price,
+        quantity, condition, grading_company, grade, cert_number, centering, grading_report, purchase_price,
         notes, image_path, reference_image_url, accent_color, location, external_ids, identification, manual_ungraded, manual_graded,
         grading_status, created_at, updated_at)
-       VALUES (@game, @sport, @name, @setName, @setCode, @cardNumber, @year, @rarity, @variant,
+       VALUES (@game, @sport, @name, @nameKey, @setName, @setCode, @cardNumber, @year, @rarity, @variant,
         @language, @manufacturer, @team, @rookie, @parallel, @serialNumber, @autograph, @relic, @subgrades,
-        @quantity, @condition, @gradingCompany, @grade, @certNumber, @purchasePrice,
+        @quantity, @condition, @gradingCompany, @grade, @certNumber, @centering, @gradingReport, @purchasePrice,
         @notes, @imagePath, @referenceImageUrl, @accentColor, @location, @externalIds, @identification, @manualUngraded, @manualGraded,
         @gradingStatus, @now, @now)`,
     )
     .run({
       ...c,
+      nameKey: nameKey(c.name),
       rookie: c.rookie ? 1 : 0,
       autograph: c.autograph ? 1 : 0,
       relic: c.relic ? 1 : 0,
       subgrades: c.subgrades ? JSON.stringify(c.subgrades) : null,
+      centering: c.centering ? JSON.stringify(c.centering) : null,
+      gradingReport: c.gradingReport ? JSON.stringify(c.gradingReport) : null,
       externalIds: JSON.stringify(c.externalIds),
       identification: c.identification ? JSON.stringify(c.identification) : null,
       manualGraded: JSON.stringify(c.manualGraded),
@@ -393,6 +402,15 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
     const existing = getCard(id);
     if (!existing) return null;
     const merged = normalizeInput({ ...existing, ...patch, game: patch.game ?? existing.game, name: patch.name ?? existing.name });
+    // A card whose identity changed is no longer the product the sources were
+    // matched to. Forget the learned ids and the reference image, unless the
+    // edit set them itself, so the next refresh searches afresh instead of
+    // asking for the old product by id — which is how a wrong match used to
+    // outlive every correction.
+    if (identityChanged(existing, merged)) {
+      if (patch.externalIds === undefined) merged.externalIds = {};
+      if (patch.referenceImageUrl === undefined) merged.referenceImageUrl = null;
+    }
     getDb()
       .prepare(
         `UPDATE cards SET game=@game, sport=@sport, name=@name, name_key=@nameKey, set_name=@setName, set_code=@setCode,
@@ -465,8 +483,12 @@ export function updateCard(id: number, patch: Partial<CardInput>): CardRecord | 
   return card;
 }
 
-/** The fields that say which product a card is, as the price sources are asked about it. */
-const IDENTITY_FIELDS = ["game", "name", "sport", "setName", "setCode", "cardNumber", "year", "variant", "manufacturer", "language"] as const;
+/**
+ * The fields that say which product a card is, as the price sources are asked
+ * about it. A parallel, an autograph and a relic are each their own listing at
+ * a price guide, and cardToQuery puts all three into the search.
+ */
+const IDENTITY_FIELDS = ["game", "name", "sport", "setName", "setCode", "cardNumber", "year", "variant", "manufacturer", "language", "parallel", "autograph", "relic"] as const;
 
 /** The fields that change what the owner's copy is worth without a new lookup. */
 const REVALUING_FIELDS = ["grade", "gradingCompany", "condition", "manualUngraded", "manualGraded"] as const;
@@ -504,6 +526,26 @@ export function interchangeable(
 ): boolean {
   const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
   return (["grade", "gradingCompany", "certNumber", "variant", "language", "condition"] as const).every((f) => norm(a[f]) === norm(b[f]));
+}
+
+/** A parallel's name as it is compared: case, spacing and the ends do not make a different one. */
+export function parallelKey(v: unknown): string {
+  return String(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Whether a copy may share a row with a card already held, on what a sports
+ * card adds to `interchangeable`: a serial-numbered card is one specific object
+ * ("12/99" names it), so it is never folded into another card and nothing is
+ * folded into it, and a parallel is its own card, valued on its own, so a
+ * base card and its Refractor are two rows. Base copies — no number, no
+ * parallel — stack as they always did.
+ */
+export function mayShareRow(
+  existing: Pick<CardRecord, "serialNumber" | "parallel">,
+  incoming: { serialNumber?: unknown; parallel?: unknown },
+): boolean {
+  return !serial(existing.serialNumber) && !serial(incoming.serialNumber) && parallelKey(existing.parallel) === parallelKey(incoming.parallel);
 }
 
 /**
@@ -701,10 +743,10 @@ export type IntakeOutcome =
  * and each adding one copy.
  *
  * A match only counts when the copies are interchangeable: both ungraded, or
- * graded by the same company to the same grade, and the same parallel. A raw
- * scan must never be folded into a slab, since it would then be valued as a
- * graded copy. A serial-numbered card is one specific object ("12/99" names
- * it), so it is never merged and never merged into.
+ * graded by the same company to the same grade. A raw scan must never be
+ * folded into a slab, since it would then be valued as a graded copy. A
+ * serial-numbered card is never merged and never merged into, and a parallel
+ * only stacks with the same parallel (mayShareRow).
  */
 export function intakeCard(input: CardInput): IntakeOutcome {
   try {
@@ -727,20 +769,19 @@ export function intakeCard(input: CardInput): IntakeOutcome {
 export function intakeCardWithin(input: CardInput): IntakeOutcome {
   const clean = normalizeInput(input);
   const run = getDb().transaction((): IntakeOutcome => {
+    // A numbered card is one specific object: it is its own card, whatever else
+    // is held that looks like it.
     if (clean.serialNumber) return { result: "created", card: createCard(input) };
-    const parallelKey = (p: string | null) => (p ?? "").trim().toLowerCase();
+    // Numbered cards and other parallels are not candidates at all, so they
+    // neither merge with this copy nor make the match ambiguous.
     const candidates = findSimilar({
       game: clean.game,
       name: clean.name,
       cardNumber: clean.cardNumber,
       setName: clean.setName,
-    }).filter((c) => !c.serialNumber && parallelKey(c.parallel) === parallelKey(clean.parallel));
-    const interchangeable = candidates.filter(
-      (c) =>
-        (c.grade ?? null) === (clean.grade ?? null) &&
-        (c.gradingCompany ?? null) === (clean.gradingCompany ?? null),
-    );
-    if (candidates.length > 0 && interchangeable.length !== 1) {
+    }).filter((c) => mayShareRow(c, clean));
+    const alike = candidates.filter((c) => interchangeable(c, clean));
+    if (candidates.length > 0 && alike.length !== 1) {
       return { result: "ambiguous", candidates };
     }
     const existing = alike.length === 1 ? alike[0] : undefined;

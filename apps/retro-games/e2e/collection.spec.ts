@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test.describe("the collection", () => {
   test("counts everything held, and values only what counts", async ({ page }) => {
