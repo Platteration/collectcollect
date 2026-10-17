@@ -14,7 +14,7 @@
     "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.124.0",
+    "@anthropic-ai/sdk": "^0.134.0",
     "@collectcollect/core": "*",
     "better-sqlite3": "^13.0.3",
     "react": "19.2.8",
